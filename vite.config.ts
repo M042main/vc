@@ -44,6 +44,10 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    // MediaPipe's module WASM loader must run in an actual module worker.
+    // Without this, Vite's production worker defaults to a classic IIFE and
+    // MediaPipe tries to load an ES module through importScripts().
+    worker: { format: "es" as const },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,

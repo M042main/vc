@@ -1,18 +1,23 @@
 /// <reference lib="webworker" />
 
 import {
-  FilesetResolver,
   HolisticLandmarker,
   type HolisticLandmarkerResult,
 } from "@mediapipe/tasks-vision";
+import wasmBinaryPath from "@mediapipe/tasks-vision/vision_wasm_module_internal.wasm?url";
+import wasmLoaderPath from "@mediapipe/tasks-vision/vision_wasm_module_internal.js?url";
 
-const WASM_ROOT =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/1/holistic_landmarker.task";
 
 let landmarker: HolisticLandmarker | null = null;
 let delegate: "GPU" | "CPU" = "CPU";
+
+type MediaPipeModuleFactory = (moduleArg?: unknown) => Promise<unknown>;
+type MediaPipeWorkerGlobal = typeof self & {
+  Module?: unknown;
+  ModuleFactory?: MediaPipeModuleFactory;
+};
 
 type WorkerInput =
   | { type: "INIT" }
@@ -36,18 +41,34 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function prepareWasmModuleFactory() {
+  let imported: { default?: unknown };
+  try {
+    imported = (await import(/* @vite-ignore */ wasmLoaderPath)) as {
+      default?: unknown;
+    };
+  } catch (error) {
+    throw new Error(`MediaPipe WASM 로더를 불러오지 못했습니다: ${errorMessage(error)}`);
+  }
+
+  if (typeof imported.default !== "function") {
+    throw new Error("MediaPipe WASM 로더 형식이 올바르지 않습니다.");
+  }
+
+  // MediaPipe clears these globals after each TaskRunner initialization. Put
+  // the cached factory back before both the GPU attempt and the CPU fallback.
+  const workerGlobal = self as MediaPipeWorkerGlobal;
+  workerGlobal.Module = undefined;
+  workerGlobal.ModuleFactory = imported.default as MediaPipeModuleFactory;
+}
+
 async function createLandmarker() {
   if (landmarker) return;
 
-  let fileset: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
-  try {
-    // This source is bundled as an ES module worker. Selecting the module WASM
-    // loader is essential: the classic loader cannot expose ModuleFactory after
-    // a dynamic import inside a module worker.
-    fileset = await FilesetResolver.forVisionTasks(WASM_ROOT, true);
-  } catch (error) {
-    throw new Error(`MediaPipe WASM 파일을 불러오지 못했습니다: ${errorMessage(error)}`);
-  }
+  // Vite emits this worker as a real ES module and copies both MediaPipe WASM
+  // assets to the same origin. Supplying the exact URLs avoids importScripts()
+  // loading an ES-module loader from a third-party CDN.
+  const fileset = { wasmLoaderPath: "", wasmBinaryPath };
 
   const common = {
     runningMode: "VIDEO" as const,
@@ -65,6 +86,7 @@ async function createLandmarker() {
   let gpuError: unknown;
   if (typeof OffscreenCanvas !== "undefined") {
     try {
+      await prepareWasmModuleFactory();
       landmarker = await HolisticLandmarker.createFromOptions(fileset, {
         ...common,
         canvas: new OffscreenCanvas(2, 2),
@@ -82,6 +104,7 @@ async function createLandmarker() {
     try {
       // CPU mode deliberately omits a canvas and remains available when WebGL,
       // OffscreenCanvas, or the GPU delegate cannot initialize.
+      await prepareWasmModuleFactory();
       landmarker = await HolisticLandmarker.createFromOptions(fileset, {
         ...common,
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },

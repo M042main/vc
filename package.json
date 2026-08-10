@@ -14,7 +14,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "^1.0.1",
+    "@mediapipe/tasks-vision": "1.0.1",
     "@pixiv/three-vrm": "^3.5.5",
     "drizzle-orm": "0.45.2",
     "kalidokit": "^1.1.5",
