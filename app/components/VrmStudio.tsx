@@ -39,12 +39,13 @@ type ModelState = "empty" | "loading" | "ready" | "error";
 
 type TrackerMessage =
   | { type: "READY"; delegate: "GPU" | "CPU" }
+  | { type: "DELEGATE"; delegate: "CPU"; message: string }
   | {
       type: "RESULT";
       result: HolisticLandmarkerResult;
       inferenceMs: number;
     }
-  | { type: "ERROR"; message: string };
+  | { type: "ERROR"; message: string; fatal: boolean };
 
 const STAGE_COLORS = ["#171719", "#332d58", "#254a48", "#eee8dc"];
 const MAX_VRM_SIZE = 80 * 1024 * 1024;
@@ -536,6 +537,8 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       let engineReady = false;
 
       worker.onmessage = (event: MessageEvent<TrackerMessage>) => {
+        if (workerRef.current !== worker) return;
+
         const message = event.data;
         if (message.type === "READY") {
           engineReady = true;
@@ -546,9 +549,16 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           return;
         }
 
+        if (message.type === "DELEGATE") {
+          setDelegate(message.delegate);
+          setError(null);
+          showToast(message.message);
+          return;
+        }
+
         if (message.type === "ERROR") {
           frameInFlightRef.current = false;
-          if (!engineReady) {
+          if (message.fatal || !engineReady) {
             stopTracking();
             setTrackingState("error");
           }
@@ -578,6 +588,8 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       };
 
       worker.onerror = () => {
+        if (workerRef.current !== worker) return;
+
         frameInFlightRef.current = false;
         stopTracking();
         setTrackingState("error");
