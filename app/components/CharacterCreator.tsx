@@ -3,6 +3,7 @@
 import {
   Download,
   Eraser,
+  PaintBucket,
   Pencil,
   Redo2,
   Send,
@@ -23,7 +24,7 @@ const CANVAS_HEIGHT = 760;
 const MAX_HISTORY = 14;
 
 type CharacterSide = "front" | "back";
-type DrawingTool = "pencil" | "eraser";
+type DrawingTool = "pencil" | "eraser" | "fill";
 
 type Point = {
   x: number;
@@ -360,6 +361,18 @@ export function CharacterCreator({
     if (!layer || !context) return;
 
     event.preventDefault();
+    if (tool === "fill") {
+      saveUndoSnapshot(side);
+      context.save();
+      context.clip(createSilhouettePath());
+      context.fillStyle = color;
+      context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      context.restore();
+      paintVisibleCanvas(side);
+      setStatus("몸 전체에 바탕색을 채웠어요. 그 위에 무늬와 얼굴을 그려 보세요.");
+      return;
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
     saveUndoSnapshot(side);
     drawingRef.current = true;
@@ -513,17 +526,17 @@ export function CharacterCreator({
     link.click();
     link.remove();
     setStatus(
-      `${side === "front" ? "앞면" : "뒷면"}을 투명 PNG로 저장했어요.`,
+      `${side === "front" ? "앞면" : "뒷면"}을 투명 PNG로 저장했어요. 스튜디오로 보내면 바로 애니메이션을 만들 수 있어요.`,
     );
   };
 
   const sendToStudio = () => {
-    const dataUrl = createExportDataUrl(side);
+    const dataUrl = createExportDataUrl("front");
     if (!dataUrl) return;
     onSendToStudio?.(dataUrl);
     setStatus(
       onSendToStudio
-        ? "현재 캐릭터를 트래킹 스튜디오로 보냈어요."
+        ? "앞면 캐릭터를 저장하고 애니메이션 스튜디오로 보냈어요."
         : "캐릭터 PNG가 준비됐어요. 스튜디오 연결 후 바로 보낼 수 있어요.",
     );
   };
@@ -538,8 +551,8 @@ export function CharacterCreator({
         <div>
           <h2 id="character-creator-title">내 손으로 만드는 캐릭터</h2>
           <p>
-            정해진 몸 위에 색과 무늬를 더해 보세요. 완성한 그림은 머리·몸통·
-            팔·다리 관절로 나뉘어 카메라 포즈를 따라 움직입니다.
+            포즈 가이드 위에 색과 무늬를 더해 보세요. 완성한 그림은 팔꿈치와
+            무릎이 부드럽게 휘고, 눈과 입도 카메라 표정을 따라 움직입니다.
           </p>
         </div>
       </header>
@@ -592,6 +605,17 @@ export function CharacterCreator({
               >
                 <Eraser size={18} strokeWidth={2} aria-hidden="true" />
                 지우개
+              </button>
+              <button
+                type="button"
+                className={`${styles.toolButton} ${
+                  tool === "fill" ? styles.toolActive : ""
+                }`}
+                aria-pressed={tool === "fill"}
+                onClick={() => setTool("fill")}
+              >
+                <PaintBucket size={18} strokeWidth={2} aria-hidden="true" />
+                바탕 채우기
               </button>
             </div>
           </div>
@@ -690,8 +714,8 @@ export function CharacterCreator({
           <div className={styles.tipBox}>
             <span aria-hidden="true">✦</span>
             <p>
-              펜을 기울이거나 세게 누르면 압력이 반영돼요. 터치 화면에서도 바로
-              그릴 수 있습니다.
+              얼굴의 눈·입 가이드 위에 그리면 트래킹할 때 깜박임, 미소, 입 벌림이
+              반영돼요. 회색 가이드는 결과물에 저장되지 않습니다.
             </p>
           </div>
         </aside>
@@ -702,7 +726,7 @@ export function CharacterCreator({
               <i aria-hidden="true" />
               {side === "front" ? "앞면 편집 중" : "뒷면 편집 중"}
             </span>
-            <span className={styles.guideNotice}>점선 가이드는 저장되지 않아요</span>
+            <span className={styles.guideNotice}>관절·표정 가이드는 저장되지 않아요</span>
           </div>
 
           <div className={styles.canvasFrame}>
@@ -725,8 +749,9 @@ export function CharacterCreator({
           </div>
 
           <p id="character-canvas-help" className={styles.canvasHelp}>
-            마우스나 손가락으로 실루엣 안을 그리세요. 내보낼 때 회색 가이드와
-            작업 배경은 자동으로 빠집니다.
+            마우스나 손가락으로 실루엣 안을 그리세요. 눈과 입은 얼굴 가이드에
+            맞출수록 표정이 자연스럽고, 관절 주변은 선을 끊지 않아도 부드럽게
+            변형됩니다.
           </p>
 
           <div className={styles.status} aria-live="polite">
@@ -740,7 +765,7 @@ export function CharacterCreator({
             </button>
             <button type="button" className={styles.sendButton} onClick={sendToStudio}>
               <Send size={19} aria-hidden="true" />
-              스튜디오로 보내기
+              스튜디오에서 움직이기
             </button>
           </div>
         </div>

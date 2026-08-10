@@ -117,7 +117,7 @@
 
 .toolGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -132,7 +132,9 @@
   border: 1px solid #deddd8;
   border-radius: 12px;
   font: inherit;
-  font-size: 13px;
+  flex-direction: column;
+  padding: 7px 4px;
+  font-size: 10px;
   font-weight: 700;
   cursor: pointer;
   transition: border-color 160ms ease, color 160ms ease, transform 160ms ease;

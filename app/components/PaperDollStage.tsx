@@ -8,15 +8,53 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  getPaperDollMotionPreset,
+  PaperDollMotionPlayer,
+  type PaperDollExpression,
+  type PaperDollMotionPresetId,
+  type PaperDollMotionSample,
+} from "../lib/paperDollMotion";
 
 export type PaperDollLandmark = {
   x: number;
   y: number;
+  z?: number;
   visibility?: number;
 };
 
+export type DollExpression = {
+  blink: number;
+  blinkLeft: number;
+  blinkRight: number;
+  mouthOpen: number;
+  smile: number;
+  browUp: number;
+  lookX: number;
+  lookY: number;
+};
+
+export const DOLL_MOTION_PRESETS = [
+  { id: "idle", label: "숨쉬기" },
+  { id: "walk", label: "제자리 걷기" },
+  { id: "dance", label: "신나는 춤" },
+  { id: "greeting", label: "손 흔들기" },
+] as const satisfies readonly {
+  id: PaperDollMotionPresetId;
+  label: string;
+}[];
+
 export type PaperDollStageHandle = {
   applyPose: (landmarks?: readonly PaperDollLandmark[]) => void;
+  applyTracking: (
+    poseLandmarks?: readonly PaperDollLandmark[],
+    faceLandmarks?: readonly PaperDollLandmark[],
+  ) => void;
+  playPreset: (preset: PaperDollMotionPresetId) => void;
+  pauseAnimation: () => void;
+  stopAnimation: () => void;
+  setAnimationSpeed: (speed: number) => void;
+  getCanvas: () => HTMLCanvasElement | null;
   capturePng: (width?: number, height?: number) => Promise<Blob>;
   resetPose: () => void;
   rotate: (direction: -1 | 1) => void;
@@ -25,6 +63,7 @@ export type PaperDollStageHandle = {
 type PaperDollStageProps = {
   artwork: string;
   className?: string;
+  onAnimationPlayingChange?: (playing: boolean) => void;
 };
 
 type Point = { x: number; y: number };
@@ -75,8 +114,22 @@ type RigSprite = {
   y: number;
 };
 
+type MeshVertex = {
+  source: Point;
+  upperWeight: number;
+};
+
+type MeshTriangle = readonly [MeshVertex, MeshVertex, MeshVertex];
+
+type LimbMesh = {
+  sprite: RigSprite;
+  upperBone: BoneName;
+  lowerBone: BoneName;
+  triangles: readonly MeshTriangle[];
+};
+
 type DollSprites = {
-  parts: Record<BoneName, RigSprite>;
+  limbs: readonly LimbMesh[];
   torso: RigSprite;
   head: RigSprite;
 };
@@ -84,6 +137,17 @@ type DollSprites = {
 const ARTWORK_WIDTH = 600;
 const ARTWORK_HEIGHT = 760;
 const ARTWORK_CENTER = { x: ARTWORK_WIDTH / 2, y: ARTWORK_HEIGHT / 2 };
+
+const NEUTRAL_EXPRESSION: DollExpression = {
+  blink: 0,
+  blinkLeft: 0,
+  blinkRight: 0,
+  mouthOpen: 0,
+  smile: 0,
+  browUp: 0,
+  lookX: 0,
+  lookY: 0,
+};
 
 const REST_JOINTS: Record<JointName, Point> = {
   leftShoulder: { x: 221, y: 238 },
@@ -195,6 +259,22 @@ const DOLL_PARTS: readonly RigPart[] = [
     ],
   },
 ];
+
+const LIMB_CHAINS = [
+  { upperBone: "leftUpperArm", lowerBone: "leftLowerArm" },
+  { upperBone: "rightUpperArm", lowerBone: "rightLowerArm" },
+  { upperBone: "leftUpperLeg", lowerBone: "leftLowerLeg" },
+  { upperBone: "rightUpperLeg", lowerBone: "rightLowerLeg" },
+] as const satisfies readonly {
+  upperBone: BoneName;
+  lowerBone: BoneName;
+}[];
+
+function getRigPart(bone: BoneName) {
+  const part = DOLL_PARTS.find((candidate) => candidate.bone === bone);
+  if (!part) throw new Error(`캐릭터 뼈대 ${bone} 구성을 찾지 못했습니다.`);
+  return part;
+}
 
 const TORSO_MASK: readonly Point[] = [
   { x: 218, y: 188 },
@@ -406,6 +486,100 @@ function blendPose(current: DollPose, next: DollPose): DollPose {
   };
 }
 
+function landmarkDistance(
+  landmarks: readonly PaperDollLandmark[],
+  first: number,
+  second: number,
+) {
+  const a = landmarks[first];
+  const b = landmarks[second];
+  if (!a || !b) return 0;
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function expressionFromFaceLandmarks(
+  landmarks?: readonly PaperDollLandmark[],
+): DollExpression {
+  if (!landmarks || landmarks.length < 455) return { ...NEUTRAL_EXPRESSION };
+
+  const leftEyeWidth = landmarkDistance(landmarks, 33, 133);
+  const rightEyeWidth = landmarkDistance(landmarks, 362, 263);
+  const leftEyeOpen = leftEyeWidth
+    ? landmarkDistance(landmarks, 159, 145) / leftEyeWidth
+    : 0.3;
+  const rightEyeOpen = rightEyeWidth
+    ? landmarkDistance(landmarks, 386, 374) / rightEyeWidth
+    : 0.3;
+  const blinkLeft = clamp((0.22 - leftEyeOpen) / 0.15, 0, 1);
+  const blinkRight = clamp((0.22 - rightEyeOpen) / 0.15, 0, 1);
+
+  const mouthWidth = landmarkDistance(landmarks, 78, 308);
+  const mouthOpenRatio = mouthWidth
+    ? landmarkDistance(landmarks, 13, 14) / mouthWidth
+    : 0;
+  const faceWidth = landmarkDistance(landmarks, 234, 454) || mouthWidth * 2.8;
+  const smileRatio = faceWidth ? mouthWidth / faceWidth : 0.3;
+  const browDistance =
+    (landmarkDistance(landmarks, 105, 159) +
+      landmarkDistance(landmarks, 334, 386)) /
+    2;
+
+  let lookX = 0;
+  let lookY = 0;
+  const leftIris = landmarks[468];
+  const leftEyeOuter = landmarks[33];
+  const leftEyeInner = landmarks[133];
+  if (leftIris && leftEyeOuter && leftEyeInner) {
+    const eyeCenterX = (leftEyeOuter.x + leftEyeInner.x) / 2;
+    const eyeCenterY = (leftEyeOuter.y + leftEyeInner.y) / 2;
+    const eyeSpan = Math.max(0.001, leftEyeWidth);
+    lookX = clamp((leftIris.x - eyeCenterX) / eyeSpan * 3, -1, 1);
+    lookY = clamp((leftIris.y - eyeCenterY) / eyeSpan * 4, -1, 1);
+  }
+
+  return {
+    blink: (blinkLeft + blinkRight) / 2,
+    blinkLeft,
+    blinkRight,
+    mouthOpen: clamp((mouthOpenRatio - 0.04) / 0.42, 0, 1),
+    smile: clamp((smileRatio - 0.28) / 0.16, 0, 1),
+    browUp: clamp((browDistance / Math.max(faceWidth, 0.001) - 0.035) / 0.055, 0, 1),
+    lookX,
+    lookY,
+  };
+}
+
+function expressionFromMotion(expression: PaperDollExpression): DollExpression {
+  return {
+    blink: (expression.blinkLeft + expression.blinkRight) / 2,
+    blinkLeft: expression.blinkLeft,
+    blinkRight: expression.blinkRight,
+    mouthOpen: expression.mouthOpen,
+    smile: expression.smile,
+    browUp: expression.browUp,
+    lookX: expression.lookX,
+    lookY: expression.lookY,
+  };
+}
+
+function blendExpression(
+  current: DollExpression,
+  next: DollExpression,
+  amount = 0.38,
+): DollExpression {
+  return {
+    blink: current.blink + (next.blink - current.blink) * amount,
+    blinkLeft: current.blinkLeft + (next.blinkLeft - current.blinkLeft) * amount,
+    blinkRight:
+      current.blinkRight + (next.blinkRight - current.blinkRight) * amount,
+    mouthOpen: current.mouthOpen + (next.mouthOpen - current.mouthOpen) * amount,
+    smile: current.smile + (next.smile - current.smile) * amount,
+    browUp: current.browUp + (next.browUp - current.browUp) * amount,
+    lookX: current.lookX + (next.lookX - current.lookX) * amount,
+    lookY: current.lookY + (next.lookY - current.lookY) * amount,
+  };
+}
+
 function extend(start: Point, angle: number, length: number): Point {
   return {
     x: start.x + Math.cos(angle) * length,
@@ -516,38 +690,310 @@ function createHeadSprite(image: HTMLImageElement): RigSprite {
   return { canvas, x: bounds.x, y: bounds.y };
 }
 
-function createDollSprites(image: HTMLImageElement): DollSprites {
-  const parts = Object.fromEntries(
-    DOLL_PARTS.map((part) => [part.bone, createPolygonSprite(image, part.mask)]),
-  ) as Record<BoneName, RigSprite>;
+function createCombinedSprite(
+  image: HTMLImageElement,
+  polygons: readonly (readonly Point[])[],
+): RigSprite {
+  const points = polygons.flat();
+  const bounds = polygonBounds(points);
+  const canvas = document.createElement("canvas");
+  canvas.width = bounds.width;
+  canvas.height = bounds.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("캐릭터 관절 메시를 준비하지 못했습니다.");
+  context.translate(-bounds.x, -bounds.y);
+  context.beginPath();
+  for (const polygon of polygons) {
+    context.moveTo(polygon[0].x, polygon[0].y);
+    for (let index = 1; index < polygon.length; index += 1) {
+      context.lineTo(polygon[index].x, polygon[index].y);
+    }
+    context.closePath();
+  }
+  context.clip();
+  context.drawImage(image, 0, 0, ARTWORK_WIDTH, ARTWORK_HEIGHT);
+  return { canvas, x: bounds.x, y: bounds.y };
+}
+
+function distanceToSegment(point: Point, start: Point, end: Point) {
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+  if (lengthSquared === 0) return distance(point, start);
+  const amount = clamp(
+    ((point.x - start.x) * deltaX + (point.y - start.y) * deltaY) /
+      lengthSquared,
+    0,
+    1,
+  );
+  return Math.hypot(
+    point.x - (start.x + deltaX * amount),
+    point.y - (start.y + deltaY * amount),
+  );
+}
+
+function pointInPolygon(point: Point, polygon: readonly Point[]) {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const a = polygon[index];
+    const b = polygon[previous];
+    const intersects =
+      a.y > point.y !== b.y > point.y &&
+      point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y || 0.0001) + a.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function cellTouchesPolygons(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+  polygons: readonly (readonly Point[])[],
+) {
+  const samples = [
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: left, y: bottom },
+    { x: right, y: bottom },
+    { x: (left + right) / 2, y: (top + bottom) / 2 },
+  ];
+  return polygons.some(
+    (polygon) =>
+      samples.some((point) => pointInPolygon(point, polygon)) ||
+      polygon.some(
+        (point) =>
+          point.x >= left &&
+          point.x <= right &&
+          point.y >= top &&
+          point.y <= bottom,
+      ),
+  );
+}
+
+function createMeshVertex(
+  source: Point,
+  upperPart: RigPart,
+  lowerPart: RigPart,
+): MeshVertex {
+  const upperDistance = distanceToSegment(
+    source,
+    REST_JOINTS[upperPart.start],
+    REST_JOINTS[upperPart.end],
+  );
+  const lowerDistance = distanceToSegment(
+    source,
+    REST_JOINTS[lowerPart.start],
+    REST_JOINTS[lowerPart.end],
+  );
+  const upperScore = 1 / Math.pow(upperDistance + 7, 3.2);
+  const lowerScore = 1 / Math.pow(lowerDistance + 7, 3.2);
   return {
-    parts,
+    source,
+    upperWeight: upperScore / (upperScore + lowerScore),
+  };
+}
+
+function createLimbMesh(
+  image: HTMLImageElement,
+  upperBone: BoneName,
+  lowerBone: BoneName,
+): LimbMesh {
+  const upperPart = getRigPart(upperBone);
+  const lowerPart = getRigPart(lowerBone);
+  const sprite = createCombinedSprite(image, [upperPart.mask, lowerPart.mask]);
+  const triangles: MeshTriangle[] = [];
+  // A moderately coarse mesh keeps elbows and knees soft without turning each
+  // 15 fps tracking update into hundreds of tiny high-cost canvas operations.
+  const cell = 32;
+
+  for (let y = sprite.y; y < sprite.y + sprite.canvas.height; y += cell) {
+    for (let x = sprite.x; x < sprite.x + sprite.canvas.width; x += cell) {
+      const right = Math.min(x + cell, sprite.x + sprite.canvas.width);
+      const bottom = Math.min(y + cell, sprite.y + sprite.canvas.height);
+      if (
+        !cellTouchesPolygons(x, y, right, bottom, [
+          upperPart.mask,
+          lowerPart.mask,
+        ])
+      ) {
+        continue;
+      }
+      const topLeft = createMeshVertex({ x, y }, upperPart, lowerPart);
+      const topRight = createMeshVertex({ x: right, y }, upperPart, lowerPart);
+      const bottomLeft = createMeshVertex({ x, y: bottom }, upperPart, lowerPart);
+      const bottomRight = createMeshVertex(
+        { x: right, y: bottom },
+        upperPart,
+        lowerPart,
+      );
+      triangles.push([topLeft, topRight, bottomRight]);
+      triangles.push([topLeft, bottomRight, bottomLeft]);
+    }
+  }
+
+  return { sprite, upperBone, lowerBone, triangles };
+}
+
+function createDollSprites(image: HTMLImageElement): DollSprites {
+  return {
+    limbs: LIMB_CHAINS.map(({ upperBone, lowerBone }) =>
+      createLimbMesh(image, upperBone, lowerBone),
+    ),
     torso: createPolygonSprite(image, TORSO_MASK),
     head: createHeadSprite(image),
   };
 }
 
-function drawSegment(
-  context: CanvasRenderingContext2D,
-  sprite: RigSprite,
+type BoneTransform = {
+  restStart: Point;
+  targetStart: Point;
+  restCosine: number;
+  restSine: number;
+  targetCosine: number;
+  targetSine: number;
+  lengthScale: number;
+};
+
+function createBoneTransform(
   part: RigPart,
   targets: Record<JointName, Point>,
-) {
+): BoneTransform {
   const restStart = REST_JOINTS[part.start];
   const restEnd = REST_JOINTS[part.end];
   const targetStart = targets[part.start];
   const targetEnd = targets[part.end];
   const sourceLength = distance(restStart, restEnd);
   const targetLength = distance(targetStart, targetEnd);
+  const restAngle = angleBetween(restStart, restEnd);
+  const targetAngle = angleBetween(targetStart, targetEnd);
+  return {
+    restStart,
+    targetStart,
+    restCosine: Math.cos(-restAngle),
+    restSine: Math.sin(-restAngle),
+    targetCosine: Math.cos(targetAngle),
+    targetSine: Math.sin(targetAngle),
+    lengthScale: targetLength / sourceLength,
+  };
+}
+
+function transformByBone(point: Point, transform: BoneTransform): Point {
+  const offsetX = point.x - transform.restStart.x;
+  const offsetY = point.y - transform.restStart.y;
+  const along =
+    (offsetX * transform.restCosine - offsetY * transform.restSine) *
+    transform.lengthScale;
+  const across = offsetX * transform.restSine + offsetY * transform.restCosine;
+  return {
+    x:
+      transform.targetStart.x +
+      along * transform.targetCosine -
+      across * transform.targetSine,
+    y:
+      transform.targetStart.y +
+      along * transform.targetSine +
+      across * transform.targetCosine,
+  };
+}
+
+function expandTriangle(points: readonly [Point, Point, Point], pixels = 0.65) {
+  const center = {
+    x: (points[0].x + points[1].x + points[2].x) / 3,
+    y: (points[0].y + points[1].y + points[2].y) / 3,
+  };
+  return points.map((point) => {
+    const length = Math.max(1, distance(center, point));
+    return {
+      x: center.x + (point.x - center.x) * (1 + pixels / length),
+      y: center.y + (point.y - center.y) * (1 + pixels / length),
+    };
+  }) as [Point, Point, Point];
+}
+
+function drawTexturedTriangle(
+  context: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  source: readonly [Point, Point, Point],
+  destination: readonly [Point, Point, Point],
+) {
+  const [s0, s1, s2] = source;
+  const [d0, d1, d2] = destination;
+  const determinant =
+    s0.x * (s1.y - s2.y) +
+    s1.x * (s2.y - s0.y) +
+    s2.x * (s0.y - s1.y);
+  if (Math.abs(determinant) < 0.0001) return;
+
+  const a =
+    (d0.x * (s1.y - s2.y) +
+      d1.x * (s2.y - s0.y) +
+      d2.x * (s0.y - s1.y)) /
+    determinant;
+  const c =
+    (d0.x * (s2.x - s1.x) +
+      d1.x * (s0.x - s2.x) +
+      d2.x * (s1.x - s0.x)) /
+    determinant;
+  const e =
+    (d0.x * (s1.x * s2.y - s2.x * s1.y) +
+      d1.x * (s2.x * s0.y - s0.x * s2.y) +
+      d2.x * (s0.x * s1.y - s1.x * s0.y)) /
+    determinant;
+  const b =
+    (d0.y * (s1.y - s2.y) +
+      d1.y * (s2.y - s0.y) +
+      d2.y * (s0.y - s1.y)) /
+    determinant;
+  const d =
+    (d0.y * (s2.x - s1.x) +
+      d1.y * (s0.x - s2.x) +
+      d2.y * (s1.x - s0.x)) /
+    determinant;
+  const f =
+    (d0.y * (s1.x * s2.y - s2.x * s1.y) +
+      d1.y * (s2.x * s0.y - s0.x * s2.y) +
+      d2.y * (s0.x * s1.y - s1.x * s0.y)) /
+    determinant;
 
   context.save();
-  context.translate(targetStart.x, targetStart.y);
-  context.rotate(angleBetween(targetStart, targetEnd));
-  context.scale(targetLength / sourceLength, 1);
-  context.rotate(-angleBetween(restStart, restEnd));
-  context.translate(-restStart.x, -restStart.y);
-  context.drawImage(sprite.canvas, sprite.x, sprite.y);
+  const clip = expandTriangle([d0, d1, d2]);
+  context.beginPath();
+  context.moveTo(clip[0].x, clip[0].y);
+  context.lineTo(clip[1].x, clip[1].y);
+  context.lineTo(clip[2].x, clip[2].y);
+  context.closePath();
+  context.clip();
+  context.transform(a, b, c, d, e, f);
+  context.drawImage(image, 0, 0);
   context.restore();
+}
+
+function drawLimb(
+  context: CanvasRenderingContext2D,
+  mesh: LimbMesh,
+  targets: Record<JointName, Point>,
+) {
+  const upperPart = getRigPart(mesh.upperBone);
+  const lowerPart = getRigPart(mesh.lowerBone);
+  const upperTransform = createBoneTransform(upperPart, targets);
+  const lowerTransform = createBoneTransform(lowerPart, targets);
+  for (const triangle of mesh.triangles) {
+    const source = triangle.map((vertex) => ({
+      x: vertex.source.x - mesh.sprite.x,
+      y: vertex.source.y - mesh.sprite.y,
+    })) as [Point, Point, Point];
+    const destination = triangle.map((vertex) => {
+      const upper = transformByBone(vertex.source, upperTransform);
+      const lower = transformByBone(vertex.source, lowerTransform);
+      return {
+        x: upper.x * vertex.upperWeight + lower.x * (1 - vertex.upperWeight),
+        y: upper.y * vertex.upperWeight + lower.y * (1 - vertex.upperWeight),
+      };
+    }) as [Point, Point, Point];
+    drawTexturedTriangle(context, mesh.sprite.canvas, source, destination);
+  }
 }
 
 function drawTorso(context: CanvasRenderingContext2D, sprite: RigSprite) {
@@ -558,13 +1004,61 @@ function drawHead(
   context: CanvasRenderingContext2D,
   sprite: RigSprite,
   rotation: number,
+  expression: DollExpression,
 ) {
   const neck = { x: 300, y: 202 };
   context.save();
   context.translate(neck.x, neck.y);
   context.rotate(rotation);
   context.translate(-neck.x, -neck.y);
-  context.drawImage(sprite.canvas, sprite.x, sprite.y);
+
+  const columns = 7;
+  const rows = 9;
+  const warp = (local: Point): Point => {
+    const global = { x: sprite.x + local.x, y: sprite.y + local.y };
+    const eyeWarp = (centerX: number, blink: number) => {
+      const dx = (global.x - centerX) / 38;
+      const dy = (global.y - 111) / 25;
+      const influence = Math.exp(-(dx * dx * 1.5 + dy * dy * 2.2));
+      global.y += (111 - global.y) * blink * influence * 0.88;
+      global.x += expression.lookX * 2.2 * influence;
+      global.y += expression.lookY * 1.4 * influence;
+    };
+    eyeWarp(270, expression.blinkLeft);
+    eyeWarp(330, expression.blinkRight);
+
+    const mouthDx = (global.x - 300) / 62;
+    const mouthDy = (global.y - 147) / 34;
+    const mouthInfluence = Math.exp(-(mouthDx * mouthDx + mouthDy * mouthDy));
+    global.x += (global.x - 300) * expression.smile * mouthInfluence * 0.08;
+    global.y +=
+      (global.y - 147) * expression.mouthOpen * mouthInfluence * 0.58 -
+      Math.abs(mouthDx) * expression.smile * mouthInfluence * 5.5;
+
+    const browInfluence = Math.exp(
+      -Math.pow((global.y - 87) / 22, 2) - Math.pow((global.x - 300) / 82, 2),
+    );
+    global.y -= expression.browUp * browInfluence * 5;
+    return global;
+  };
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const left = (column / columns) * sprite.canvas.width;
+      const right = ((column + 1) / columns) * sprite.canvas.width;
+      const top = (row / rows) * sprite.canvas.height;
+      const bottom = ((row + 1) / rows) * sprite.canvas.height;
+      const normalizedX = (sprite.x + (left + right) / 2 - 300) / 88;
+      const normalizedY = (sprite.y + (top + bottom) / 2 - 111) / 108;
+      if (normalizedX * normalizedX + normalizedY * normalizedY > 1.28) continue;
+      const a = { x: left, y: top };
+      const b = { x: right, y: top };
+      const c = { x: right, y: bottom };
+      const d = { x: left, y: bottom };
+      drawTexturedTriangle(context, sprite.canvas, [a, b, c], [warp(a), warp(b), warp(c)]);
+      drawTexturedTriangle(context, sprite.canvas, [a, c, d], [warp(a), warp(c), warp(d)]);
+    }
+  }
   context.restore();
 }
 
@@ -610,12 +1104,17 @@ function findOpaqueBounds(canvas: HTMLCanvasElement) {
 }
 
 export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStageProps>(
-  function PaperDollStage({ artwork, className }, ref) {
+  function PaperDollStage(
+    { artwork, className, onAnimationPlayingChange },
+    ref,
+  ) {
     const hostRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imageRef = useRef<HTMLImageElement | null>(null);
     const spritesRef = useRef<DollSprites | null>(null);
     const poseRef = useRef<DollPose>(createRestPose());
+    const expressionRef = useRef<DollExpression>({ ...NEUTRAL_EXPRESSION });
+    const motionPlayerRef = useRef<PaperDollMotionPlayer | null>(null);
     const manualRotationRef = useRef(0);
     const manualPanRef = useRef<Point>({ x: 0, y: 0 });
     const panGestureRef = useRef<{
@@ -651,6 +1150,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
         context.imageSmoothingQuality = quality;
 
         const pose = poseRef.current;
+        const expression = expressionRef.current;
         const baseScale = captureSafe
           ? Math.min(
               (width * 0.5) / ARTWORK_WIDTH,
@@ -675,11 +1175,11 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
         context.scale(scale, scale);
         context.translate(-ARTWORK_CENTER.x, -ARTWORK_CENTER.y);
 
-        for (const part of DOLL_PARTS) {
-          drawSegment(context, sprites.parts[part.bone], part, targets);
+        for (const limb of sprites.limbs) {
+          drawLimb(context, limb, targets);
         }
         drawTorso(context, sprites.torso);
-        drawHead(context, sprites.head, pose.headRotation);
+        drawHead(context, sprites.head, pose.headRotation, expression);
 
         context.restore();
       },
@@ -728,12 +1228,70 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
       return () => observer.disconnect();
     }, [redraw]);
 
+    useEffect(() => {
+      const applyMotionSample = (sample: PaperDollMotionSample) => {
+        poseRef.current = poseFromLandmarks(sample.landmarks);
+        expressionRef.current = expressionFromMotion(sample.pose.expression);
+        redraw();
+      };
+      const player = new PaperDollMotionPlayer({
+        onFrame: applyMotionSample,
+        onStateChange: (snapshot) =>
+          onAnimationPlayingChange?.(snapshot.state === "playing"),
+      });
+      motionPlayerRef.current = player;
+      player.load(getPaperDollMotionPreset("idle"), { autoplay: true, loop: true });
+
+      return () => {
+        player.dispose();
+        if (motionPlayerRef.current === player) motionPlayerRef.current = null;
+      };
+    }, [onAnimationPlayingChange, redraw]);
+
     useImperativeHandle(
       ref,
       () => ({
         applyPose(landmarks) {
+          motionPlayerRef.current?.pause();
           poseRef.current = blendPose(poseRef.current, poseFromLandmarks(landmarks));
           redraw();
+        },
+        applyTracking(poseLandmarks, faceLandmarks) {
+          motionPlayerRef.current?.pause();
+          poseRef.current = blendPose(
+            poseRef.current,
+            poseFromLandmarks(poseLandmarks),
+          );
+          expressionRef.current = blendExpression(
+            expressionRef.current,
+            expressionFromFaceLandmarks(faceLandmarks),
+          );
+          redraw();
+        },
+        playPreset(preset) {
+          const player = motionPlayerRef.current;
+          if (!player) return;
+          player.load(getPaperDollMotionPreset(preset), {
+            autoplay: true,
+            loop: preset !== "greeting",
+          });
+          requestAnimationFrame(() => redraw());
+        },
+        pauseAnimation() {
+          motionPlayerRef.current?.pause();
+          redraw();
+        },
+        stopAnimation() {
+          motionPlayerRef.current?.stop();
+          poseRef.current = createRestPose();
+          expressionRef.current = { ...NEUTRAL_EXPRESSION };
+          redraw();
+        },
+        setAnimationSpeed(speed) {
+          motionPlayerRef.current?.setPlaybackRate(speed);
+        },
+        getCanvas() {
+          return canvasRef.current;
         },
         async capturePng(width = 1600, height = 2000) {
           if (
@@ -777,7 +1335,9 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           return canvasToBlob(canvas);
         },
         resetPose() {
+          motionPlayerRef.current?.pause();
           poseRef.current = createRestPose();
+          expressionRef.current = { ...NEUTRAL_EXPRESSION };
           manualRotationRef.current = 0;
           manualPanRef.current = { x: 0, y: 0 };
           redraw();
@@ -795,7 +1355,9 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
     );
 
     const beginPan = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-      if (event.pointerType !== "mouse" || event.button !== 1) return;
+      const middleMouse = event.pointerType === "mouse" && event.button === 1;
+      const directTouch = event.pointerType === "touch" && event.isPrimary;
+      if (!middleMouse && !directTouch) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       panGestureRef.current = {
@@ -838,7 +1400,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           onAuxClick={(event) => {
             if (event.button === 1) event.preventDefault();
           }}
-          aria-label="가운데 마우스 버튼으로 이동할 수 있는 관절 캐릭터"
+          aria-label="가운데 마우스 버튼 또는 한 손가락으로 이동할 수 있는 관절 캐릭터"
         />
       </div>
     );

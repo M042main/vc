@@ -7,10 +7,13 @@ import {
   CircleUserRound,
   Download,
   FileUp,
+  Film,
   Focus,
   Image as ImageIcon,
   LoaderCircle,
   LockKeyhole,
+  Pause,
+  Play,
   RotateCcw,
   RotateCw,
   Sparkles,
@@ -29,6 +32,11 @@ import {
 } from "../lib/vrmCapture";
 import { createHolisticTrackingWorker } from "../lib/holisticWorker";
 import {
+  getPaperDollMotionPreset,
+  type PaperDollMotionPresetId,
+} from "../lib/paperDollMotion";
+import {
+  DOLL_MOTION_PRESETS,
   PaperDollStage,
   type PaperDollStageHandle,
 } from "./PaperDollStage";
@@ -200,9 +208,18 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
   const paperDollActiveRef = useRef(false);
   const stageVisibleRef = useRef(true);
   const frameInFlightRef = useRef(false);
+  const modelLoadSessionRef = useRef(0);
   const lastFrameRef = useRef(0);
   const lastStatsRef = useRef(0);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingSessionRef = useRef(0);
+  const activeRecordingRef = useRef<{
+    session: number;
+    recorder: MediaRecorder;
+    stream: MediaStream;
+    timer: number;
+    releaseDelay: () => void;
+  } | null>(null);
 
   const [modelState, setModelState] = useState<ModelState>("empty");
   const [trackingState, setTrackingState] = useState<TrackingState>("idle");
@@ -213,12 +230,18 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
   const [inferenceMs, setInferenceMs] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [selectedMotion, setSelectedMotion] =
+    useState<PaperDollMotionPresetId>("idle");
+  const [animationPlaying, setAnimationPlaying] = useState(false);
+  const [animationSpeed, setAnimationSpeed] = useState(1);
+  const [preferVrm, setPreferVrm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  const modelReady = modelState === "ready";
   const artworkReady = Boolean(artwork);
-  const paperDollActive = artworkReady && !modelReady;
+  const paperDollActive = artworkReady && !preferVrm;
+  const modelReady = modelState === "ready" && !paperDollActive;
   const characterReady = modelReady || artworkReady;
   const trackingRunning = trackingState === "running";
   const displayModelName = modelReady
@@ -395,11 +418,29 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     if (mannequinRef.current) {
       mannequinRef.current.visible = !modelReady && !artworkReady;
     }
+    if (vrmRef.current) vrmRef.current.scene.visible = modelReady;
   }, [artworkReady, modelReady]);
 
   useEffect(() => {
     paperDollActiveRef.current = paperDollActive;
   }, [paperDollActive]);
+
+  const cancelRecording = useCallback(() => {
+    recordingSessionRef.current += 1;
+    const active = activeRecordingRef.current;
+    activeRecordingRef.current = null;
+    if (!active) return;
+    window.clearTimeout(active.timer);
+    active.releaseDelay();
+    if (active.recorder.state !== "inactive") {
+      try {
+        active.recorder.stop();
+      } catch {
+        // The browser may already be finalizing the recorder.
+      }
+    }
+    active.stream.getTracks().forEach((track) => track.stop());
+  }, []);
 
   const stopTracking = useCallback(() => {
     trackingSessionRef.current += 1;
@@ -424,26 +465,37 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
 
   useEffect(() => {
     return () => {
+      modelLoadSessionRef.current += 1;
+      cancelRecording();
       stopTracking();
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
-  }, [stopTracking]);
+  }, [cancelRecording, stopTracking]);
 
   const handleModelFile = useCallback(
     async (file?: File) => {
       if (!file) return;
+      if (isRecording) {
+        showToast("애니메이션 저장이 끝난 뒤 VRM을 선택해 주세요.");
+        return;
+      }
       setError(null);
 
       if (!file.name.toLowerCase().endsWith(".vrm")) {
         setError(".vrm 형식의 파일만 불러올 수 있습니다.");
-        setModelState("error");
+        setModelState(vrmRef.current ? "ready" : "error");
         return;
       }
       if (file.size > MAX_VRM_SIZE) {
         setError("VRM 파일은 80MB 이하만 사용할 수 있습니다.");
-        setModelState("error");
+        setModelState(vrmRef.current ? "ready" : "error");
         return;
       }
+
+      stopTracking();
+      paperDollRef.current?.pauseAnimation();
+      setAnimationPlaying(false);
+      const loadSession = ++modelLoadSessionRef.current;
 
       const scene = sceneRef.current;
       const camera = cameraRef.current;
@@ -453,6 +505,10 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       setModelState("loading");
       try {
         const loaded = await loadVrm(file, { maxBytes: MAX_VRM_SIZE });
+        if (modelLoadSessionRef.current !== loadSession) {
+          disposeVrm(loaded.vrm);
+          return;
+        }
         const previous = vrmRef.current;
 
         loaded.vrm.scene.traverse((child) => {
@@ -464,6 +520,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
 
         scene.add(loaded.vrm.scene);
         vrmRef.current = loaded.vrm;
+        setPreferVrm(true);
         mannequinRef.current!.visible = false;
 
         if (previous) {
@@ -477,6 +534,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         setModelState("ready");
         showToast("VRM을 불러왔어요. 이제 카메라를 연결해 보세요.");
       } catch (loadError) {
+        if (modelLoadSessionRef.current !== loadSession) return;
         setModelState(vrmRef.current ? "ready" : "error");
         setError(
           loadError instanceof Error
@@ -485,7 +543,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         );
       }
     },
-    [showToast],
+    [isRecording, showToast, stopTracking],
   );
 
   const runTrackingFrames = useCallback(() => {
@@ -532,7 +590,11 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
   }, []);
 
   const startTracking = useCallback(async () => {
-    if (!vrmRef.current && !artwork) {
+    if (isRecording) {
+      showToast("애니메이션 저장이 끝난 뒤 카메라를 시작해 주세요.");
+      return;
+    }
+    if (!characterReady) {
       showToast("먼저 VRM을 올리거나 직접 그린 캐릭터를 준비해 주세요.");
       return;
     }
@@ -543,6 +605,8 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     }
 
     setError(null);
+    paperDollRef.current?.pauseAnimation();
+    setAnimationPlaying(false);
     setTrackingState("loading");
     const session = ++trackingSessionRef.current;
     let sessionStream: MediaStream | null = null;
@@ -612,9 +676,14 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         }
 
         frameInFlightRef.current = false;
+        const result = message.result;
         const vrm = vrmRef.current;
-        if (vrm) {
-          const result = message.result;
+        if (paperDollActiveRef.current) {
+          paperDollRef.current?.applyTracking(
+            result.poseLandmarks?.[0],
+            result.faceLandmarks?.[0],
+          );
+        } else if (vrm) {
           applyVrmTracking(vrm, {
             faceLandmarks: result.faceLandmarks?.[0],
             poseLandmarks: result.poseLandmarks?.[0],
@@ -622,8 +691,6 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             leftHandLandmarks: result.leftHandLandmarks?.[0],
             rightHandLandmarks: result.rightHandLandmarks?.[0],
           });
-        } else {
-          paperDollRef.current?.applyPose(message.result.poseLandmarks?.[0]);
         }
 
         if (performance.now() - lastStatsRef.current > 500) {
@@ -652,7 +719,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       setTrackingState("error");
       setError(formatCameraError(cameraError));
     }
-  }, [artwork, runTrackingFrames, showToast, stopTracking]);
+  }, [characterReady, isRecording, runTrackingFrames, showToast, stopTracking]);
 
   const resetView = useCallback(() => {
     if (paperDollActive) {
@@ -673,6 +740,155 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     const object = vrmRef.current?.scene ?? mannequinRef.current;
     if (object) object.rotateY(direction * 0.28);
   }, [paperDollActive]);
+
+  const selectMotionPreset = useCallback(
+    (preset: PaperDollMotionPresetId) => {
+      if (!paperDollActive) return;
+      if (trackingState !== "idle") stopTracking();
+      setSelectedMotion(preset);
+      paperDollRef.current?.setAnimationSpeed(animationSpeed);
+      paperDollRef.current?.playPreset(preset);
+      setAnimationPlaying(true);
+      showToast(`${getPaperDollMotionPreset(preset).name} 애니메이션을 재생합니다.`);
+    },
+    [animationSpeed, paperDollActive, showToast, stopTracking, trackingState],
+  );
+
+  const toggleAnimation = useCallback(() => {
+    if (!paperDollActive) return;
+    if (animationPlaying) {
+      paperDollRef.current?.pauseAnimation();
+      setAnimationPlaying(false);
+      return;
+    }
+    if (trackingState !== "idle") stopTracking();
+    paperDollRef.current?.setAnimationSpeed(animationSpeed);
+    paperDollRef.current?.playPreset(selectedMotion);
+    setAnimationPlaying(true);
+  }, [
+    animationPlaying,
+    animationSpeed,
+    paperDollActive,
+    selectedMotion,
+    stopTracking,
+    trackingState,
+  ]);
+
+  const changeAnimationSpeed = useCallback((speed: number) => {
+    setAnimationSpeed(speed);
+    paperDollRef.current?.setAnimationSpeed(speed);
+  }, []);
+
+  const recordAnimation = useCallback(async () => {
+    if (!paperDollActive || isRecording) return;
+    const paperDoll = paperDollRef.current;
+    const canvas = paperDoll?.getCanvas();
+    if (!paperDoll || !canvas) {
+      showToast("애니메이션 캔버스를 아직 준비하고 있습니다.");
+      return;
+    }
+    if (typeof MediaRecorder === "undefined" || !canvas.captureStream) {
+      setError("이 브라우저는 애니메이션 WebM 저장을 지원하지 않습니다.");
+      return;
+    }
+
+    if (trackingState !== "idle") stopTracking();
+    const session = ++recordingSessionRef.current;
+    setIsRecording(true);
+    setError(null);
+    let canvasStream: MediaStream | null = null;
+    try {
+      paperDoll.setAnimationSpeed(animationSpeed);
+      paperDoll.playPreset(selectedMotion);
+      setAnimationPlaying(true);
+
+      canvasStream = canvas.captureStream(30);
+      const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
+        (candidate) => MediaRecorder.isTypeSupported(candidate),
+      );
+      if (!mimeType) {
+        throw new Error("이 브라우저는 WebM 애니메이션 저장을 지원하지 않습니다.");
+      }
+      const recorder = new MediaRecorder(
+        canvasStream,
+        { mimeType, videoBitsPerSecond: 4_000_000 },
+      );
+      const chunks: Blob[] = [];
+      let recorderFailure: Error | null = null;
+      let releaseDelay = () => undefined;
+      const completed = new Promise<Blob>((resolve) => {
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onerror = () => {
+          recorderFailure = new Error("애니메이션 녹화 중 문제가 생겼습니다.");
+          releaseDelay();
+        };
+        recorder.onstop = () =>
+          resolve(new Blob(chunks, { type: mimeType }));
+      });
+
+      const clip = getPaperDollMotionPreset(selectedMotion);
+      const delay = new Promise<void>((resolve) => {
+        releaseDelay = resolve;
+      });
+      const timer = window.setTimeout(
+        releaseDelay,
+        clip.durationMs / animationSpeed + 180,
+      );
+      activeRecordingRef.current = {
+        session,
+        recorder,
+        stream: canvasStream,
+        timer,
+        releaseDelay,
+      };
+      recorder.start(120);
+      await delay;
+      if (recordingSessionRef.current !== session) return;
+      if (recorder.state !== "inactive") recorder.stop();
+      const blob = await completed;
+      if (recordingSessionRef.current !== session) return;
+      if (recorderFailure) throw recorderFailure;
+      if (blob.size === 0) throw new Error("저장된 애니메이션이 비어 있습니다.");
+      downloadBlob(
+        blob,
+        `${cleanFilename(displayModelName)}-${selectedMotion}-animation.webm`,
+      );
+      showToast("캐릭터 애니메이션 WebM을 기기에 저장했어요.");
+    } catch (recordingError) {
+      if (recordingSessionRef.current === session) {
+        setError(
+          recordingError instanceof Error
+            ? recordingError.message
+            : "애니메이션을 저장하지 못했습니다.",
+        );
+      }
+    } finally {
+      const active = activeRecordingRef.current;
+      if (active?.session === session) {
+        window.clearTimeout(active.timer);
+        active.stream.getTracks().forEach((track) => track.stop());
+        activeRecordingRef.current = null;
+      } else {
+        canvasStream?.getTracks().forEach((track) => track.stop());
+      }
+      if (recordingSessionRef.current === session) {
+        paperDoll.pauseAnimation();
+        setAnimationPlaying(false);
+        setIsRecording(false);
+      }
+    }
+  }, [
+    animationSpeed,
+    displayModelName,
+    isRecording,
+    paperDollActive,
+    selectedMotion,
+    showToast,
+    stopTracking,
+    trackingState,
+  ]);
 
   const capture = useCallback(async () => {
     const renderer = rendererRef.current;
@@ -771,9 +987,9 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           >
             <div className={styles.stepTop}>
               <span className={styles.stepNumber}>03</span>
-              <strong>포즈 저장</strong>
+              <strong>포즈·애니메이션 저장</strong>
             </div>
-            <p>원하는 순간을 누르면 전신이 투명 PNG로 자동 저장됩니다.</p>
+            <p>현재 포즈는 PNG로, 선택한 움직임은 WebM으로 저장할 수 있어요.</p>
           </div>
         </div>
 
@@ -791,7 +1007,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             className={styles.primaryButton}
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={modelState === "loading"}
+            disabled={modelState === "loading" || isRecording}
           >
             {modelState === "loading" ? (
               <LoaderCircle size={16} className="spin" />
@@ -804,7 +1020,12 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             className={styles.secondaryButton}
             type="button"
             onClick={trackingRunning ? stopTracking : startTracking}
-            disabled={!characterReady || trackingState === "loading" || modelState === "loading"}
+            disabled={
+              !characterReady ||
+              trackingState === "loading" ||
+              modelState === "loading" ||
+              isRecording
+            }
           >
             {trackingState === "loading" ? (
               <LoaderCircle size={16} />
@@ -823,12 +1044,69 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             className={styles.captureButton}
             type="button"
             onClick={capture}
-            disabled={!characterReady || isCapturing || modelState === "loading"}
+            disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
           >
             {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
             {isCapturing ? "전신 맞추는 중" : "전신 PNG 자동 저장"}
           </button>
         </div>
+
+        {paperDollActive ? (
+          <section className={styles.animationLab} aria-label="캐릭터 애니메이션 만들기">
+            <div className={styles.animationHeading}>
+              <span>ANIMATION LAB</span>
+              <strong>저장한 그림을 움직여 보세요</strong>
+            </div>
+            <div className={styles.motionGrid}>
+              {DOLL_MOTION_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-selected={selectedMotion === preset.id}
+                  aria-pressed={selectedMotion === preset.id}
+                  onClick={() => selectMotionPreset(preset.id)}
+                  disabled={isRecording || trackingState === "loading"}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className={styles.motionControls}>
+              <button
+                type="button"
+                className={styles.playButton}
+                onClick={toggleAnimation}
+                disabled={isRecording || trackingState === "loading"}
+              >
+                {animationPlaying ? <Pause size={14} /> : <Play size={14} />}
+                {animationPlaying ? "일시정지" : "애니메이션 재생"}
+              </button>
+              <label className={styles.speedControl}>
+                <span>속도</span>
+                <select
+                  value={animationSpeed}
+                  onChange={(event) => changeAnimationSpeed(Number(event.target.value))}
+                  disabled={isRecording}
+                  aria-label="애니메이션 재생 속도"
+                >
+                  <option value={0.75}>0.75×</option>
+                  <option value={1}>1×</option>
+                  <option value={1.25}>1.25×</option>
+                  <option value={1.5}>1.5×</option>
+                </select>
+              </label>
+            </div>
+            <button
+              type="button"
+              className={styles.recordButton}
+              onClick={recordAnimation}
+              disabled={isRecording || trackingState === "loading"}
+            >
+              {isRecording ? <LoaderCircle size={15} /> : <Film size={15} />}
+              {isRecording ? "애니메이션 녹화 중" : "애니메이션 WebM 저장"}
+            </button>
+          </section>
+        ) : null}
 
         {error ? <div className={styles.errorBox}>{error}</div> : null}
 
@@ -856,6 +1134,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         onDrop={(event) => {
           event.preventDefault();
           setIsDragging(false);
+          if (isRecording) return;
           handleModelFile(event.dataTransfer.files?.[0]);
         }}
       >
@@ -871,12 +1150,19 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             ref={paperDollRef}
             artwork={artwork}
             className={styles.paperDollViewport}
+            onAnimationPlayingChange={setAnimationPlaying}
           />
         ) : null}
 
         <div className={styles.stageBar}>
-          <span className={trackingRunning ? styles.liveBadge : styles.stageBadge}>
-            {trackingRunning ? "LIVE TRACKING" : "PREVIEW MODE"}
+          <span
+            className={trackingRunning || animationPlaying ? styles.liveBadge : styles.stageBadge}
+          >
+            {trackingRunning
+              ? "LIVE TRACKING"
+              : animationPlaying
+                ? "ANIMATION PLAYING"
+                : "PREVIEW MODE"}
           </span>
           <span className={styles.stageBadge}>
             {paperDollActive
@@ -950,7 +1236,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             className={styles.iconButton}
             type="button"
             onClick={capture}
-            disabled={!characterReady || isCapturing || modelState === "loading"}
+            disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
             aria-label="전신 PNG 저장"
           >
             <Download size={16} />
@@ -1028,12 +1314,13 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           </div>
           <div className={styles.metric}>
             <span>FORMAT</span>
-            <strong>PNG · 투명</strong>
+            <strong>{paperDollActive ? "PNG · WEBM" : "PNG · 투명"}</strong>
           </div>
         </div>
         <p className={styles.exportNote}>
-          저장할 때 현재 포즈의 실제 범위를 다시 계산해 머리부터 발끝까지 자동으로
-          화면 안에 맞춥니다.
+          {paperDollActive
+            ? "현재 포즈는 투명 PNG로, 선택한 동작은 브라우저에서 바로 WebM으로 저장합니다."
+            : "저장할 때 현재 포즈의 실제 범위를 다시 계산해 머리부터 발끝까지 자동으로 화면 안에 맞춥니다."}
         </p>
       </aside>
     </section>

@@ -249,6 +249,12 @@ footer p {
   margin: 0;
 }
 
+footer a {
+  color: var(--ink);
+  font-weight: 800;
+  text-underline-offset: 3px;
+}
+
 @media (max-width: 900px) {
   .topbar {
     grid-template-columns: 1fr auto;

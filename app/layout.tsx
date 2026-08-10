@@ -20,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: baseUrl,
     title: "MOTION INK — VRM 트래킹 & 캐릭터 메이커",
     description:
-      "VRM 캐릭터를 카메라로 움직이고 전신 PNG로 저장하거나, 도안 위에 직접 나만의 캐릭터를 그려보세요.",
+      "VRM과 직접 그린 캐릭터를 카메라 또는 프리셋 모션으로 움직이고, 전신 PNG와 WebM 애니메이션으로 저장하세요.",
     applicationName: "MOTION INK",
     icons: {
       icon: "/favicon.svg",
@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     openGraph: {
       title: "MOTION INK — 움직이고, 그리고, 저장하세요",
-      description: "브라우저에서 즐기는 VRM 모션 트래킹과 캐릭터 드로잉 랩",
+      description: "브라우저에서 즐기는 VRM 트래킹과 캐릭터 애니메이션 랩",
       type: "website",
       url: baseUrl,
       images: [
@@ -43,7 +43,7 @@ export async function generateMetadata(): Promise<Metadata> {
     twitter: {
       card: "summary_large_image",
       title: "MOTION INK — 움직이고, 그리고, 저장하세요",
-      description: "브라우저에서 즐기는 VRM 모션 트래킹과 캐릭터 드로잉 랩",
+      description: "브라우저에서 즐기는 VRM 트래킹과 캐릭터 애니메이션 랩",
       images: [socialImage],
     },
   };

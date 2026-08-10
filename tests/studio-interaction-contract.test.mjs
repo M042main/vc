@@ -81,7 +81,10 @@ test("pans the articulated 2D character with the middle mouse button", async () 
   const source = await readFile(paperDollUrl, "utf8");
 
   assert.match(source, /manualPanRef/);
-  assert.match(source, /event\.button\s*!==\s*1/);
+  assert.ok(
+    /event\.button\s*===\s*1/.test(source) || /event\.button\s*!==\s*1/.test(source),
+    "middle mouse must be recognized as the 2D pan gesture",
+  );
   assert.match(source, /setPointerCapture\(event\.pointerId\)/);
   assert.match(source, /onPointerMove=\{movePan\}/);
   assert.match(source, /manualPanRef\.current\s*=\s*\{/);

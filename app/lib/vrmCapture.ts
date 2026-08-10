@@ -399,9 +399,12 @@ export async function captureVrmFullBodyPng(
   return { blob, width, height, bounds, camera };
 }
 
-function pngFilename(filename: string): string {
-  const trimmed = filename.trim() || "my-vrm-character";
-  return trimmed.toLowerCase().endsWith(".png") ? trimmed : `${trimmed}.png`;
+function downloadFilename(blob: Blob, filename: string): string {
+  const trimmed = filename.trim() || "motion-ink-character";
+  if (/\.[a-z0-9]{2,5}$/i.test(trimmed)) return trimmed;
+  if (blob.type.includes("webm")) return `${trimmed}.webm`;
+  if (blob.type.includes("mp4")) return `${trimmed}.mp4`;
+  return `${trimmed}.png`;
 }
 
 /** Trigger a browser download and promptly release the temporary object URL. */
@@ -412,7 +415,7 @@ export function downloadBlob(blob: Blob, filename = "my-vrm-character.png"): voi
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = pngFilename(filename);
+  anchor.download = downloadFilename(blob, filename);
   anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();

@@ -147,6 +147,129 @@
   margin-top: 18px;
 }
 
+.animationLab {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(23, 23, 19, 0.14);
+  border-radius: 16px;
+  background: linear-gradient(145deg, #f2efea, #fffdf8);
+}
+
+.animationHeading span,
+.animationHeading strong {
+  display: block;
+}
+
+.animationHeading span {
+  margin-bottom: 3px;
+  color: #745cff;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.animationHeading strong {
+  font-size: 11px;
+  letter-spacing: -0.025em;
+}
+
+.motionGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.motionGrid button,
+.playButton,
+.recordButton {
+  border: 1px solid rgba(23, 23, 19, 0.13);
+  border-radius: 10px;
+  background: white;
+  color: #35342f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.motionGrid button {
+  min-height: 44px;
+  padding: 0 7px;
+}
+
+.motionGrid button[data-selected="true"] {
+  border-color: #171713;
+  background: #dfff45;
+  color: #171713;
+  box-shadow: 2px 2px 0 #171713;
+  transform: translate(-1px, -1px);
+}
+
+.motionControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.playButton,
+.recordButton {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+}
+
+.playButton {
+  background: #171713;
+  color: white;
+}
+
+.speedControl {
+  display: flex;
+  min-width: 82px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid rgba(23, 23, 19, 0.13);
+  border-radius: 10px;
+  background: white;
+  color: #6d6a62;
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.speedControl select {
+  max-width: 46px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #171713;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.recordButton {
+  width: 100%;
+  border-color: rgba(255, 115, 87, 0.45);
+  background: rgba(255, 115, 87, 0.13);
+  color: #7e2718;
+}
+
+.motionGrid button:disabled,
+.playButton:disabled,
+.recordButton:disabled,
+.speedControl select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .primaryButton,
 .secondaryButton,
 .captureButton,

@@ -1,18 +1,77 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Camera, Code2, Paintbrush, ShieldCheck } from "lucide-react";
 import { CharacterCreator } from "./components/CharacterCreator";
 import { VrmStudio } from "./components/VrmStudio";
+import { PaperDollCharacterStore } from "./lib/paperDollCharacterStore";
 
 type WorkspaceMode = "studio" | "creator";
+const SAVED_CHARACTER_KEY = "motion-ink.saved-character.v1";
+const SAVED_CHARACTER_ID = "motion-ink-latest-character";
 
 export default function Home() {
   const [mode, setMode] = useState<WorkspaceMode>("studio");
   const [characterArtwork, setCharacterArtwork] = useState<string | null>(null);
+  const characterStoreRef = useRef<PaperDollCharacterStore | null>(null);
+  const artworkGenerationRef = useRef(0);
+
+  useEffect(() => {
+    const store = new PaperDollCharacterStore();
+    characterStoreRef.current = store;
+    let active = true;
+    const restoreGeneration = artworkGenerationRef.current;
+    let fallbackArtwork: string | null = null;
+    try {
+      fallbackArtwork = window.localStorage.getItem(SAVED_CHARACTER_KEY);
+    } catch {
+      // Private browsing modes may disable local storage. The studio still works
+      // for the current tab, so no user-facing failure is necessary here.
+    }
+
+    void store
+      .get(SAVED_CHARACTER_ID)
+      .then((character) => {
+        if (!active || artworkGenerationRef.current !== restoreGeneration) return;
+        const savedArtwork =
+          typeof character?.artwork === "string"
+            ? character.artwork
+            : fallbackArtwork;
+        if (savedArtwork) setCharacterArtwork(savedArtwork);
+      })
+      .catch(() => {
+        if (
+          active &&
+          artworkGenerationRef.current === restoreGeneration &&
+          fallbackArtwork
+        ) {
+          setCharacterArtwork(fallbackArtwork);
+        }
+      });
+
+    return () => {
+      active = false;
+      if (characterStoreRef.current === store) characterStoreRef.current = null;
+      void store.close();
+    };
+  }, []);
 
   const handleSendToStudio = (dataUrl: string) => {
+    artworkGenerationRef.current += 1;
     setCharacterArtwork(dataUrl);
+    try {
+      window.localStorage.setItem(SAVED_CHARACTER_KEY, dataUrl);
+    } catch {
+      // Keep the in-memory character even when the browser storage quota is full.
+    }
+    void characterStoreRef.current
+      ?.save({
+        id: SAVED_CHARACTER_ID,
+        name: "내가 그린 캐릭터",
+        artwork: dataUrl,
+        playback: { presetId: "idle", playbackRate: 1, loop: true },
+      })
+      .catch(() => undefined);
     setMode("studio");
   };
 
@@ -95,15 +154,14 @@ export default function Home() {
           <span className="trust-number">03</span>
           <p>
             <strong>전신 PNG 저장</strong>
-            포즈에 맞춰 자동 프레이밍
+            포즈 또는 애니메이션으로 저장
           </p>
         </div>
       </section>
 
       <footer>
         <p>
-          Kalidoface 3D의 아이디어를 바탕으로 최신 MediaPipe Tasks와
-          three-vrm으로 새롭게 구성했습니다.
+          Kalidoface 3D와 <a href="https://github.com/yemount/pose-animator" target="_blank" rel="noreferrer">Pose Animator</a>, <a href="https://github.com/facebookresearch/AnimatedDrawings" target="_blank" rel="noreferrer">Animated Drawings</a>의 리깅 아이디어를 브라우저용으로 재구성했습니다.
         </p>
         <p>카메라 사용에는 HTTPS 또는 localhost 환경이 필요합니다.</p>
       </footer>
