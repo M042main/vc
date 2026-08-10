@@ -17,6 +17,7 @@
     "@mediapipe/tasks-vision": "1.0.1",
     "@pixiv/three-vrm": "^3.5.5",
     "drizzle-orm": "0.45.2",
+    "firebase": "11.6.1",
     "kalidokit": "^1.1.5",
     "lucide-react": "^1.31.0",
     "react": "19.2.6",

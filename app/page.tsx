@@ -1,18 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Camera, Code2, Paintbrush } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Camera, Code2, Images, Paintbrush } from "lucide-react";
 import { CharacterCreator } from "./components/CharacterCreator";
-import { VrmStudio } from "./components/VrmStudio";
+import {
+  VrmStudio,
+  type VrmStudioCapture,
+} from "./components/VrmStudio";
 import { PaperDollCharacterStore } from "./lib/paperDollCharacterStore";
 
-type WorkspaceMode = "studio" | "creator";
+const OnlineGallery = lazy(() =>
+  import("./components/OnlineGallery").then((module) => ({
+    default: module.OnlineGallery,
+  })),
+);
+
+type WorkspaceMode = "studio" | "creator" | "gallery";
 const SAVED_CHARACTER_KEY = "motion-ink.saved-character.v1";
 const SAVED_CHARACTER_ID = "motion-ink-latest-character";
 
 export default function Home() {
   const [mode, setMode] = useState<WorkspaceMode>("studio");
   const [characterArtwork, setCharacterArtwork] = useState<string | null>(null);
+  const [latestCapture, setLatestCapture] = useState<VrmStudioCapture | null>(null);
   const characterStoreRef = useRef<PaperDollCharacterStore | null>(null);
   const artworkGenerationRef = useRef(0);
 
@@ -105,6 +115,22 @@ export default function Home() {
             <Paintbrush size={17} aria-hidden="true" />
             캐릭터 만들기
           </button>
+          <button
+            className={mode === "gallery" ? "is-active" : ""}
+            onClick={() => setMode("gallery")}
+            type="button"
+            aria-label={
+              latestCapture
+                ? "온라인 갤러리, 업로드할 새 캡처 있음"
+                : "온라인 갤러리"
+            }
+          >
+            <Images size={17} aria-hidden="true" />
+            온라인 갤러리
+            {latestCapture ? (
+              <span className="gallery-ready-dot" aria-hidden="true" />
+            ) : null}
+          </button>
         </nav>
 
         <a
@@ -120,9 +146,25 @@ export default function Home() {
 
       <section className="workspace" id="top">
         {mode === "studio" ? (
-          <VrmStudio artwork={characterArtwork} />
-        ) : (
+          <VrmStudio
+            artwork={characterArtwork}
+            onCaptureReady={setLatestCapture}
+          />
+        ) : mode === "creator" ? (
           <CharacterCreator onSendToStudio={handleSendToStudio} />
+        ) : (
+          <Suspense
+            fallback={
+              <div className="gallery-loading-shell" role="status">
+                온라인 갤러리를 여는 중입니다.
+              </div>
+            }
+          >
+            <OnlineGallery
+              pendingCapture={latestCapture}
+              onUploadComplete={() => setLatestCapture(null)}
+            />
+          </Suspense>
         )}
       </section>
 

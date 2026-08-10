@@ -134,6 +134,7 @@ input:focus-visible {
 }
 
 .mode-switch button {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -146,6 +147,16 @@ input:focus-visible {
   font-size: 13px;
   font-weight: 750;
   transition: 160ms ease;
+}
+
+.gallery-ready-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: -2px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: var(--coral);
+  box-shadow: 0 0 0 2px rgba(255, 115, 87, 0.18);
 }
 
 .mode-switch button:hover {
@@ -177,6 +188,18 @@ input:focus-visible {
   width: min(1540px, 100%);
   margin: 0 auto;
   padding: clamp(18px, 2.4vw, 34px) clamp(16px, 4vw, 64px) 30px;
+}
+
+.gallery-loading-shell {
+  display: grid;
+  min-height: 420px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--white);
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 footer {
@@ -248,6 +271,12 @@ footer a {
 
   .workspace {
     padding-top: 30px;
+  }
+
+  .mode-switch button {
+    gap: 5px;
+    padding-inline: 8px;
+    font-size: 11px;
   }
 
   footer {

@@ -34,24 +34,33 @@ test("server-renders the Motion Ink studio", async () => {
   assert.match(html, /MOTION INK/);
   assert.match(html, /트래킹 스튜디오/);
   assert.match(html, /캐릭터 만들기/);
+  assert.match(html, /온라인 갤러리/);
   assert.match(html, /VRM/);
   assert.doesNotMatch(html, /trust-strip|서비스 특징|영상은 기기 안에서만/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
 test("ships the two interactive creation surfaces and removes the starter", async () => {
-  const [page, studio, creator, packageJson] = await Promise.all([
+  const [page, studio, creator, gallery, firebaseGallery, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/VrmStudio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/CharacterCreator.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/OnlineGallery.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/firebaseGallery.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<VrmStudio/);
   assert.match(page, /<CharacterCreator/);
+  assert.match(page, /<OnlineGallery/);
+  assert.match(page, /onCaptureReady=\{setLatestCapture\}/);
   assert.match(studio, /captureVrmFullBodyPng/);
   assert.match(studio, /createHolisticTrackingWorker/);
   assert.match(creator, /onSendToStudio/);
+  assert.match(gallery, /publishGalleryEntry/);
+  assert.match(gallery, /document\.cookie/);
+  assert.match(firebaseGallery, /motion_ink_gallery_a7f3c9/);
+  assert.match(packageJson, /"firebase":\s*"11\.6\.1"/);
   assert.doesNotMatch(page, /trust-strip|ShieldCheck/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 

@@ -203,6 +203,22 @@ function cleanFilename(value: string) {
     .slice(0, 60) || "motion-ink-character";
 }
 
+function pngBlobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new Error("PNG 이미지를 온라인 갤러리용으로 준비하지 못했습니다."));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("PNG 이미지 변환 결과가 올바르지 않습니다."));
+        return;
+      }
+      resolve(reader.result);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
 function formatCameraError(error: unknown) {
   if (!(error instanceof DOMException)) {
     return "카메라를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -223,7 +239,18 @@ function formatCameraError(error: unknown) {
   return "카메라 연결 중 문제가 생겼습니다. 다시 시도해 주세요.";
 }
 
-export function VrmStudio({ artwork }: { artwork?: string | null }) {
+export type VrmStudioCapture = {
+  imageDataUrl: string;
+  fileName: string;
+};
+
+export function VrmStudio({
+  artwork,
+  onCaptureReady,
+}: {
+  artwork?: string | null;
+  onCaptureReady?: (capture: VrmStudioCapture) => void;
+}) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -1333,8 +1360,17 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         String(date.getMinutes()).padStart(2, "0"),
         String(date.getSeconds()).padStart(2, "0"),
       ].join("");
-      downloadBlob(blob, `${cleanFilename(displayModelName)}-fullbody-${stamp}.png`);
-      showToast("캐릭터 전신 PNG를 다운로드 폴더에 저장했어요.");
+      const fileName = `${cleanFilename(displayModelName)}-fullbody-${stamp}.png`;
+      if (onCaptureReady) {
+        const imageDataUrl = await pngBlobToDataUrl(blob);
+        onCaptureReady({ imageDataUrl, fileName });
+      }
+      downloadBlob(blob, fileName);
+      showToast(
+        onCaptureReady
+          ? "전신 PNG를 저장했고 온라인 갤러리에도 올릴 준비가 됐어요."
+          : "캐릭터 전신 PNG를 다운로드 폴더에 저장했어요.",
+      );
     } catch (captureError) {
       setError(
         captureError instanceof Error
@@ -1344,7 +1380,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     } finally {
       setIsCapturing(false);
     }
-  }, [displayModelName, paperDollActive, showToast]);
+  }, [displayModelName, onCaptureReady, paperDollActive, showToast]);
 
   return (
     <section className={styles.studio} aria-label="캐릭터 트래킹 스튜디오">

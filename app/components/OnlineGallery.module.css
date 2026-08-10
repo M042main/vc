@@ -1,0 +1,658 @@
+.gallery {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: clamp(22px, 3.5vw, 42px);
+  border: 1px solid rgba(23, 23, 19, 0.18);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 92% 7%, rgba(223, 255, 69, 0.36), transparent 26%),
+    linear-gradient(150deg, #fffefb 0%, #f8f4ec 100%);
+  box-shadow: 0 24px 70px rgba(36, 32, 24, 0.12);
+  color: #171713;
+}
+
+.gallery::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  opacity: 0.17;
+  background-image: radial-gradient(rgba(23, 23, 19, 0.42) 0.7px, transparent 0.7px);
+  background-size: 10px 10px;
+  content: "";
+  pointer-events: none;
+}
+
+.gallery button,
+.gallery input {
+  font: inherit;
+}
+
+.gallery button {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.gallery button:focus-visible,
+.gallery input:focus-visible {
+  outline: 3px solid #477200;
+  outline-offset: 3px;
+}
+
+.gallery button:disabled {
+  cursor: not-allowed;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 28px;
+  padding-bottom: clamp(20px, 3vw, 30px);
+  border-bottom: 1px solid rgba(23, 23, 19, 0.14);
+}
+
+.header h2 {
+  max-width: 720px;
+  margin: 10px 0 8px;
+  font-size: clamp(25px, 3.2vw, 42px);
+  font-weight: 950;
+  letter-spacing: -0.055em;
+  line-height: 1.04;
+}
+
+.header p {
+  max-width: 650px;
+  margin: 0;
+  color: #65635b;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.65;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+}
+
+.eyebrow > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #80bb00;
+  box-shadow: 0 0 0 5px rgba(128, 187, 0, 0.14);
+}
+
+.liveCount {
+  display: grid;
+  min-width: 118px;
+  padding: 14px 16px;
+  border: 1px solid #171713;
+  border-radius: 16px;
+  background: #171713;
+  box-shadow: 4px 4px 0 #dfff45;
+  color: #fffef8;
+  text-align: right;
+}
+
+.liveCount strong {
+  font-size: 27px;
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.liveCount span {
+  margin-top: 6px;
+  color: #dfff45;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.capturePanel,
+.namePanel {
+  min-width: 0;
+  border: 1px solid rgba(23, 23, 19, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.capturePanel {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 10px 11px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.capturePanel[data-ready="true"] {
+  border-color: rgba(98, 145, 0, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(128, 187, 0, 0.1);
+}
+
+.capturePreview {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgba(23, 23, 19, 0.12);
+  border-radius: 13px;
+  background-color: #ebe8e1;
+  background-image:
+    linear-gradient(45deg, #fff 25%, transparent 25%),
+    linear-gradient(-45deg, #fff 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #fff 75%),
+    linear-gradient(-45deg, transparent 75%, #fff 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+  color: #77746c;
+}
+
+.capturePreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.captureCopy,
+.namePanel > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.captureCopy span,
+.namePanel > div > span {
+  color: #77746c;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.captureCopy strong,
+.namePanel > div > strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploadButton,
+.confirmNameButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 148px;
+  padding: 0 16px;
+  border: 1px solid #171713;
+  border-radius: 13px;
+  background: #171713;
+  color: #fffef8;
+  font-size: 11px;
+  font-weight: 900;
+  transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.uploadButton:disabled {
+  border-color: #c8c5bc;
+  background: #dedbd3;
+  color: #77746c;
+}
+
+.namePanel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+}
+
+.userIcon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8ff7b;
+  color: #283500;
+}
+
+.editNameButton,
+.downloadButton,
+.errorState button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 13px;
+  border: 1px solid rgba(23, 23, 19, 0.2);
+  border-radius: 12px;
+  background: #fff;
+  color: #171713;
+  font-size: 10px;
+  font-weight: 900;
+  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+}
+
+.actionStatus {
+  min-height: 20px;
+  margin: 10px 2px 0;
+  color: #4f5f28;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.content {
+  min-height: 270px;
+  margin-top: 3px;
+}
+
+.loadingState,
+.errorState,
+.emptyState {
+  display: grid;
+  min-height: 270px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 32px;
+  border: 1px dashed rgba(23, 23, 19, 0.22);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
+.loadingState strong,
+.errorState strong,
+.emptyState strong {
+  margin-top: 5px;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.loadingState span,
+.errorState span,
+.emptyState span {
+  max-width: 480px;
+  color: #6f6c64;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.errorState {
+  border-color: rgba(162, 47, 38, 0.3);
+  color: #942e26;
+}
+
+.errorState button {
+  margin-top: 8px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 14px;
+}
+
+.card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(23, 23, 19, 0.15);
+  border-radius: 19px;
+  background: #fffefb;
+  box-shadow: 0 9px 22px rgba(36, 32, 24, 0.07);
+  transition: border-color 170ms ease, box-shadow 170ms ease, transform 170ms ease;
+}
+
+.cardImage {
+  position: relative;
+  display: grid;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  place-items: center;
+  border-bottom: 1px solid rgba(23, 23, 19, 0.11);
+  background-color: #eae7df;
+  background-image:
+    linear-gradient(45deg, #faf9f6 25%, transparent 25%),
+    linear-gradient(-45deg, #faf9f6 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #faf9f6 75%),
+    linear-gradient(-45deg, transparent 75%, #faf9f6 75%);
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
+}
+
+.cardImage::after {
+  position: absolute;
+  inset: auto 12px 10px auto;
+  padding: 4px 6px;
+  border: 1px solid rgba(23, 23, 19, 0.14);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #56544e;
+  content: "PNG";
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.11em;
+  pointer-events: none;
+}
+
+.cardImage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: transform 220ms ease;
+}
+
+.cardBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 12px;
+}
+
+.cardBody > div {
+  min-width: 0;
+}
+
+.cardBody h3 {
+  overflow: hidden;
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardBody time {
+  display: block;
+  overflow: hidden;
+  color: #77746c;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downloadButton {
+  min-width: 96px;
+  border-color: #171713;
+  background: #dfff45;
+}
+
+.downloadButton:disabled {
+  border-color: #c8c5bc;
+  background: #eeeae2;
+  color: #817e76;
+}
+
+.spinner {
+  flex: 0 0 auto;
+  animation: spin 0.85s linear infinite;
+}
+
+.dialogBackdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  overflow: auto;
+  place-items: center;
+  padding: 20px;
+  background: rgba(17, 17, 14, 0.64);
+  backdrop-filter: blur(7px);
+}
+
+.dialog {
+  position: relative;
+  width: min(100%, 430px);
+  padding: 28px;
+  border: 1px solid #171713;
+  border-radius: 22px;
+  background: #fffdf8;
+  box-shadow: 8px 8px 0 #dfff45, 0 30px 80px rgba(0, 0, 0, 0.28);
+  animation: dialogIn 170ms ease-out;
+}
+
+.dialogClose {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  display: grid;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #55534c;
+}
+
+.dialogIcon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  place-items: center;
+  border: 1px solid #171713;
+  border-radius: 50%;
+  background: #dfff45;
+}
+
+.dialog h3 {
+  margin: 0 44px 8px 0;
+  font-size: 22px;
+  font-weight: 950;
+  letter-spacing: -0.045em;
+}
+
+.dialog > p {
+  margin: 0 0 20px;
+  color: #69675f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dialog form {
+  display: grid;
+  gap: 8px;
+}
+
+.dialog label {
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.dialog input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 13px;
+  border: 1px solid rgba(23, 23, 19, 0.3);
+  border-radius: 12px;
+  background: #fff;
+  color: #171713;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.dialog input[aria-invalid="true"] {
+  border-color: #a22f26;
+}
+
+.nameError {
+  color: #942e26;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.confirmNameButton {
+  width: 100%;
+  margin-top: 8px;
+  background: #dfff45;
+  color: #171713;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .uploadButton:not(:disabled):hover,
+  .confirmNameButton:hover {
+    background: #dfff45;
+    color: #171713;
+    transform: translateY(-1px);
+  }
+
+  .editNameButton:hover,
+  .errorState button:hover {
+    border-color: #171713;
+    background: #f1eee7;
+    transform: translateY(-1px);
+  }
+
+  .downloadButton:not(:disabled):hover {
+    background: #cffa00;
+    transform: translateY(-1px);
+  }
+
+  .dialogClose:hover {
+    background: #eeebe4;
+  }
+
+  .card:hover {
+    border-color: rgba(23, 23, 19, 0.33);
+    box-shadow: 0 15px 30px rgba(36, 32, 24, 0.12);
+    transform: translateY(-3px);
+  }
+
+  .card:hover .cardImage img {
+    transform: scale(1.025);
+  }
+}
+
+@media (max-width: 800px) {
+  .toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .namePanel {
+    min-height: 64px;
+  }
+}
+
+@media (max-width: 590px) {
+  .gallery {
+    padding: 20px 14px;
+    border-radius: 21px;
+  }
+
+  .header {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .header h2 {
+    font-size: clamp(25px, 9vw, 34px);
+  }
+
+  .liveCount {
+    justify-self: start;
+    min-width: 104px;
+    text-align: left;
+  }
+
+  .capturePanel {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .capturePreview {
+    width: 54px;
+    height: 54px;
+  }
+
+  .uploadButton {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .namePanel {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .editNameButton {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cardBody {
+    padding: 13px;
+  }
+
+  .dialogBackdrop {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .dialog {
+    padding: 24px 19px max(24px, env(safe-area-inset-bottom));
+    border-radius: 22px 22px 14px 14px;
+    box-shadow: 0 -4px 0 #dfff45, 0 20px 60px rgba(0, 0, 0, 0.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery *,
+  .gallery *::before,
+  .gallery *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .eyebrow > span,
+  .liveCount,
+  .downloadButton,
+  .dialogIcon,
+  .confirmNameButton {
+    forced-color-adjust: none;
+  }
+}
