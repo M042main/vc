@@ -176,64 +176,7 @@ input:focus-visible {
 .workspace {
   width: min(1540px, 100%);
   margin: 0 auto;
-  padding: clamp(28px, 4vw, 54px) clamp(16px, 4vw, 64px) 30px;
-}
-
-.workspace-intro {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.65fr);
-  align-items: end;
-  gap: 48px;
-  margin-bottom: 28px;
-}
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 13px;
-  color: var(--violet);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.09em;
-}
-
-.workspace-intro h1 {
-  margin: 0;
-  font-size: clamp(40px, 5.4vw, 79px);
-  font-weight: 950;
-  letter-spacing: -0.075em;
-  line-height: 0.93;
-}
-
-.workspace-intro h1 em {
-  position: relative;
-  z-index: 0;
-  color: var(--ink);
-  font-style: normal;
-}
-
-.workspace-intro h1 em::after {
-  position: absolute;
-  z-index: -1;
-  right: -0.04em;
-  bottom: 0.05em;
-  left: -0.04em;
-  height: 0.27em;
-  border-radius: 0.1em;
-  background: var(--acid);
-  content: "";
-  transform: rotate(-1.2deg);
-}
-
-.workspace-intro > p {
-  max-width: 420px;
-  margin: 0 0 5px;
-  color: var(--ink-soft);
-  font-size: clamp(14px, 1.3vw, 17px);
-  font-weight: 560;
-  line-height: 1.7;
-  word-break: keep-all;
+  padding: clamp(18px, 2.4vw, 34px) clamp(16px, 4vw, 64px) 30px;
 }
 
 .trust-strip {
@@ -333,11 +276,6 @@ footer p {
     display: none;
   }
 
-  .workspace-intro {
-    grid-template-columns: 1fr;
-    gap: 20px;
-  }
-
   .trust-strip {
     grid-template-columns: 1fr 1fr;
   }
@@ -372,10 +310,6 @@ footer p {
 
   .workspace {
     padding-top: 30px;
-  }
-
-  .workspace-intro h1 {
-    font-size: clamp(39px, 13vw, 58px);
   }
 
   .trust-strip {

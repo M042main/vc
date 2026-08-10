@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Camera, Code2, Paintbrush, ShieldCheck, Sparkles } from "lucide-react";
+import { Camera, Code2, Paintbrush, ShieldCheck } from "lucide-react";
 import { CharacterCreator } from "./components/CharacterCreator";
 import { VrmStudio } from "./components/VrmStudio";
 
@@ -60,24 +60,6 @@ export default function Home() {
       </header>
 
       <section className="workspace" id="top">
-        <div className="workspace-intro">
-          <div>
-            <span className="eyebrow">
-              <Sparkles size={14} aria-hidden="true" />
-              BROWSER-ONLY CHARACTER LAB
-            </span>
-            <h1>
-              몸을 움직이고,
-              <br />
-              <em>캐릭터를 남겨보세요.</em>
-            </h1>
-          </div>
-          <p>
-            VRM을 올리거나 직접 그린 캐릭터를 보내면 카메라 움직임을
-            따라갑니다. 마음에 드는 순간, 전신만 투명 PNG로 저장하세요.
-          </p>
-        </div>
-
         {mode === "studio" ? (
           <VrmStudio artwork={characterArtwork} />
         ) : (

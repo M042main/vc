@@ -20,7 +20,7 @@ import styles from "./CharacterCreator.module.css";
 
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 760;
-const MAX_HISTORY = 28;
+const MAX_HISTORY = 14;
 
 type CharacterSide = "front" | "back";
 type DrawingTool = "pencil" | "eraser";
@@ -266,7 +266,10 @@ export function CharacterCreator({
   const [tool, setTool] = useState<DrawingTool>("pencil");
   const [color, setColor] = useState<string>(PALETTE[0]);
   const [brushSize, setBrushSize] = useState<number>(BRUSH_SIZES[1].value);
-  const [historyRevision, setHistoryRevision] = useState(0);
+  const [historyAvailability, setHistoryAvailability] = useState({
+    front: { undo: false, redo: false },
+    back: { undo: false, redo: false },
+  });
   const [clearArmed, setClearArmed] = useState(false);
   const [status, setStatus] = useState(
     "앞면부터 자유롭게 그려 보세요. 선은 실루엣 밖으로 나가지 않아요.",
@@ -341,7 +344,10 @@ export function CharacterCreator({
     history.push(context.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT));
     if (history.length > MAX_HISTORY) history.shift();
     redoHistoryRef.current[whichSide] = [];
-    setHistoryRevision((revision) => revision + 1);
+    setHistoryAvailability((current) => ({
+      ...current,
+      [whichSide]: { undo: history.length > 0, redo: false },
+    }));
   };
 
   const handlePointerDown = (
@@ -435,7 +441,13 @@ export function CharacterCreator({
 
     target.push(context.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT));
     context.putImageData(snapshot, 0, 0);
-    setHistoryRevision((revision) => revision + 1);
+    setHistoryAvailability((current) => ({
+      ...current,
+      [side]: {
+        undo: undoHistoryRef.current[side].length > 0,
+        redo: redoHistoryRef.current[side].length > 0,
+      },
+    }));
     paintVisibleCanvas(side);
     setClearArmed(false);
     setStatus(
@@ -516,9 +528,8 @@ export function CharacterCreator({
     );
   };
 
-  const canUndo = undoHistoryRef.current[side].length > 0;
-  const canRedo = redoHistoryRef.current[side].length > 0;
-  void historyRevision;
+  const canUndo = historyAvailability[side].undo;
+  const canRedo = historyAvailability[side].redo;
 
   return (
     <section className={styles.creator} aria-labelledby="character-creator-title">
@@ -527,8 +538,8 @@ export function CharacterCreator({
         <div>
           <h2 id="character-creator-title">내 손으로 만드는 캐릭터</h2>
           <p>
-            정해진 몸 위에 색과 무늬를 더해 보세요. 가이드 밖의 선은 자동으로
-            잘리고, 앞면과 뒷면은 따로 보관됩니다.
+            정해진 몸 위에 색과 무늬를 더해 보세요. 완성한 그림은 머리·몸통·
+            팔·다리 관절로 나뉘어 카메라 포즈를 따라 움직입니다.
           </p>
         </div>
       </header>

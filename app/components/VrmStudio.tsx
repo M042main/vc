@@ -196,6 +196,9 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
   const paperDollRef = useRef<PaperDollStageHandle | null>(null);
   const trackingRafRef = useRef<number | null>(null);
   const trackingRunningRef = useRef(false);
+  const trackingSessionRef = useRef(0);
+  const paperDollActiveRef = useRef(false);
+  const stageVisibleRef = useRef(true);
   const frameInFlightRef = useRef(false);
   const lastFrameRef = useRef(0);
   const lastStatsRef = useRef(0);
@@ -252,7 +255,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     renderer.toneMappingExposure = 1.1;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setClearAlpha(1);
     mount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -260,7 +263,9 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.enablePan = false;
+    controls.enablePan = true;
+    controls.screenSpacePanning = true;
+    controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
     controls.minDistance = 1;
     controls.maxDistance = 8;
     controls.target.set(0, 0.9, 0);
@@ -270,7 +275,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     const keyLight = new THREE.DirectionalLight(0xfff6df, 3.2);
     keyLight.position.set(3.4, 5, 4.2);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024);
+    keyLight.shadow.mapSize.set(512, 512);
     scene.add(keyLight);
     const rimLight = new THREE.DirectionalLight(0x9684ff, 2.6);
     rimLight.position.set(-4, 2.8, -3);
@@ -311,10 +316,28 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     const observer = new ResizeObserver(resize);
     observer.observe(mount);
 
+    const visibilityObserver = new IntersectionObserver(
+      ([entry]) => {
+        stageVisibleRef.current = entry?.isIntersecting ?? true;
+      },
+      { rootMargin: "120px" },
+    );
+    visibilityObserver.observe(mount);
+
     const clock = new THREE.Clock();
     let raf = 0;
-    const render = () => {
+    let lastRenderAt = 0;
+    const render = (timestamp = 0) => {
       raf = requestAnimationFrame(render);
+      if (
+        document.hidden ||
+        paperDollActiveRef.current ||
+        !stageVisibleRef.current ||
+        timestamp - lastRenderAt < 33
+      ) {
+        return;
+      }
+      lastRenderAt = timestamp;
       const delta = Math.min(clock.getDelta(), 0.05);
       const elapsed = clock.elapsedTime;
 
@@ -338,6 +361,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     return () => {
       cancelAnimationFrame(raf);
       observer.disconnect();
+      visibilityObserver.disconnect();
       controls.dispose();
       if (vrmRef.current) disposeVrm(vrmRef.current);
       mannequin.traverse((child) => {
@@ -373,7 +397,12 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     }
   }, [artworkReady, modelReady]);
 
+  useEffect(() => {
+    paperDollActiveRef.current = paperDollActive;
+  }, [paperDollActive]);
+
   const stopTracking = useCallback(() => {
+    trackingSessionRef.current += 1;
     trackingRunningRef.current = false;
     frameInFlightRef.current = false;
     if (trackingRafRef.current !== null) {
@@ -469,6 +498,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       if (
         !video ||
         !worker ||
+        !stageVisibleRef.current ||
         video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
         frameInFlightRef.current ||
         timestamp - lastFrameRef.current < 66
@@ -480,13 +510,13 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       lastFrameRef.current = timestamp;
       try {
         const bitmap = await createImageBitmap(video, {
-          resizeWidth: 640,
-          resizeHeight: 360,
+          resizeWidth: 480,
+          resizeHeight: 270,
           resizeQuality: "low",
         });
-        if (!trackingRunningRef.current || !workerRef.current) {
+        if (!trackingRunningRef.current || workerRef.current !== worker) {
           bitmap.close();
-          frameInFlightRef.current = false;
+          if (workerRef.current === worker) frameInFlightRef.current = false;
           return;
         }
         worker.postMessage(
@@ -514,21 +544,36 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
 
     setError(null);
     setTrackingState("loading");
+    const session = ++trackingSessionRef.current;
+    let sessionStream: MediaStream | null = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+          aspectRatio: { ideal: 16 / 9 },
+          frameRate: { ideal: 24, max: 30 },
         },
       });
+      sessionStream = stream;
+      if (trackingSessionRef.current !== session) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
 
       const video = videoRef.current;
       if (!video) throw new Error("카메라 미리보기를 준비하지 못했습니다.");
       video.srcObject = stream;
       await video.play();
+      if (trackingSessionRef.current !== session) {
+        stream.getTracks().forEach((track) => track.stop());
+        if (video.srcObject === stream) video.srcObject = null;
+        if (streamRef.current === stream) streamRef.current = null;
+        return;
+      }
 
       const worker = createHolisticTrackingWorker();
       workerRef.current = worker;
@@ -598,8 +643,12 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
 
       worker.postMessage({ type: "INIT" });
     } catch (cameraError) {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
+      sessionStream?.getTracks().forEach((track) => track.stop());
+      if (videoRef.current?.srcObject === sessionStream) {
+        videoRef.current.srcObject = null;
+      }
+      if (streamRef.current === sessionStream) streamRef.current = null;
+      if (trackingSessionRef.current !== session) return;
       setTrackingState("error");
       setError(formatCameraError(cameraError));
     }
@@ -654,6 +703,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           width: 1600,
           height: 2000,
           margin: 0.14,
+          samples: 2,
         });
         blob = result.blob;
       }
@@ -794,6 +844,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       <div
         className={styles.stage}
         data-dragging={isDragging}
+        style={paperDollActive ? { background: stageColor } : undefined}
         onDragEnter={(event) => {
           event.preventDefault();
           setIsDragging(true);
@@ -808,7 +859,13 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           handleModelFile(event.dataTransfer.files?.[0]);
         }}
       >
-        <div ref={viewportRef} className={styles.viewport} aria-label="3D 캐릭터 미리보기" />
+        <div
+          ref={viewportRef}
+          className={styles.viewport}
+          data-hidden={paperDollActive}
+          aria-hidden={paperDollActive}
+          aria-label="3D 캐릭터 미리보기"
+        />
         {paperDollActive && artwork ? (
           <PaperDollStage
             ref={paperDollRef}
@@ -822,7 +879,9 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             {trackingRunning ? "LIVE TRACKING" : "PREVIEW MODE"}
           </span>
           <span className={styles.stageBadge}>
-            {paperDollActive ? "2D PAPER DOLL" : "DRAG · ZOOM · ROTATE"}
+            {paperDollActive
+              ? "2D JOINT PUPPET · MIDDLE PAN"
+              : "ROTATE · MIDDLE PAN · WHEEL ZOOM"}
           </span>
         </div>
 
@@ -852,22 +911,14 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           </div>
         ) : null}
 
-        <video ref={videoRef} playsInline muted className={styles.hiddenInput} />
-        {trackingState === "loading" || trackingRunning ? (
-          <div className={styles.cameraPreview}>
-            <video
-              playsInline
-              muted
-              ref={(node) => {
-                if (node && streamRef.current && node.srcObject !== streamRef.current) {
-                  node.srcObject = streamRef.current;
-                  void node.play();
-                }
-              }}
-            />
-            <span>{trackingRunning ? "ON DEVICE" : "LOADING"}</span>
-          </div>
-        ) : null}
+        <div
+          className={styles.cameraPreview}
+          data-visible={trackingState === "loading" || trackingRunning}
+          aria-hidden={trackingState !== "loading" && !trackingRunning}
+        >
+          <video ref={videoRef} playsInline muted />
+          <span>{trackingRunning ? "ON DEVICE" : "LOADING"}</span>
+        </div>
 
         <div className={styles.stageTools} aria-label="캐릭터 화면 도구">
           <button

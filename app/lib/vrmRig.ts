@@ -332,6 +332,10 @@ export async function loadVrm(
     throw error;
   }
 
+  // Reduce duplicate skinning work before the avatar enters the live render
+  // loop. These utilities preserve the humanoid rig and expressions.
+  VRMUtils.removeUnnecessaryVertices(vrm.scene);
+  VRMUtils.combineSkeletons(vrm.scene);
   VRMUtils.rotateVRM0(vrm);
   vrm.scene.updateMatrixWorld(true);
 
