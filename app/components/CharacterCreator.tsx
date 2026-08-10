@@ -128,35 +128,60 @@ function drawWorkspace(context: CanvasRenderingContext2D) {
 
 function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
   const silhouette = createSilhouettePath();
+  const joints = {
+    head: { x: 300, y: 111 },
+    neck: { x: 300, y: 202 },
+    leftShoulder: { x: 221, y: 238 },
+    leftElbow: { x: 202, y: 350 },
+    leftWrist: { x: 182, y: 442 },
+    rightShoulder: { x: 379, y: 238 },
+    rightElbow: { x: 398, y: 350 },
+    rightWrist: { x: 418, y: 442 },
+    pelvis: { x: 300, y: 470 },
+    leftHip: { x: 268, y: 470 },
+    leftKnee: { x: 236, y: 572 },
+    leftAnkle: { x: 226, y: 704 },
+    rightHip: { x: 332, y: 470 },
+    rightKnee: { x: 364, y: 572 },
+    rightAnkle: { x: 374, y: 704 },
+  } as const;
+  const bones = [
+    [joints.head, joints.neck],
+    [joints.neck, joints.leftShoulder],
+    [joints.neck, joints.rightShoulder],
+    [joints.leftShoulder, joints.leftElbow],
+    [joints.leftElbow, joints.leftWrist],
+    [joints.rightShoulder, joints.rightElbow],
+    [joints.rightElbow, joints.rightWrist],
+    [joints.neck, joints.pelvis],
+    [joints.leftHip, joints.rightHip],
+    [joints.leftHip, joints.leftKnee],
+    [joints.leftKnee, joints.leftAnkle],
+    [joints.rightHip, joints.rightKnee],
+    [joints.rightKnee, joints.rightAnkle],
+  ] as const;
 
   context.save();
-  context.strokeStyle = "rgba(53, 58, 66, 0.62)";
-  context.lineWidth = 2.2;
-  context.setLineDash([]);
+  context.strokeStyle = "rgba(53, 58, 66, 0.48)";
+  context.lineWidth = 2;
+  context.setLineDash([8, 7]);
   context.stroke(silhouette);
-  context.clip(silhouette);
 
-  context.strokeStyle = "rgba(58, 63, 73, 0.24)";
-  context.lineWidth = 1.4;
-  context.setLineDash([7, 8]);
-
-  context.beginPath();
-  context.moveTo(300, 37);
-  context.lineTo(300, 705);
-  context.stroke();
-
-  context.beginPath();
-  context.moveTo(226, 273);
-  context.bezierCurveTo(268, 292, 332, 292, 374, 273);
-  context.stroke();
-
-  context.beginPath();
-  context.moveTo(226, 445);
-  context.bezierCurveTo(266, 430, 334, 430, 374, 445);
-  context.stroke();
-
+  context.strokeStyle = "rgba(77, 111, 230, 0.58)";
+  context.lineWidth = 3.2;
+  context.lineCap = "round";
+  context.lineJoin = "round";
   context.setLineDash([]);
+  context.beginPath();
+  for (const [from, to] of bones) {
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+  }
+  context.stroke();
+
   if (side === "front") {
+    context.strokeStyle = "rgba(53, 58, 66, 0.34)";
+    context.lineWidth = 1.5;
     context.beginPath();
     context.ellipse(300, 111, 58, 41, 0, 0.1 * Math.PI, 0.9 * Math.PI);
     context.stroke();
@@ -173,6 +198,8 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
     context.quadraticCurveTo(300, 153, 313, 146);
     context.stroke();
   } else {
+    context.strokeStyle = "rgba(53, 58, 66, 0.34)";
+    context.lineWidth = 1.5;
     context.beginPath();
     context.arc(300, 115, 58, 1.12 * Math.PI, 1.88 * Math.PI);
     context.stroke();
@@ -185,17 +212,14 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
     context.stroke();
   }
 
-  const joints = [
-    [202, 339],
-    [398, 339],
-    [236, 558],
-    [364, 558],
-  ];
-  context.fillStyle = "rgba(58, 63, 73, 0.18)";
-  for (const [x, y] of joints) {
+  context.fillStyle = "rgba(255, 255, 255, 0.9)";
+  context.strokeStyle = "rgba(77, 111, 230, 0.82)";
+  context.lineWidth = 2.4;
+  for (const joint of Object.values(joints)) {
     context.beginPath();
-    context.arc(x, y, 4, 0, Math.PI * 2);
+    context.arc(joint.x, joint.y, joint === joints.head ? 7 : 6, 0, Math.PI * 2);
     context.fill();
+    context.stroke();
   }
 
   context.restore();
@@ -214,7 +238,6 @@ function drawStroke(
   const distance = Math.hypot(to.x - from.x, to.y - from.y);
 
   context.save();
-  context.clip(createSilhouettePath());
   context.globalCompositeOperation =
     tool === "eraser" ? "destination-out" : "source-over";
   context.globalAlpha = tool === "eraser" ? 1 : 0.96;
@@ -273,7 +296,7 @@ export function CharacterCreator({
   });
   const [clearArmed, setClearArmed] = useState(false);
   const [status, setStatus] = useState(
-    "앞면부터 자유롭게 그려 보세요. 선은 실루엣 밖으로 나가지 않아요.",
+    "앞면부터 자유롭게 그려 보세요. 몸 밖의 소매·치마·머리카락도 함께 움직여요.",
   );
 
   const paintVisibleCanvas = useCallback((whichSide: CharacterSide) => {
@@ -291,8 +314,8 @@ export function CharacterCreator({
     context.clip(createSilhouettePath());
     context.fillStyle = "#FFFCF5";
     context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    context.drawImage(drawingLayer, 0, 0);
     context.restore();
+    context.drawImage(drawingLayer, 0, 0);
 
     drawGuide(context, whichSide);
   }, []);
@@ -509,8 +532,8 @@ export function CharacterCreator({
     context.clip(createSilhouettePath());
     context.fillStyle = "#FFFCF5";
     context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    context.drawImage(drawingLayer, 0, 0);
     context.restore();
+    context.drawImage(drawingLayer, 0, 0);
 
     return exportCanvas.toDataURL("image/png");
   };
@@ -551,8 +574,9 @@ export function CharacterCreator({
         <div>
           <h2 id="character-creator-title">내 손으로 만드는 캐릭터</h2>
           <p>
-            포즈 가이드 위에 색과 무늬를 더해 보세요. 완성한 그림은 팔꿈치와
-            무릎이 부드럽게 휘고, 눈과 입도 카메라 표정을 따라 움직입니다.
+            스켈레톤 가이드 위에 몸과 옷을 자유롭게 그려 보세요. 실루엣 밖의
+            소매·치마·머리카락도 가까운 관절을 따라 움직이고, 눈과 입은 카메라
+            표정을 따라갑니다.
           </p>
         </div>
       </header>
@@ -715,7 +739,7 @@ export function CharacterCreator({
             <span aria-hidden="true">✦</span>
             <p>
               얼굴의 눈·입 가이드 위에 그리면 트래킹할 때 깜박임, 미소, 입 벌림이
-              반영돼요. 회색 가이드는 결과물에 저장되지 않습니다.
+              반영돼요. 파란 스켈레톤과 회색 실루엣은 결과물에 저장되지 않습니다.
             </p>
           </div>
         </aside>
@@ -749,9 +773,9 @@ export function CharacterCreator({
           </div>
 
           <p id="character-canvas-help" className={styles.canvasHelp}>
-            마우스나 손가락으로 실루엣 안을 그리세요. 눈과 입은 얼굴 가이드에
-            맞출수록 표정이 자연스럽고, 관절 주변은 선을 끊지 않아도 부드럽게
-            변형됩니다.
+            마우스나 손가락으로 캔버스 어디든 그리세요. 몸 밖의 픽셀도 가장 가까운
+            머리·몸통·팔·다리에 자동으로 붙고, 관절 주변은 선을 끊지 않아도
+            부드럽게 변형됩니다.
           </p>
 
           <div className={styles.status} aria-live="polite">

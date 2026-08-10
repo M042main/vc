@@ -146,6 +146,18 @@ type DollSprites = {
 const ARTWORK_WIDTH = 600;
 const ARTWORK_HEIGHT = 760;
 const ARTWORK_CENTER = { x: ARTWORK_WIDTH / 2, y: ARTWORK_HEIGHT / 2 };
+const ARTWORK_OWNERS = [
+  "head",
+  "leftArm",
+  "rightArm",
+  "leftLeg",
+  "rightLeg",
+  "torso",
+] as const;
+type ArtworkOwner = (typeof ARTWORK_OWNERS)[number];
+type OwnedSprites = Record<ArtworkOwner, RigSprite>;
+const OWNER_SEAM_BLEED_PX = 8;
+let artworkOwnerMapCache: Uint8Array | null = null;
 
 const NEUTRAL_EXPRESSION: DollExpression = {
   blink: 0,
@@ -270,11 +282,12 @@ const DOLL_PARTS: readonly RigPart[] = [
 ];
 
 const LIMB_CHAINS = [
-  { upperBone: "leftUpperArm", lowerBone: "leftLowerArm" },
-  { upperBone: "rightUpperArm", lowerBone: "rightLowerArm" },
-  { upperBone: "leftUpperLeg", lowerBone: "leftLowerLeg" },
-  { upperBone: "rightUpperLeg", lowerBone: "rightLowerLeg" },
+  { owner: "leftArm", upperBone: "leftUpperArm", lowerBone: "leftLowerArm" },
+  { owner: "rightArm", upperBone: "rightUpperArm", lowerBone: "rightLowerArm" },
+  { owner: "leftLeg", upperBone: "leftUpperLeg", lowerBone: "leftLowerLeg" },
+  { owner: "rightLeg", upperBone: "rightUpperLeg", lowerBone: "rightLowerLeg" },
 ] as const satisfies readonly {
+  owner: ArtworkOwner;
   upperBone: BoneName;
   lowerBone: BoneName;
 }[];
@@ -645,85 +658,6 @@ function targetJointsForPose(pose: DollPose): Record<JointName, Point> {
   return target;
 }
 
-function clipPolygon(context: CanvasRenderingContext2D, points: readonly Point[]) {
-  context.beginPath();
-  context.moveTo(points[0].x, points[0].y);
-  for (let index = 1; index < points.length; index += 1) {
-    context.lineTo(points[index].x, points[index].y);
-  }
-  context.closePath();
-  context.clip();
-}
-
-function polygonBounds(points: readonly Point[]) {
-  const xValues = points.map((point) => point.x);
-  const yValues = points.map((point) => point.y);
-  const padding = 2;
-  const minimumX = Math.floor(Math.min(...xValues) - padding);
-  const minimumY = Math.floor(Math.min(...yValues) - padding);
-  const maximumX = Math.ceil(Math.max(...xValues) + padding);
-  const maximumY = Math.ceil(Math.max(...yValues) + padding);
-  return {
-    x: minimumX,
-    y: minimumY,
-    width: maximumX - minimumX,
-    height: maximumY - minimumY,
-  };
-}
-
-function createPolygonSprite(image: HTMLImageElement, points: readonly Point[]): RigSprite {
-  const bounds = polygonBounds(points);
-  const canvas = document.createElement("canvas");
-  canvas.width = bounds.width;
-  canvas.height = bounds.height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("캐릭터 관절 이미지를 준비하지 못했습니다.");
-  context.translate(-bounds.x, -bounds.y);
-  clipPolygon(context, points);
-  context.drawImage(image, 0, 0, ARTWORK_WIDTH, ARTWORK_HEIGHT);
-  return { canvas, x: bounds.x, y: bounds.y };
-}
-
-function createHeadSprite(image: HTMLImageElement): RigSprite {
-  const bounds = { x: 216, y: 6, width: 168, height: 208 };
-  const canvas = document.createElement("canvas");
-  canvas.width = bounds.width;
-  canvas.height = bounds.height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("캐릭터 머리 이미지를 준비하지 못했습니다.");
-  context.translate(-bounds.x, -bounds.y);
-  context.beginPath();
-  context.ellipse(300, 111, 82, 101, 0, 0, Math.PI * 2);
-  context.clip();
-  context.drawImage(image, 0, 0, ARTWORK_WIDTH, ARTWORK_HEIGHT);
-  return { canvas, x: bounds.x, y: bounds.y };
-}
-
-function createCombinedSprite(
-  image: HTMLImageElement,
-  polygons: readonly (readonly Point[])[],
-): RigSprite {
-  const points = polygons.flat();
-  const bounds = polygonBounds(points);
-  const canvas = document.createElement("canvas");
-  canvas.width = bounds.width;
-  canvas.height = bounds.height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("캐릭터 관절 메시를 준비하지 못했습니다.");
-  context.translate(-bounds.x, -bounds.y);
-  context.beginPath();
-  for (const polygon of polygons) {
-    context.moveTo(polygon[0].x, polygon[0].y);
-    for (let index = 1; index < polygon.length; index += 1) {
-      context.lineTo(polygon[index].x, polygon[index].y);
-    }
-    context.closePath();
-  }
-  context.clip();
-  context.drawImage(image, 0, 0, ARTWORK_WIDTH, ARTWORK_HEIGHT);
-  return { canvas, x: bounds.x, y: bounds.y };
-}
-
 function distanceToSegment(point: Point, start: Point, end: Point) {
   const deltaX = end.x - start.x;
   const deltaY = end.y - start.y;
@@ -754,31 +688,235 @@ function pointInPolygon(point: Point, polygon: readonly Point[]) {
   return inside;
 }
 
-function cellTouchesPolygons(
+function distanceToPolygon(point: Point, polygon: readonly Point[]) {
+  let minimum = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < polygon.length; index += 1) {
+    minimum = Math.min(
+      minimum,
+      distanceToSegment(
+        point,
+        polygon[index],
+        polygon[(index + 1) % polygon.length],
+      ),
+    );
+  }
+  return pointInPolygon(point, polygon) ? -minimum : minimum;
+}
+
+function distanceToPolygons(
+  point: Point,
+  polygons: readonly (readonly Point[])[],
+) {
+  let minimum = Number.POSITIVE_INFINITY;
+  for (const polygon of polygons) {
+    minimum = Math.min(minimum, distanceToPolygon(point, polygon));
+  }
+  return minimum;
+}
+
+function distanceToHead(point: Point) {
+  const radiusX = 82;
+  const radiusY = 101;
+  const offsetX = point.x - 300;
+  const offsetY = point.y - 111;
+  const normalized = Math.hypot(offsetX / radiusX, offsetY / radiusY);
+  if (normalized === 0) return -Math.min(radiusX, radiusY);
+  const boundaryScale = 1 / normalized;
+  const boundaryDistance = Math.hypot(
+    offsetX - offsetX * boundaryScale,
+    offsetY - offsetY * boundaryScale,
+  );
+  return normalized < 1 ? -boundaryDistance : boundaryDistance;
+}
+
+const ARTWORK_OWNER_POLYGONS = {
+  leftArm: [
+    getRigPart("leftUpperArm").mask,
+    getRigPart("leftLowerArm").mask,
+  ],
+  rightArm: [
+    getRigPart("rightUpperArm").mask,
+    getRigPart("rightLowerArm").mask,
+  ],
+  leftLeg: [
+    getRigPart("leftUpperLeg").mask,
+    getRigPart("leftLowerLeg").mask,
+  ],
+  rightLeg: [
+    getRigPart("rightUpperLeg").mask,
+    getRigPart("rightLowerLeg").mask,
+  ],
+  torso: [TORSO_MASK],
+} as const satisfies Record<
+  Exclude<ArtworkOwner, "head">,
+  readonly (readonly Point[])[]
+>;
+
+/**
+ * Build a stable nearest-part map once. Each opaque artwork pixel uses this map,
+ * so painted sleeves, skirts, hair, and props outside the body guide survive as
+ * part of the closest animated region instead of being clipped away.
+ */
+function getArtworkOwnerMap() {
+  if (artworkOwnerMapCache) return artworkOwnerMapCache;
+
+  const owners = new Uint8Array(ARTWORK_WIDTH * ARTWORK_HEIGHT);
+  for (let y = 0; y < ARTWORK_HEIGHT; y += 1) {
+    for (let x = 0; x < ARTWORK_WIDTH; x += 1) {
+      const point = { x: x + 0.5, y: y + 0.5 };
+      let bestOwnerIndex = 0;
+      let bestDistance = distanceToHead(point);
+      let secondOwnerIndex = -1;
+      let secondDistance = Number.POSITIVE_INFINITY;
+      for (let index = 1; index < ARTWORK_OWNERS.length; index += 1) {
+        const owner = ARTWORK_OWNERS[index];
+        if (owner === "head") continue;
+        const candidateDistance = distanceToPolygons(
+          point,
+          ARTWORK_OWNER_POLYGONS[owner],
+        );
+        if (candidateDistance < bestDistance - 0.001) {
+          secondDistance = bestDistance;
+          secondOwnerIndex = bestOwnerIndex;
+          bestDistance = candidateDistance;
+          bestOwnerIndex = index;
+        } else if (candidateDistance < secondDistance - 0.001) {
+          secondDistance = candidateDistance;
+          secondOwnerIndex = index;
+        }
+      }
+      let ownerMask = 1 << bestOwnerIndex;
+      if (
+        secondOwnerIndex >= 0 &&
+        secondDistance - bestDistance <= OWNER_SEAM_BLEED_PX
+      ) {
+        ownerMask |= 1 << secondOwnerIndex;
+      }
+      owners[y * ARTWORK_WIDTH + x] = ownerMask;
+    }
+  }
+  artworkOwnerMapCache = owners;
+  return owners;
+}
+
+type MutableBounds = {
+  minimumX: number;
+  minimumY: number;
+  maximumX: number;
+  maximumY: number;
+};
+
+function fallbackBounds(owner: ArtworkOwner) {
+  if (owner === "head") return { x: 216, y: 6, width: 168, height: 208 };
+  const polygons = ARTWORK_OWNER_POLYGONS[owner];
+  const points = polygons.flat();
+  const minimumX = Math.max(0, Math.floor(Math.min(...points.map(({ x }) => x)) - 2));
+  const minimumY = Math.max(0, Math.floor(Math.min(...points.map(({ y }) => y)) - 2));
+  const maximumX = Math.min(
+    ARTWORK_WIDTH,
+    Math.ceil(Math.max(...points.map(({ x }) => x)) + 2),
+  );
+  const maximumY = Math.min(
+    ARTWORK_HEIGHT,
+    Math.ceil(Math.max(...points.map(({ y }) => y)) + 2),
+  );
+  return {
+    x: minimumX,
+    y: minimumY,
+    width: Math.max(1, maximumX - minimumX),
+    height: Math.max(1, maximumY - minimumY),
+  };
+}
+
+function createOwnedSprites(image: HTMLImageElement): OwnedSprites {
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = ARTWORK_WIDTH;
+  sourceCanvas.height = ARTWORK_HEIGHT;
+  const sourceContext = sourceCanvas.getContext("2d", {
+    willReadFrequently: true,
+  });
+  if (!sourceContext) throw new Error("캐릭터 픽셀을 분리하지 못했습니다.");
+  sourceContext.drawImage(image, 0, 0, ARTWORK_WIDTH, ARTWORK_HEIGHT);
+  const source = sourceContext.getImageData(0, 0, ARTWORK_WIDTH, ARTWORK_HEIGHT);
+  const ownerMap = getArtworkOwnerMap();
+  const bounds = ARTWORK_OWNERS.map<MutableBounds>(() => ({
+    minimumX: ARTWORK_WIDTH,
+    minimumY: ARTWORK_HEIGHT,
+    maximumX: -1,
+    maximumY: -1,
+  }));
+
+  for (let pixel = 0; pixel < ownerMap.length; pixel += 1) {
+    if (source.data[pixel * 4 + 3] === 0) continue;
+    const x = pixel % ARTWORK_WIDTH;
+    const y = Math.floor(pixel / ARTWORK_WIDTH);
+    for (let ownerIndex = 0; ownerIndex < ARTWORK_OWNERS.length; ownerIndex += 1) {
+      if ((ownerMap[pixel] & (1 << ownerIndex)) === 0) continue;
+      const ownerBounds = bounds[ownerIndex];
+      ownerBounds.minimumX = Math.min(ownerBounds.minimumX, x);
+      ownerBounds.minimumY = Math.min(ownerBounds.minimumY, y);
+      ownerBounds.maximumX = Math.max(ownerBounds.maximumX, x);
+      ownerBounds.maximumY = Math.max(ownerBounds.maximumY, y);
+    }
+  }
+
+  return Object.fromEntries(
+    ARTWORK_OWNERS.map((owner, ownerIndex) => {
+      const measured = bounds[ownerIndex];
+      const fallback = fallbackBounds(owner);
+      const x = measured.maximumX >= measured.minimumX ? measured.minimumX : fallback.x;
+      const y = measured.maximumY >= measured.minimumY ? measured.minimumY : fallback.y;
+      const width =
+        measured.maximumX >= measured.minimumX
+          ? measured.maximumX - measured.minimumX + 1
+          : fallback.width;
+      const height =
+        measured.maximumY >= measured.minimumY
+          ? measured.maximumY - measured.minimumY + 1
+          : fallback.height;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("캐릭터 파트 이미지를 준비하지 못했습니다.");
+      const pixels = context.createImageData(width, height);
+
+      for (let localY = 0; localY < height; localY += 1) {
+        const sourceY = y + localY;
+        if (sourceY < 0 || sourceY >= ARTWORK_HEIGHT) continue;
+        for (let localX = 0; localX < width; localX += 1) {
+          const sourceX = x + localX;
+          if (sourceX < 0 || sourceX >= ARTWORK_WIDTH) continue;
+          const sourcePixel = sourceY * ARTWORK_WIDTH + sourceX;
+          if ((ownerMap[sourcePixel] & (1 << ownerIndex)) === 0) continue;
+          const sourceOffset = sourcePixel * 4;
+          const targetOffset = (localY * width + localX) * 4;
+          pixels.data[targetOffset] = source.data[sourceOffset];
+          pixels.data[targetOffset + 1] = source.data[sourceOffset + 1];
+          pixels.data[targetOffset + 2] = source.data[sourceOffset + 2];
+          pixels.data[targetOffset + 3] = source.data[sourceOffset + 3];
+        }
+      }
+      context.putImageData(pixels, 0, 0);
+      return [owner, { canvas, x, y } satisfies RigSprite] as const;
+    }),
+  ) as OwnedSprites;
+}
+
+function cellHasOpaquePixel(
+  pixels: Uint8ClampedArray,
+  canvasWidth: number,
   left: number,
   top: number,
   right: number,
   bottom: number,
-  polygons: readonly (readonly Point[])[],
 ) {
-  const samples = [
-    { x: left, y: top },
-    { x: right, y: top },
-    { x: left, y: bottom },
-    { x: right, y: bottom },
-    { x: (left + right) / 2, y: (top + bottom) / 2 },
-  ];
-  return polygons.some(
-    (polygon) =>
-      samples.some((point) => pointInPolygon(point, polygon)) ||
-      polygon.some(
-        (point) =>
-          point.x >= left &&
-          point.x <= right &&
-          point.y >= top &&
-          point.y <= bottom,
-      ),
-  );
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      if (pixels[(y * canvasWidth + x) * 4 + 3] > 0) return true;
+    }
+  }
+  return false;
 }
 
 function createMeshVertex(
@@ -805,30 +943,45 @@ function createMeshVertex(
 }
 
 function createLimbMesh(
-  image: HTMLImageElement,
+  sprite: RigSprite,
   upperBone: BoneName,
   lowerBone: BoneName,
 ): LimbMesh {
   const upperPart = getRigPart(upperBone);
   const lowerPart = getRigPart(lowerBone);
-  const sprite = createCombinedSprite(image, [upperPart.mask, lowerPart.mask]);
   const triangles: MeshTriangle[] = [];
+  const spriteContext = sprite.canvas.getContext("2d", {
+    willReadFrequently: true,
+  });
+  if (!spriteContext) throw new Error("캐릭터 관절 메시를 준비하지 못했습니다.");
+  const spritePixels = spriteContext.getImageData(
+    0,
+    0,
+    sprite.canvas.width,
+    sprite.canvas.height,
+  ).data;
   // A moderately coarse mesh keeps elbows and knees soft without turning each
   // 15 fps tracking update into hundreds of tiny high-cost canvas operations.
   const cell = 32;
 
-  for (let y = sprite.y; y < sprite.y + sprite.canvas.height; y += cell) {
-    for (let x = sprite.x; x < sprite.x + sprite.canvas.width; x += cell) {
-      const right = Math.min(x + cell, sprite.x + sprite.canvas.width);
-      const bottom = Math.min(y + cell, sprite.y + sprite.canvas.height);
+  for (let localY = 0; localY < sprite.canvas.height; localY += cell) {
+    for (let localX = 0; localX < sprite.canvas.width; localX += cell) {
+      const localRight = Math.min(localX + cell, sprite.canvas.width);
+      const localBottom = Math.min(localY + cell, sprite.canvas.height);
       if (
-        !cellTouchesPolygons(x, y, right, bottom, [
-          upperPart.mask,
-          lowerPart.mask,
-        ])
-      ) {
-        continue;
-      }
+        !cellHasOpaquePixel(
+          spritePixels,
+          sprite.canvas.width,
+          localX,
+          localY,
+          localRight,
+          localBottom,
+        )
+      ) continue;
+      const x = sprite.x + localX;
+      const y = sprite.y + localY;
+      const right = sprite.x + localRight;
+      const bottom = sprite.y + localBottom;
       const topLeft = createMeshVertex({ x, y }, upperPart, lowerPart);
       const topRight = createMeshVertex({ x: right, y }, upperPart, lowerPart);
       const bottomLeft = createMeshVertex({ x, y: bottom }, upperPart, lowerPart);
@@ -846,12 +999,13 @@ function createLimbMesh(
 }
 
 function createDollSprites(image: HTMLImageElement): DollSprites {
+  const sprites = createOwnedSprites(image);
   return {
-    limbs: LIMB_CHAINS.map(({ upperBone, lowerBone }) =>
-      createLimbMesh(image, upperBone, lowerBone),
+    limbs: LIMB_CHAINS.map(({ owner, upperBone, lowerBone }) =>
+      createLimbMesh(sprites[owner], upperBone, lowerBone),
     ),
-    torso: createPolygonSprite(image, TORSO_MASK),
-    head: createHeadSprite(image),
+    torso: sprites.torso,
+    head: sprites.head,
   };
 }
 
@@ -1021,8 +1175,8 @@ function drawHead(
   context.rotate(rotation);
   context.translate(-neck.x, -neck.y);
 
-  const columns = 7;
-  const rows = 9;
+  const columns = Math.max(1, Math.min(16, Math.ceil(sprite.canvas.width / 24)));
+  const rows = Math.max(1, Math.min(20, Math.ceil(sprite.canvas.height / 24)));
   const warp = (local: Point): Point => {
     const global = { x: sprite.x + local.x, y: sprite.y + local.y };
     const eyeWarp = (centerX: number, blink: number) => {
@@ -1057,9 +1211,6 @@ function drawHead(
       const right = ((column + 1) / columns) * sprite.canvas.width;
       const top = (row / rows) * sprite.canvas.height;
       const bottom = ((row + 1) / rows) * sprite.canvas.height;
-      const normalizedX = (sprite.x + (left + right) / 2 - 300) / 88;
-      const normalizedY = (sprite.y + (top + bottom) / 2 - 111) / 108;
-      if (normalizedX * normalizedX + normalizedY * normalizedY > 1.28) continue;
       const a = { x: left, y: top };
       const b = { x: right, y: top };
       const c = { x: right, y: bottom };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Code2, Paintbrush, ShieldCheck } from "lucide-react";
+import { Camera, Code2, Paintbrush } from "lucide-react";
 import { CharacterCreator } from "./components/CharacterCreator";
 import { VrmStudio } from "./components/VrmStudio";
 import { PaperDollCharacterStore } from "./lib/paperDollCharacterStore";
@@ -124,39 +124,6 @@ export default function Home() {
         ) : (
           <CharacterCreator onSendToStudio={handleSendToStudio} />
         )}
-      </section>
-
-      <section className="trust-strip" aria-label="서비스 특징">
-        <div>
-          <span className="trust-icon">
-            <ShieldCheck size={20} aria-hidden="true" />
-          </span>
-          <p>
-            <strong>영상은 기기 안에서만</strong>
-            카메라 프레임은 서버에 업로드하지 않습니다.
-          </p>
-        </div>
-        <div>
-          <span className="trust-number">01</span>
-          <p>
-            <strong>캐릭터 준비</strong>
-            VRM 또는 직접 그린 도안
-          </p>
-        </div>
-        <div>
-          <span className="trust-number">02</span>
-          <p>
-            <strong>카메라 트래킹</strong>
-            얼굴·상체·손·다리 인식
-          </p>
-        </div>
-        <div>
-          <span className="trust-number">03</span>
-          <p>
-            <strong>전신 PNG 저장</strong>
-            포즈 또는 애니메이션으로 저장
-          </p>
-        </div>
       </section>
 
       <footer>

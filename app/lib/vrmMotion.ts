@@ -90,6 +90,11 @@ type BoneSnapshot = {
 
 const PI = Math.PI;
 const TWO_PI = Math.PI * 2;
+// Normalized VRM arms start in a T-pose: left points toward -X and right
+// toward +X. Rotating left around +Z and right around -Z therefore lowers
+// both arms toward -Y. A small X rotation then produces the walking swing.
+const WALK_ARM_DROP_RADIANS = 1.22;
+const WALK_ARM_SWING_RADIANS = 0.26;
 
 export const VRM_MOTION_PRESETS: Readonly<
   Record<VrmMotionPresetId, VrmMotionPreset>
@@ -229,9 +234,17 @@ function sampleWalk(progress: number): VrmMotionPose {
       [VRMHumanBoneName.Spine]: [0.035, swing * 0.025, swing * 0.035],
       [VRMHumanBoneName.Chest]: [-0.025, -swing * 0.035, -swing * 0.03],
       [VRMHumanBoneName.Head]: [0, swing * 0.025, -swing * 0.018],
-      [VRMHumanBoneName.LeftUpperArm]: [-swing * 0.42, 0, -1.08],
+      [VRMHumanBoneName.LeftUpperArm]: [
+        -swing * WALK_ARM_SWING_RADIANS,
+        0,
+        WALK_ARM_DROP_RADIANS,
+      ],
       [VRMHumanBoneName.LeftLowerArm]: [-0.08 - rightLift * 0.24, 0, -0.12],
-      [VRMHumanBoneName.RightUpperArm]: [swing * 0.42, 0, 1.08],
+      [VRMHumanBoneName.RightUpperArm]: [
+        swing * WALK_ARM_SWING_RADIANS,
+        0,
+        -WALK_ARM_DROP_RADIANS,
+      ],
       [VRMHumanBoneName.RightLowerArm]: [-0.08 - leftLift * 0.24, 0, 0.12],
       [VRMHumanBoneName.LeftUpperLeg]: [swing * 0.5, 0, 0],
       [VRMHumanBoneName.LeftLowerLeg]: [leftLift * 0.62, 0, 0],

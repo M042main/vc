@@ -35,6 +35,7 @@ test("server-renders the Motion Ink studio", async () => {
   assert.match(html, /트래킹 스튜디오/);
   assert.match(html, /캐릭터 만들기/);
   assert.match(html, /VRM/);
+  assert.doesNotMatch(html, /trust-strip|서비스 특징|영상은 기기 안에서만/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -51,6 +52,7 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(studio, /captureVrmFullBodyPng/);
   assert.match(studio, /createHolisticTrackingWorker/);
   assert.match(creator, /onSendToStudio/);
+  assert.doesNotMatch(page, /trust-strip|ShieldCheck/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await assert.rejects(
