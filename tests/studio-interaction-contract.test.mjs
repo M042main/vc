@@ -100,12 +100,12 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
   );
   const inputWidth = numericSetting(
     studioSource,
-    /resizeWidth\s*:\s*([A-Za-z_$][\w$]*|\d+(?:\.\d+)?)/,
+    /TRACKING_INPUT_MAX_WIDTH\s*=\s*([A-Za-z_$][\w$]*|\d+(?:\.\d+)?)/,
     "tracking input width",
   );
   const inputHeight = numericSetting(
     studioSource,
-    /resizeHeight\s*:\s*([A-Za-z_$][\w$]*|\d+(?:\.\d+)?)/,
+    /TRACKING_INPUT_MAX_HEIGHT\s*=\s*([A-Za-z_$][\w$]*|\d+(?:\.\d+)?)/,
     "tracking input height",
   );
   const cameraWidth = numericSetting(
@@ -134,12 +134,13 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
     `tracking must be capped near 15 FPS or lower; got ${frameInterval} ms`,
   );
   assert.ok(inputWidth <= 480, `tracking width must be <= 480; got ${inputWidth}`);
-  assert.ok(inputHeight <= 270, `tracking height must be <= 270; got ${inputHeight}`);
+  assert.ok(inputHeight <= 360, `tracking height must be <= 360; got ${inputHeight}`);
   assert.ok(cameraWidth <= 640, `camera width must be <= 640; got ${cameraWidth}`);
   assert.ok(cameraHeight <= 360, `camera height must be <= 360; got ${cameraHeight}`);
   assert.ok(cameraMaxFps <= 30, `camera FPS must be <= 30; got ${cameraMaxFps}`);
   assert.ok(pixelRatioCap <= 1.5, `renderer DPR cap must be <= 1.5; got ${pixelRatioCap}`);
   assert.match(studioSource, /resizeQuality\s*:\s*["']low["']/);
+  assert.match(studioSource, /trackingInputDimensions\(cameraAspectRatioRef\.current\)/);
   assert.match(
     studioSource,
     /frameInFlightRef\.current[\s\S]{0,180}timestamp\s*-\s*lastFrameRef\.current/,
@@ -152,9 +153,14 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
   );
 
   assert.equal(
-    studioSource.match(/<video\b/g)?.length ?? 0,
+    studioSource.match(/<video\b[^>]*ref=\{videoRef\}/g)?.length ?? 0,
     1,
-    "the preview and tracker must share one video element",
+    "the camera preview and tracker must share exactly one camera video element",
+  );
+  assert.match(
+    studioSource,
+    /<video\b[^>]*ref=\{pipVideoRef\}[\s\S]{0,220}aria-hidden=["'{]true/,
+    "the only auxiliary video must be the hidden browser-local PiP source",
   );
   assert.match(studioSource, /trackingSessionRef/);
   assert.match(studioSource, /workerRef\.current\s*!==\s*worker/);

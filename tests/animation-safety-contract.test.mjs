@@ -95,6 +95,47 @@ test("serializes camera startup and preset recording modes", async () => {
   );
 });
 
+test("claims a recording session before awaiting PiP and blocks competing workflows", async () => {
+  const source = await readFile(studioUrl, "utf8");
+  const recording = blockFrom(source, "const recordAnimation", 4_500);
+  const busyIndex = recording.indexOf("recordingBusyRef.current = true");
+  const sessionIndex = recording.indexOf("++recordingSessionRef.current");
+  const pipAwaitIndex = recording.indexOf("await exitStagePictureInPicture()");
+
+  assert.ok(busyIndex >= 0, "recording must synchronously claim an in-flight lock");
+  assert.ok(sessionIndex >= 0, "recording must create a cancellable session token");
+  assert.ok(pipAwaitIndex >= 0, "recording must close PiP before capturing the stage");
+  assert.ok(
+    busyIndex < pipAwaitIndex && sessionIndex < pipAwaitIndex,
+    "the recording lock and session must be established before the first PiP await",
+  );
+  assert.match(
+    recording,
+    /await\s+exitStagePictureInPicture\s*\(\s*\)[\s\S]{0,220}recordingSessionRef\.current\s*!==\s*session/,
+    "an unmount or cancellation during PiP exit must stop recording startup",
+  );
+
+  const cancelRecording = blockFrom(source, "const cancelRecording", 1_000);
+  assert.match(
+    cancelRecording,
+    /recordingSessionRef\.current\s*\+=\s*1[\s\S]{0,120}recordingBusyRef\.current\s*=\s*false/,
+    "recording cleanup must invalidate pending startup and release its lock",
+  );
+
+  for (const [marker, label] of [
+    ["const startTracking", "camera startup"],
+    ["const handleModelFile", "VRM replacement"],
+    ["const enterStagePictureInPicture", "PiP entry"],
+  ]) {
+    const handler = blockFrom(source, marker, 1_500);
+    assert.match(
+      handler,
+      /if\s*\(\s*recordingBusyRef\.current\s*\)\s*(?:return|\{)/,
+      `${label} must reject a recording that is pending before MediaRecorder activation`,
+    );
+  }
+});
+
 test("does not label an unsupported recorder format as WebM", async () => {
   const source = await readFile(studioUrl, "utf8");
   const recording = blockFrom(source, "const recordAnimation", 7_000);
@@ -116,11 +157,25 @@ test("restores recording UI state after failures before recorder activation", as
   const recording = blockFrom(source, "const recordAnimation", 9_000);
   const cleanup = blockFrom(recording, "finally", 2_000);
 
-  assert.ok(
-    /if\s*\(\s*recordingSessionRef\.current\s*===\s*session\s*\)\s*\{[\s\S]{0,700}paperDoll\.pauseAnimation\s*\(\s*\)[\s\S]{0,300}setAnimationPlaying\s*\(\s*false\s*\)[\s\S]{0,300}setIsRecording\s*\(\s*false\s*\)/.test(
-      cleanup,
-    ),
-    "every current-session failure must leave recording mode and pause the preset",
+  const currentSessionCleanup = blockFrom(
+    cleanup,
+    "if (recordingSessionRef.current === session)",
+    900,
+  );
+  assert.match(
+    currentSessionCleanup,
+    /paperDoll\??\.pauseAnimation\s*\(\s*\)/,
+    "paper-doll recording failure must pause its preset",
+  );
+  assert.match(
+    currentSessionCleanup,
+    /(?:vrmMotion\??\.pause|stopVrmAnimation)\s*\(\s*\)/,
+    "VRM recording failure must stop or restore its preset",
+  );
+  assert.match(
+    currentSessionCleanup,
+    /setAnimationPlaying\s*\(\s*false\s*\)[\s\S]{0,300}setIsRecording\s*\(\s*false\s*\)/,
+    "every current-session failure must leave recording mode",
   );
 });
 

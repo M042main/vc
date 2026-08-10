@@ -199,6 +199,10 @@
   padding: 0 7px;
 }
 
+.motionPresetButton {
+  min-height: 44px;
+}
+
 .motionGrid button[data-selected="true"] {
   border-color: #171713;
   background: #dfff45;
@@ -253,6 +257,11 @@
   font: inherit;
   font-size: 9px;
   font-weight: 900;
+}
+
+.speedControl:focus-within {
+  outline: 2px solid #745cff;
+  outline-offset: 2px;
 }
 
 .recordButton {
@@ -542,6 +551,7 @@
 }
 
 .cameraPreview video {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -561,6 +571,16 @@
   letter-spacing: 0.08em;
 }
 
+.pipSourceVideo {
+  position: fixed;
+  top: 0;
+  left: -4px;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .stageTools {
   position: absolute;
   z-index: 5;
@@ -578,11 +598,16 @@
 }
 
 .iconButton {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: transparent;
   color: rgba(255, 255, 255, 0.78);
+}
+
+.iconButton[data-active="true"] {
+  background: #dfff45;
+  color: #171713;
 }
 
 .iconButton:hover:not(:disabled) {
@@ -675,16 +700,23 @@
 
 .swatches {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
 }
 
 .swatch {
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   border: 2px solid transparent;
   border-radius: 50%;
   box-shadow: inset 0 0 0 1px rgba(23, 23, 19, 0.14);
   cursor: pointer;
+}
+
+.swatch[data-chroma="true"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(23, 23, 19, 0.3),
+    0 0 0 2px rgba(0, 255, 0, 0.12);
 }
 
 .swatch[data-selected="true"] {
@@ -707,6 +739,52 @@
 .metric span,
 .metric strong {
   display: block;
+}
+
+.legLockButton {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 8px 11px;
+  border: 1px solid rgba(23, 23, 19, 0.13);
+  border-radius: 12px;
+  background: #f3efe7;
+  color: #3b3933;
+  cursor: pointer;
+  text-align: left;
+}
+
+.legLockButton[data-locked="true"] {
+  border-color: #171713;
+  background: #dfff45;
+  color: #171713;
+  box-shadow: 2px 2px 0 #171713;
+}
+
+.legLockButton span,
+.legLockButton strong,
+.legLockButton small {
+  display: block;
+}
+
+.legLockButton strong {
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.legLockButton small {
+  margin-top: 2px;
+  color: inherit;
+  font-size: 8px;
+  opacity: 0.68;
+}
+
+.legLockButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .metric span {
@@ -745,7 +823,10 @@
   }
 
   .panel:last-child {
-    display: none;
+    display: flex;
+    grid-column: 1 / -1;
+    border-top: 1px solid rgba(23, 23, 19, 0.12);
+    border-left: 0;
   }
 }
 
@@ -769,7 +850,10 @@
   }
 
   .panel:last-child {
-    display: none;
+    display: flex;
+    order: 3;
+    border-top: 1px solid rgba(23, 23, 19, 0.12);
+    border-left: 0;
   }
 
   .stepList {

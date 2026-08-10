@@ -158,6 +158,8 @@ export interface VrmRigOptions {
   hipsPositionScale?: number;
   /** Apply hips translation as well as rotation. Defaults to true. */
   applyHipsPosition?: boolean;
+  /** Apply tracking-driven hips rotation. Disable this while planting the legs. */
+  applyHipsRotation?: boolean;
   /** Solve and apply leg bones. Defaults to true. */
   enableLegs?: boolean;
   /** Maximum eye yaw produced by pupil tracking, in degrees. Defaults to 18. */
@@ -552,6 +554,7 @@ function isEulerLike(value: unknown): value is EulerLike {
 function applyPose(vrm: VRM, pose: TPose, options: Required<VrmRigOptions>, missing: Set<VRMHumanBoneNameValue>): void {
   for (const [bone, solutionKey, dampener] of POSE_BONES) {
     if (!options.enableLegs && (solutionKey.includes("Leg") || solutionKey.includes("Foot"))) continue;
+    if (!options.applyHipsRotation && bone === VRMHumanBoneName.Hips) continue;
     const solution = solutionKey === "Hips" ? pose.Hips.rotation : pose[solutionKey];
     if (!isEulerLike(solution)) continue;
     if (
@@ -651,6 +654,7 @@ function resolveRigOptions(options: VrmRigOptions): Required<VrmRigOptions> {
     expressionLerp: MathUtils.clamp(options.expressionLerp ?? 0.4, 0, 1),
     hipsPositionScale: options.hipsPositionScale ?? 1,
     applyHipsPosition: options.applyHipsPosition ?? true,
+    applyHipsRotation: options.applyHipsRotation ?? true,
     enableLegs: options.enableLegs ?? true,
     maxLookYawDegrees: Math.max(0, options.maxLookYawDegrees ?? 18),
     maxLookPitchDegrees: Math.max(0, options.maxLookPitchDegrees ?? 12),

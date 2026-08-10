@@ -54,6 +54,7 @@ export type PaperDollStageHandle = {
   pauseAnimation: () => void;
   stopAnimation: () => void;
   setAnimationSpeed: (speed: number) => void;
+  setLegsLocked: (locked: boolean) => void;
   getCanvas: () => HTMLCanvasElement | null;
   capturePng: (width?: number, height?: number) => Promise<Blob>;
   resetPose: () => void;
@@ -62,6 +63,7 @@ export type PaperDollStageHandle = {
 
 type PaperDollStageProps = {
   artwork: string;
+  backgroundColor?: string;
   className?: string;
   onAnimationPlayingChange?: (playing: boolean) => void;
 };
@@ -91,6 +93,13 @@ type BoneName =
   | "leftLowerLeg"
   | "rightUpperLeg"
   | "rightLowerLeg";
+
+const LEG_BONES = [
+  "leftUpperLeg",
+  "leftLowerLeg",
+  "rightUpperLeg",
+  "rightLowerLeg",
+] as const satisfies readonly BoneName[];
 
 type DollPose = {
   rotation: number;
@@ -1105,7 +1114,7 @@ function findOpaqueBounds(canvas: HTMLCanvasElement) {
 
 export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStageProps>(
   function PaperDollStage(
-    { artwork, className, onAnimationPlayingChange },
+    { artwork, backgroundColor, className, onAnimationPlayingChange },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null);
@@ -1115,6 +1124,9 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
     const poseRef = useRef<DollPose>(createRestPose());
     const expressionRef = useRef<DollExpression>({ ...NEUTRAL_EXPRESSION });
     const motionPlayerRef = useRef<PaperDollMotionPlayer | null>(null);
+    const lockedLegWorldAnglesRef = useRef<Partial<Record<BoneName, number>> | null>(
+      null,
+    );
     const manualRotationRef = useRef(0);
     const manualPanRef = useRef<Point>({ x: 0, y: 0 });
     const panGestureRef = useRef<{
@@ -1146,6 +1158,10 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
         }
 
         context.clearRect(0, 0, canvas.width, canvas.height);
+        if (!captureSafe && backgroundColor) {
+          context.fillStyle = backgroundColor;
+          context.fillRect(0, 0, canvas.width, canvas.height);
+        }
         context.imageSmoothingEnabled = true;
         context.imageSmoothingQuality = quality;
 
@@ -1183,7 +1199,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
 
         context.restore();
       },
-      [],
+      [backgroundColor],
     );
 
     const redraw = useCallback(() => {
@@ -1253,15 +1269,32 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
       () => ({
         applyPose(landmarks) {
           motionPlayerRef.current?.pause();
-          poseRef.current = blendPose(poseRef.current, poseFromLandmarks(landmarks));
+          const nextPose = poseFromLandmarks(landmarks);
+          const lockedAngles = lockedLegWorldAnglesRef.current;
+          if (lockedAngles) {
+            for (const bone of LEG_BONES) {
+              const worldAngle = lockedAngles[bone];
+              if (worldAngle !== undefined) {
+                nextPose.boneAngles[bone] = wrapAngle(worldAngle - nextPose.rotation);
+              }
+            }
+          }
+          poseRef.current = blendPose(poseRef.current, nextPose);
           redraw();
         },
         applyTracking(poseLandmarks, faceLandmarks) {
           motionPlayerRef.current?.pause();
-          poseRef.current = blendPose(
-            poseRef.current,
-            poseFromLandmarks(poseLandmarks),
-          );
+          const nextPose = poseFromLandmarks(poseLandmarks);
+          const lockedAngles = lockedLegWorldAnglesRef.current;
+          if (lockedAngles) {
+            for (const bone of LEG_BONES) {
+              const worldAngle = lockedAngles[bone];
+              if (worldAngle !== undefined) {
+                nextPose.boneAngles[bone] = wrapAngle(worldAngle - nextPose.rotation);
+              }
+            }
+          }
+          poseRef.current = blendPose(poseRef.current, nextPose);
           expressionRef.current = blendExpression(
             expressionRef.current,
             expressionFromFaceLandmarks(faceLandmarks),
@@ -1289,6 +1322,16 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
         },
         setAnimationSpeed(speed) {
           motionPlayerRef.current?.setPlaybackRate(speed);
+        },
+        setLegsLocked(locked) {
+          if (!locked) {
+            lockedLegWorldAnglesRef.current = null;
+            return;
+          }
+          const pose = poseRef.current;
+          lockedLegWorldAnglesRef.current = Object.fromEntries(
+            LEG_BONES.map((bone) => [bone, wrapAngle(pose.boneAngles[bone] + pose.rotation)]),
+          ) as Partial<Record<BoneName, number>>;
         },
         getCanvas() {
           return canvasRef.current;
