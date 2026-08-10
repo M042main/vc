@@ -27,6 +27,11 @@ import {
   captureVrmFullBodyPng,
   downloadBlob,
 } from "../lib/vrmCapture";
+import { createHolisticTrackingWorker } from "../lib/holisticWorker";
+import {
+  PaperDollStage,
+  type PaperDollStageHandle,
+} from "./PaperDollStage";
 import styles from "./VrmStudio.module.css";
 
 type TrackingState = "idle" | "loading" | "running" | "error";
@@ -187,6 +192,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
   const floorRef = useRef<THREE.Object3D | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  const paperDollRef = useRef<PaperDollStageHandle | null>(null);
   const trackingRafRef = useRef<number | null>(null);
   const trackingRunningRef = useRef(false);
   const frameInFlightRef = useRef(false);
@@ -205,6 +211,17 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  const modelReady = modelState === "ready";
+  const artworkReady = Boolean(artwork);
+  const paperDollActive = artworkReady && !modelReady;
+  const characterReady = modelReady || artworkReady;
+  const trackingRunning = trackingState === "running";
+  const displayModelName = modelReady
+    ? modelName
+    : artworkReady
+      ? "내가 그린 캐릭터"
+      : modelName;
 
   const showToast = useCallback((message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -349,6 +366,12 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     if (sceneRef.current) sceneRef.current.background = new THREE.Color(stageColor);
   }, [stageColor]);
 
+  useEffect(() => {
+    if (mannequinRef.current) {
+      mannequinRef.current.visible = !modelReady && !artworkReady;
+    }
+  }, [artworkReady, modelReady]);
+
   const stopTracking = useCallback(() => {
     trackingRunningRef.current = false;
     frameInFlightRef.current = false;
@@ -478,8 +501,8 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
   }, []);
 
   const startTracking = useCallback(async () => {
-    if (!vrmRef.current) {
-      showToast("먼저 VRM 파일을 올려 주세요.");
+    if (!vrmRef.current && !artwork) {
+      showToast("먼저 VRM을 올리거나 직접 그린 캐릭터를 준비해 주세요.");
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -506,17 +529,16 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       video.srcObject = stream;
       await video.play();
 
-      const worker = new Worker(
-        new URL("../workers/holistic.worker.ts", import.meta.url),
-        { type: "module" },
-      );
+      const worker = createHolisticTrackingWorker();
       workerRef.current = worker;
       trackingRunningRef.current = true;
       frameInFlightRef.current = false;
+      let engineReady = false;
 
       worker.onmessage = (event: MessageEvent<TrackerMessage>) => {
         const message = event.data;
         if (message.type === "READY") {
+          engineReady = true;
           setDelegate(message.delegate);
           setTrackingState("running");
           showToast("카메라 트래킹을 시작했어요.");
@@ -526,6 +548,10 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
 
         if (message.type === "ERROR") {
           frameInFlightRef.current = false;
+          if (!engineReady) {
+            stopTracking();
+            setTrackingState("error");
+          }
           setError(`트래킹 엔진: ${message.message}`);
           return;
         }
@@ -541,6 +567,8 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             leftHandLandmarks: result.leftHandLandmarks?.[0],
             rightHandLandmarks: result.rightHandLandmarks?.[0],
           });
+        } else {
+          paperDollRef.current?.applyPose(message.result.poseLandmarks?.[0]);
         }
 
         if (performance.now() - lastStatsRef.current > 500) {
@@ -551,8 +579,9 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
 
       worker.onerror = () => {
         frameInFlightRef.current = false;
+        stopTracking();
         setTrackingState("error");
-        setError("트래킹 작업을 시작하지 못했습니다. 브라우저를 새로고침해 주세요.");
+        setError("트래킹 엔진을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
       };
 
       worker.postMessage({ type: "INIT" });
@@ -562,44 +591,60 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
       setTrackingState("error");
       setError(formatCameraError(cameraError));
     }
-  }, [runTrackingFrames, showToast]);
+  }, [artwork, runTrackingFrames, showToast, stopTracking]);
 
   const resetView = useCallback(() => {
+    if (paperDollActive) {
+      paperDollRef.current?.resetPose();
+      return;
+    }
     const object = vrmRef.current?.scene ?? mannequinRef.current;
     if (object && cameraRef.current && controlsRef.current) {
       fitObject(object, cameraRef.current, controlsRef.current);
     }
-  }, []);
+  }, [paperDollActive]);
 
   const rotateModel = useCallback((direction: -1 | 1) => {
+    if (paperDollActive) {
+      paperDollRef.current?.rotate(direction);
+      return;
+    }
     const object = vrmRef.current?.scene ?? mannequinRef.current;
     if (object) object.rotateY(direction * 0.28);
-  }, []);
+  }, [paperDollActive]);
 
   const capture = useCallback(async () => {
     const renderer = rendererRef.current;
     const scene = sceneRef.current;
     const vrm = vrmRef.current;
-    if (!renderer || !scene || !vrm) {
-      showToast("저장할 VRM 캐릭터를 먼저 올려 주세요.");
+    if (!paperDollActive && (!renderer || !scene || !vrm)) {
+      showToast("저장할 캐릭터를 먼저 준비해 주세요.");
       return;
     }
 
     setIsCapturing(true);
     setError(null);
     try {
-      const helpers = [gridRef.current, floorRef.current].filter(
-        (value): value is THREE.Object3D => Boolean(value),
-      );
-      const result = await captureVrmFullBodyPng({
-        renderer,
-        scene,
-        vrm,
-        helpers,
-        width: 1600,
-        height: 2000,
-        margin: 0.14,
-      });
+      let blob: Blob;
+      if (paperDollActive) {
+        const paperDoll = paperDollRef.current;
+        if (!paperDoll) throw new Error("직접 그린 캐릭터를 아직 준비하고 있습니다.");
+        blob = await paperDoll.capturePng(1600, 2000);
+      } else {
+        const helpers = [gridRef.current, floorRef.current].filter(
+          (value): value is THREE.Object3D => Boolean(value),
+        );
+        const result = await captureVrmFullBodyPng({
+          renderer: renderer!,
+          scene: scene!,
+          vrm: vrm!,
+          helpers,
+          width: 1600,
+          height: 2000,
+          margin: 0.14,
+        });
+        blob = result.blob;
+      }
       const date = new Date();
       const stamp = [
         date.getFullYear(),
@@ -610,7 +655,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         String(date.getMinutes()).padStart(2, "0"),
         String(date.getSeconds()).padStart(2, "0"),
       ].join("");
-      downloadBlob(result.blob, `${cleanFilename(modelName)}-fullbody-${stamp}.png`);
+      downloadBlob(blob, `${cleanFilename(displayModelName)}-fullbody-${stamp}.png`);
       showToast("캐릭터 전신 PNG를 다운로드 폴더에 저장했어요.");
     } catch (captureError) {
       setError(
@@ -621,36 +666,33 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
     } finally {
       setIsCapturing(false);
     }
-  }, [modelName, showToast]);
-
-  const modelReady = modelState === "ready";
-  const trackingRunning = trackingState === "running";
+  }, [displayModelName, paperDollActive, showToast]);
 
   return (
-    <section className={styles.studio} aria-label="VRM 트래킹 스튜디오">
+    <section className={styles.studio} aria-label="캐릭터 트래킹 스튜디오">
       <aside className={styles.panel} aria-label="시작 단계">
         <div className={styles.panelHeader}>
           <h2>빠른 시작</h2>
-          <span className={styles.statusDot} data-ready={modelReady}>
-            {modelReady ? "준비됨" : "대기 중"}
+          <span className={styles.statusDot} data-ready={characterReady}>
+            {characterReady ? "준비됨" : "대기 중"}
           </span>
         </div>
 
         <div className={styles.stepList}>
           <div
             className={styles.step}
-            data-state={modelReady ? "ready" : "active"}
+            data-state={characterReady ? "ready" : "active"}
           >
             <div className={styles.stepTop}>
-              <span className={styles.stepNumber}>{modelReady ? <Check size={11} /> : "01"}</span>
-              <strong>VRM 올리기</strong>
+              <span className={styles.stepNumber}>{characterReady ? <Check size={11} /> : "01"}</span>
+              <strong>캐릭터 준비</strong>
             </div>
-            <p>내 캐릭터 .vrm 파일을 선택하거나 화면에 끌어 놓으세요.</p>
+            <p>VRM을 올리거나 캐릭터 만들기에서 완성한 도안을 보내세요.</p>
           </div>
           <div
             className={styles.step}
             data-state={
-              trackingRunning ? "ready" : modelReady ? "active" : "waiting"
+              trackingRunning ? "ready" : characterReady ? "active" : "waiting"
             }
           >
             <div className={styles.stepTop}>
@@ -663,7 +705,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           </div>
           <div
             className={styles.step}
-            data-state={trackingRunning ? "active" : modelReady ? "ready" : "waiting"}
+            data-state={trackingRunning ? "active" : characterReady ? "ready" : "waiting"}
           >
             <div className={styles.stepTop}>
               <span className={styles.stepNumber}>03</span>
@@ -700,7 +742,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             className={styles.secondaryButton}
             type="button"
             onClick={trackingRunning ? stopTracking : startTracking}
-            disabled={!modelReady || trackingState === "loading"}
+            disabled={!characterReady || trackingState === "loading" || modelState === "loading"}
           >
             {trackingState === "loading" ? (
               <LoaderCircle size={16} />
@@ -719,7 +761,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             className={styles.captureButton}
             type="button"
             onClick={capture}
-            disabled={!modelReady || isCapturing}
+            disabled={!characterReady || isCapturing || modelState === "loading"}
           >
             {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
             {isCapturing ? "전신 맞추는 중" : "전신 PNG 자동 저장"}
@@ -731,7 +773,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         <div className={styles.privacyNote}>
           <LockKeyhole size={13} aria-hidden="true" />
           <span>
-            카메라 영상과 VRM은 서버로 전송하지 않습니다. 모델 파일은 현재
+            카메라 영상과 캐릭터 파일은 서버로 전송하지 않습니다. 현재
             브라우저 탭 안에서만 사용됩니다.
           </span>
         </div>
@@ -755,15 +797,24 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
         }}
       >
         <div ref={viewportRef} className={styles.viewport} aria-label="3D 캐릭터 미리보기" />
+        {paperDollActive && artwork ? (
+          <PaperDollStage
+            ref={paperDollRef}
+            artwork={artwork}
+            className={styles.paperDollViewport}
+          />
+        ) : null}
 
         <div className={styles.stageBar}>
           <span className={trackingRunning ? styles.liveBadge : styles.stageBadge}>
             {trackingRunning ? "LIVE TRACKING" : "PREVIEW MODE"}
           </span>
-          <span className={styles.stageBadge}>DRAG · ZOOM · ROTATE</span>
+          <span className={styles.stageBadge}>
+            {paperDollActive ? "2D PAPER DOLL" : "DRAG · ZOOM · ROTATE"}
+          </span>
         </div>
 
-        {!modelReady && modelState !== "loading" ? (
+        {!characterReady && modelState !== "loading" ? (
           <div className={styles.emptyState}>
             <span className={styles.dropIcon}>
               <Upload size={24} aria-hidden="true" />
@@ -806,7 +857,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
           </div>
         ) : null}
 
-        <div className={styles.stageTools} aria-label="3D 화면 도구">
+        <div className={styles.stageTools} aria-label="캐릭터 화면 도구">
           <button
             className={styles.iconButton}
             type="button"
@@ -836,7 +887,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             className={styles.iconButton}
             type="button"
             onClick={capture}
-            disabled={!modelReady || isCapturing}
+            disabled={!characterReady || isCapturing || modelState === "loading"}
             aria-label="전신 PNG 저장"
           >
             <Download size={16} />
@@ -859,7 +910,7 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
 
         <div className={styles.modelCard}>
           <div className={styles.modelThumb}>
-            {artwork ? (
+            {paperDollActive && artwork ? (
               // The paper-doll artwork is generated locally by CharacterCreator.
               // eslint-disable-next-line @next/next/no-img-element
               <img src={artwork} alt="직접 그린 캐릭터 도안" />
@@ -868,8 +919,14 @@ export function VrmStudio({ artwork }: { artwork?: string | null }) {
             )}
           </div>
           <div className={styles.modelInfo}>
-            <strong>{modelName}</strong>
-            <span>{modelSize || (artwork ? "내가 그린 도안 · 로컬 저장" : "VRM을 선택해 주세요")}</span>
+            <strong>{displayModelName}</strong>
+            <span>
+              {modelReady
+                ? modelSize
+                : artworkReady
+                  ? "내가 그린 도안 · 트래킹 준비됨"
+                  : "VRM을 선택해 주세요"}
+            </span>
           </div>
         </div>
 

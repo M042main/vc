@@ -49,7 +49,7 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(page, /<VrmStudio/);
   assert.match(page, /<CharacterCreator/);
   assert.match(studio, /captureVrmFullBodyPng/);
-  assert.match(studio, /holistic\.worker/);
+  assert.match(studio, /createHolisticTrackingWorker/);
   assert.match(creator, /onSendToStudio/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 

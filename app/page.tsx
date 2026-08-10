@@ -73,8 +73,8 @@ export default function Home() {
             </h1>
           </div>
           <p>
-            VRM을 올리면 카메라 움직임을 따라갑니다. 마음에 드는 순간,
-            캐릭터 전신만 투명 PNG로 자동 저장하세요.
+            VRM을 올리거나 직접 그린 캐릭터를 보내면 카메라 움직임을
+            따라갑니다. 마음에 드는 순간, 전신만 투명 PNG로 저장하세요.
           </p>
         </div>
 
@@ -98,8 +98,8 @@ export default function Home() {
         <div>
           <span className="trust-number">01</span>
           <p>
-            <strong>VRM 업로드</strong>
-            파일을 놓고 바로 시작
+            <strong>캐릭터 준비</strong>
+            VRM 또는 직접 그린 도안
           </p>
         </div>
         <div>

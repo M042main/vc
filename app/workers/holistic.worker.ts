@@ -32,10 +32,23 @@ function reply(message: WorkerOutput) {
   self.postMessage(message);
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function createLandmarker() {
   if (landmarker) return;
 
-  const fileset = await FilesetResolver.forVisionTasks(WASM_ROOT);
+  let fileset: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
+  try {
+    // This source is bundled as an ES module worker. Selecting the module WASM
+    // loader is essential: the classic loader cannot expose ModuleFactory after
+    // a dynamic import inside a module worker.
+    fileset = await FilesetResolver.forVisionTasks(WASM_ROOT, true);
+  } catch (error) {
+    throw new Error(`MediaPipe WASM 파일을 불러오지 못했습니다: ${errorMessage(error)}`);
+  }
+
   const common = {
     runningMode: "VIDEO" as const,
     minFaceDetectionConfidence: 0.5,
@@ -49,20 +62,42 @@ async function createLandmarker() {
     outputPoseSegmentationMasks: false,
   };
 
-  try {
-    if (typeof OffscreenCanvas === "undefined") throw new Error("No OffscreenCanvas");
-    landmarker = await HolisticLandmarker.createFromOptions(fileset, {
-      ...common,
-      canvas: new OffscreenCanvas(2, 2),
-      baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-    });
-    delegate = "GPU";
-  } catch {
-    landmarker = await HolisticLandmarker.createFromOptions(fileset, {
-      ...common,
-      baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
-    });
-    delegate = "CPU";
+  let gpuError: unknown;
+  if (typeof OffscreenCanvas !== "undefined") {
+    try {
+      landmarker = await HolisticLandmarker.createFromOptions(fileset, {
+        ...common,
+        canvas: new OffscreenCanvas(2, 2),
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+      });
+      delegate = "GPU";
+    } catch (error) {
+      gpuError = error;
+    }
+  } else {
+    gpuError = new Error("OffscreenCanvas를 지원하지 않는 브라우저입니다.");
+  }
+
+  if (!landmarker) {
+    try {
+      // CPU mode deliberately omits a canvas and remains available when WebGL,
+      // OffscreenCanvas, or the GPU delegate cannot initialize.
+      landmarker = await HolisticLandmarker.createFromOptions(fileset, {
+        ...common,
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
+      });
+      delegate = "CPU";
+    } catch (cpuError) {
+      throw new Error(
+        `트래킹 모델 초기화에 실패했습니다. GPU: ${errorMessage(gpuError)} / CPU: ${errorMessage(cpuError)}`,
+      );
+    }
+  }
+
+  if (!landmarker) {
+    // This should be unreachable, but keeps READY from being emitted without a
+    // usable engine if a future MediaPipe release changes its return contract.
+    throw new Error("MediaPipe 트래킹 엔진이 생성되지 않았습니다.");
   }
 
   reply({ type: "READY", delegate });
@@ -77,10 +112,7 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
     } catch (error) {
       reply({
         type: "ERROR",
-        message:
-          error instanceof Error
-            ? error.message
-            : "트래킹 엔진을 준비하지 못했습니다.",
+        message: errorMessage(error) || "트래킹 엔진을 준비하지 못했습니다.",
       });
     }
     return;
@@ -110,8 +142,7 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
   } catch (error) {
     reply({
       type: "ERROR",
-      message:
-        error instanceof Error ? error.message : "프레임 분석에 실패했습니다.",
+      message: errorMessage(error) || "프레임 분석에 실패했습니다.",
     });
   } finally {
     message.bitmap.close();
