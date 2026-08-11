@@ -47,16 +47,32 @@
 }
 
 .profileIdentity > span:last-child {
-  display: grid;
+  display: flex;
+  align-items: center;
   min-width: 0;
-  gap: 1px;
+  gap: 5px;
 }
 
 .profileIdentity small,
 .profileIdentity strong {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.profileIdentity small {
+  flex: 1 1 auto;
+}
+
+.profileIdentity strong {
+  flex: 1 1 auto;
+}
+
+.profileSeparator {
+  flex: 0 0 auto;
+  color: #9a968c;
+  font-size: 10px;
 }
 
 .profileIdentity small {

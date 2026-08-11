@@ -205,8 +205,8 @@ test("accepts only bounded PNG data URLs before Firebase writes", async () => {
   );
 });
 
-test("persists an editable download name in a cookie and exposes gallery actions", async () => {
-  const { ui } = await gallerySources();
+test("persists an editable download name and exposes icon-only gallery actions", async () => {
+  const { firebase, ui } = await gallerySources();
 
   assert.match(ui, /document\.cookie/, "the visitor name must persist in a cookie");
   assert.match(ui, /SameSite=Lax/i, "the name cookie should use SameSite=Lax");
@@ -214,9 +214,12 @@ test("persists an editable download name in a cookie and exposes gallery actions
     /이름\s*(?:입력|수정|저장)|(?:aria-label|<label)[\s\S]{0,100}이름/.test(ui),
     "the saved name must have an accessible edit control",
   );
-  assert.match(ui, /(?:업로드|갤러리에\s*저장)/);
   assert.match(ui, /다운로드/);
-  assert.match(ui, /publishGalleryEntry\s*\(/);
+  assert.match(firebase, /publishGalleryEntry\s*\(/);
+  assert.doesNotMatch(ui, /갤러리에 올리기/);
+  assert.doesNotMatch(ui, /PNG 받기/);
+  assert.doesNotMatch(ui, /현재 캡처를 올리고/);
+  assert.match(ui, /title=\{`\$\{entry\.name\}님의 캐릭터 PNG 다운로드`\}/);
   assert.match(
     ui,
     /\.download\s*=[^;\n]*(?:viewerName|downloaderName|safeFilename\s*\([^)]*name)/,
@@ -246,16 +249,16 @@ test("shows two-step deletion controls only behind the administrator UI gate", a
   );
 });
 
-test("immediately exposes a successful named upload while realtime catches up", async () => {
+test("returns a complete named entry for the page-level automatic uploader", async () => {
   const { firebase, ui } = await gallerySources();
 
   assert.match(firebase, /publishGalleryEntry[\s\S]{0,250}Promise<GalleryEntry>/);
-  assert.match(firebase, /return\s*\{\s*id\s*,\s*\.\.\.record\s*\}/);
   assert.match(
-    ui,
-    /const\s+entry\s*=\s*await\s+publishGalleryEntry[\s\S]{0,500}setEntries\s*\([\s\S]{0,350}entry/,
+    firebase,
+    /return\s*\{\s*id\s*,\s*\.\.\.record\s*,\s*likeCount:\s*0\s*,\s*likeActorKeys:\s*\[\]\s*\}/,
   );
-  assert.match(ui, /\$\{entry\.name\}\s*이름으로 저장했습니다/);
+  assert.doesNotMatch(ui, /function\s+OnlineGallery[\s\S]{0,8000}publishGalleryEntry\s*\(/);
+  assert.match(ui, /pendingCapture\?:/);
 });
 
 test("wires the full-body PNG capture into the mounted online gallery", async () => {

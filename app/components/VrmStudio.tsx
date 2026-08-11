@@ -24,6 +24,7 @@ import {
   Upload,
   Video,
   VideoOff,
+  X,
 } from "lucide-react";
 import type { HolisticLandmarkerResult } from "@mediapipe/tasks-vision";
 import * as THREE from "three";
@@ -291,6 +292,55 @@ function drawStageBackground(
   );
 }
 
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error("배경을 포함한 PNG를 만들지 못했습니다."));
+    }, "image/png");
+  });
+}
+
+async function includeStageBackgroundInCapture(
+  foregroundBlob: Blob,
+  stageColor: string,
+  backgroundImage: HTMLImageElement | null,
+  backgroundFit: StudioBackgroundFit,
+  width = 1600,
+  height = 2000,
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("PNG 합성용 캔버스를 준비하지 못했습니다.");
+
+  if (backgroundImage) {
+    drawStageBackground(
+      canvas,
+      backgroundImage,
+      backgroundFit,
+      stageColor,
+      width,
+      height,
+    );
+  } else {
+    context.fillStyle = stageColor;
+    context.fillRect(0, 0, width, height);
+  }
+
+  const foreground = await createImageBitmap(foregroundBlob);
+  try {
+    context.drawImage(foreground, 0, 0, width, height);
+  } finally {
+    foreground.close();
+  }
+  return canvasToPngBlob(canvas);
+}
+
 function formatCameraError(error: unknown) {
   if (!(error instanceof DOMException)) {
     return "카메라를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -331,7 +381,7 @@ export interface VrmStudioProps {
   activeCreatedCharacterId?: string | null;
   onSelectCreatedCharacter?: (id: string) => void;
   onSelectVrm?: () => void;
-  onCaptureReady?: (capture: VrmStudioCapture) => void;
+  onCaptureReady?: (capture: VrmStudioCapture) => void | Promise<void>;
 }
 
 const MAX_CREATED_CHARACTER_OPTIONS = 3;
@@ -394,6 +444,10 @@ export function VrmStudio({
   const cameraAspectRatioRef = useRef(16 / 9);
   const lastStatsRef = useRef(0);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureBusyRef = useRef(false);
+  const captureDialogRef = useRef<HTMLDivElement>(null);
+  const captureDialogFirstChoiceRef = useRef<HTMLButtonElement>(null);
+  const captureDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
   const recordingSessionRef = useRef(0);
   const recordingBusyRef = useRef(false);
   const activeRecordingRef = useRef<{
@@ -420,6 +474,7 @@ export function VrmStudio({
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
   const [isDragging, setIsDragging] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [captureDialogOpen, setCaptureDialogOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [pipActive, setPipActive] = useState(false);
   const [pipTransitioning, setPipTransitioning] = useState(false);
@@ -498,6 +553,59 @@ export function VrmStudio({
     setToast(message);
     toastTimerRef.current = setTimeout(() => setToast(null), 3200);
   }, []);
+
+  const restoreCaptureDialogFocus = useCallback(() => {
+    const trigger = captureDialogTriggerRef.current;
+    captureDialogTriggerRef.current = null;
+    window.requestAnimationFrame(() => trigger?.focus());
+  }, []);
+
+  const closeCaptureDialog = useCallback(() => {
+    if (captureBusyRef.current) return;
+    setCaptureDialogOpen(false);
+    restoreCaptureDialogFocus();
+  }, [restoreCaptureDialogFocus]);
+
+  const openCaptureDialog = useCallback((trigger: HTMLButtonElement) => {
+    if (captureBusyRef.current) return;
+    captureDialogTriggerRef.current = trigger;
+    setCaptureDialogOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (!captureDialogOpen) return;
+    const frame = window.requestAnimationFrame(() =>
+      captureDialogFirstChoiceRef.current?.focus(),
+    );
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !captureBusyRef.current) {
+        event.preventDefault();
+        closeCaptureDialog();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        captureDialogRef.current?.querySelectorAll<HTMLButtonElement>(
+          "button:not(:disabled)",
+        ) ?? [],
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [captureDialogOpen, closeCaptureDialog]);
 
   const releasePipResources = useCallback(
     (
@@ -1781,7 +1889,8 @@ export function VrmStudio({
     trackingState,
   ]);
 
-  const capture = useCallback(async () => {
+  const capture = useCallback(async (includeBackground: boolean) => {
+    if (captureBusyRef.current) return;
     const renderer = rendererRef.current;
     const scene = sceneRef.current;
     const vrm = vrmRef.current;
@@ -1789,15 +1898,24 @@ export function VrmStudio({
       showToast("저장할 캐릭터를 먼저 준비해 주세요.");
       return;
     }
+    const captureBackground = {
+      color: stageColorRef.current,
+      image: stageBackgroundImageRef.current,
+      fit: stageBackgroundFitRef.current,
+    };
 
+    captureBusyRef.current = true;
+    setCaptureDialogOpen(false);
+    restoreCaptureDialogFocus();
     setIsCapturing(true);
     setError(null);
+    let downloaded = false;
     try {
-      let blob: Blob;
+      let transparentBlob: Blob;
       if (paperDollActive) {
         const paperDoll = paperDollRef.current;
         if (!paperDoll) throw new Error("직접 그린 캐릭터를 아직 준비하고 있습니다.");
-        blob = await paperDoll.capturePng(1600, 2000);
+        transparentBlob = await paperDoll.capturePng(1600, 2000);
       } else {
         const helpers = [gridRef.current, floorRef.current].filter(
           (value): value is THREE.Object3D => Boolean(value),
@@ -1812,8 +1930,16 @@ export function VrmStudio({
           margin: 0.14,
           samples: 2,
         });
-        blob = result.blob;
+        transparentBlob = result.blob;
       }
+      const blob = includeBackground
+        ? await includeStageBackgroundInCapture(
+            transparentBlob,
+            captureBackground.color,
+            captureBackground.image,
+            captureBackground.fit,
+          )
+        : transparentBlob;
       const date = new Date();
       const stamp = [
         date.getFullYear(),
@@ -1824,27 +1950,37 @@ export function VrmStudio({
         String(date.getMinutes()).padStart(2, "0"),
         String(date.getSeconds()).padStart(2, "0"),
       ].join("");
-      const fileName = `${cleanFilename(displayModelName)}-fullbody-${stamp}.png`;
+      const fileName = `${cleanFilename(displayModelName)}-fullbody${
+        includeBackground ? "-background" : ""
+      }-${stamp}.png`;
+      downloadBlob(blob, fileName);
+      downloaded = true;
       if (onCaptureReady) {
         const imageDataUrl = await pngBlobToDataUrl(blob);
-        onCaptureReady({ imageDataUrl, fileName });
+        await onCaptureReady({ imageDataUrl, fileName });
       }
-      downloadBlob(blob, fileName);
-      showToast(
-        onCaptureReady
-          ? "전신 PNG를 저장했고 온라인 갤러리에도 올릴 준비가 됐어요."
-          : "캐릭터 전신 PNG를 다운로드 폴더에 저장했어요.",
-      );
+      showToast("캐릭터 전신 PNG를 저장했어요.");
     } catch (captureError) {
-      setError(
+      const message =
         captureError instanceof Error
           ? captureError.message
-          : "전신 이미지를 저장하지 못했습니다.",
+          : "전신 이미지를 저장하지 못했습니다.";
+      setError(
+        downloaded
+          ? `PNG 다운로드는 완료됐지만 온라인 갤러리 등록에 실패했습니다. ${message}`
+          : message,
       );
     } finally {
+      captureBusyRef.current = false;
       setIsCapturing(false);
     }
-  }, [displayModelName, onCaptureReady, paperDollActive, showToast]);
+  }, [
+    displayModelName,
+    onCaptureReady,
+    paperDollActive,
+    restoreCaptureDialogFocus,
+    showToast,
+  ]);
 
   return (
     <section className={styles.studio} aria-label="캐릭터 트래킹 스튜디오">
@@ -1954,8 +2090,9 @@ export function VrmStudio({
           <button
             className={styles.captureButton}
             type="button"
-            onClick={capture}
+            onClick={(event) => openCaptureDialog(event.currentTarget)}
             disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
+            aria-haspopup="dialog"
           >
             {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
             {isCapturing ? "전신 맞추는 중" : "전신 PNG 자동 저장"}
@@ -2205,9 +2342,10 @@ export function VrmStudio({
           <button
             className={styles.iconButton}
             type="button"
-            onClick={capture}
+            onClick={(event) => openCaptureDialog(event.currentTarget)}
             disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
             aria-label="전신 PNG 저장"
+            aria-haspopup="dialog"
           >
             <Download size={16} />
           </button>
@@ -2407,6 +2545,75 @@ export function VrmStudio({
             : "저장할 때 현재 포즈의 실제 범위를 다시 계산해 머리부터 발끝까지 자동으로 화면 안에 맞춥니다."}
         </p>
       </aside>
+
+      {captureDialogOpen ? (
+        <div className={styles.captureDialogBackdrop}>
+          <div
+            ref={captureDialogRef}
+            className={styles.captureDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="capture-dialog-title"
+            aria-describedby="capture-dialog-description"
+          >
+            <button
+              type="button"
+              className={styles.captureDialogClose}
+              onClick={closeCaptureDialog}
+              aria-label="PNG 저장 창 닫기"
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+            <span className={styles.captureDialogEyebrow}>FULL-BODY PNG</span>
+            <h2 id="capture-dialog-title">배경을 함께 저장할까요?</h2>
+            <p id="capture-dialog-description">
+              현재 포즈의 전신을 자동으로 맞춘 뒤 선택한 방식으로 저장합니다.
+            </p>
+            <div className={styles.captureDialogChoices}>
+              <button
+                ref={captureDialogFirstChoiceRef}
+                type="button"
+                className={styles.captureDialogChoice}
+                onClick={() => void capture(false)}
+                disabled={isCapturing}
+              >
+                <span
+                  className={styles.transparentChoicePreview}
+                  aria-hidden="true"
+                >
+                  <Sparkles size={21} />
+                </span>
+                <span>
+                  <strong>배경 미포함</strong>
+                  <small>캐릭터만 투명 PNG로 저장</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.captureDialogChoice}
+                onClick={() => void capture(true)}
+                disabled={isCapturing}
+              >
+                <span
+                  className={styles.backgroundChoicePreview}
+                  style={{ backgroundColor: stageColor }}
+                  aria-hidden="true"
+                >
+                  <ImageIcon size={21} />
+                </span>
+                <span>
+                  <strong>배경 포함</strong>
+                  <small>
+                    {stageBackgroundImage
+                      ? "현재 사진 배경과 함께 저장"
+                      : "현재 무대 배경색과 함께 저장"}
+                  </small>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

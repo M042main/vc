@@ -32,6 +32,7 @@ import {
 import {
   deleteCharacterSlot,
   loadSavedCharacterSlots,
+  publishGalleryEntry,
   saveCharacterSlot,
 } from "./lib/firebaseGallery";
 import { PaperDollCharacterStore } from "./lib/paperDollCharacterStore";
@@ -67,6 +68,7 @@ const SAVED_CHARACTER_ID = "motion-ink-latest-character-t-pose-v2";
 const LEGACY_GUEST_CHARACTER_OWNER_KEY = `${SAVED_CHARACTER_KEY}:migration-owner`;
 const ADMIN_ID = "m042";
 const ADMIN_SESSION_KEY = "virtual-creator.admin.m042";
+const GALLERY_IMAGE_TARGET_BYTES = Math.floor(5.5 * 1024 * 1024);
 
 type LibraryMutationToken = {
   epoch: number;
@@ -166,6 +168,70 @@ function characterStorageId(profile: VisitorProfile) {
   return profile.guest
     ? `${SAVED_CHARACTER_ID}:${guestCharacterOwnerKey(profile)}`
     : `${SAVED_CHARACTER_ID}:${visitorArtworkKey(profile)}`;
+}
+
+function loadDataUrlImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("갤러리용 PNG를 읽지 못했습니다."));
+    image.src = dataUrl;
+  });
+}
+
+function canvasToPngDataUrl(canvas: HTMLCanvasElement): Promise<string> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("갤러리용 PNG를 만들지 못했습니다."));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result !== "string") {
+          reject(new Error("갤러리용 PNG를 변환하지 못했습니다."));
+          return;
+        }
+        resolve(reader.result);
+      };
+      reader.onerror = () =>
+        reject(new Error("갤러리용 PNG를 변환하지 못했습니다."));
+      reader.readAsDataURL(blob);
+    }, "image/png");
+  });
+}
+
+async function prepareGalleryImageDataUrl(dataUrl: string): Promise<string> {
+  if (dataUrl.length <= GALLERY_IMAGE_TARGET_BYTES) return dataUrl;
+
+  const image = await loadDataUrlImage(dataUrl);
+  const sourceWidth = image.naturalWidth;
+  const sourceHeight = image.naturalHeight;
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error("갤러리용 PNG 크기를 확인하지 못했습니다.");
+  }
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { alpha: true });
+  if (!context) throw new Error("갤러리용 PNG를 처리하지 못했습니다.");
+
+  let scale = Math.min(
+    0.92,
+    Math.sqrt(GALLERY_IMAGE_TARGET_BYTES / dataUrl.length) * 0.92,
+  );
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    canvas.width = Math.max(320, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(400, Math.round(sourceHeight * scale));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const resized = await canvasToPngDataUrl(canvas);
+    if (resized.length <= GALLERY_IMAGE_TARGET_BYTES) return resized;
+    scale *= 0.76;
+  }
+
+  throw new Error(
+    "사진 배경이 너무 복잡해 갤러리용 PNG를 줄이지 못했습니다. 배경 미포함으로 다시 저장해 주세요.",
+  );
 }
 
 export default function Home() {
@@ -623,6 +689,47 @@ export default function Home() {
   };
 
   const profileGateBlocking = !profile && profileReady;
+  const handleCaptureReady = useCallback(
+    async (capture: VrmStudioCapture) => {
+      if (!profile || profile.guest) {
+        setLatestCapture(null);
+        return;
+      }
+
+      const mutationToken = beginLibraryMutation(libraryMutationRef, profile);
+      if (!mutationToken) {
+        throw new Error("다른 저장 작업이 끝난 뒤 다시 시도해 주세요.");
+      }
+      if (!isLibraryMutationCurrent(libraryMutationRef, mutationToken)) {
+        finishLibraryMutation(libraryMutationRef, mutationToken);
+        throw new Error("프로필이 변경되어 갤러리 저장을 취소했습니다.");
+      }
+
+      setCharacterLibraryBusy(true);
+      setLatestCapture(capture);
+      try {
+        const galleryImageDataUrl = await prepareGalleryImageDataUrl(
+          capture.imageDataUrl,
+        );
+        if (!isLibraryMutationCurrent(libraryMutationRef, mutationToken)) {
+          throw new Error("프로필이 변경되어 갤러리 저장을 취소했습니다.");
+        }
+        await publishGalleryEntry({
+          profile,
+          imageDataUrl: galleryImageDataUrl,
+        });
+      } finally {
+        setLatestCapture((current) =>
+          current?.imageDataUrl === capture.imageDataUrl ? null : current,
+        );
+        if (finishLibraryMutation(libraryMutationRef, mutationToken)) {
+          setCharacterLibraryBusy(false);
+        }
+      }
+    },
+    [profile],
+  );
+
   const renderAdminAccessButton = (gateControl = false) => (
     <button
       ref={adminButtonRef}
@@ -635,7 +742,6 @@ export default function Home() {
       aria-label={adminMode ? "m042 관리자 설정 열기" : "관리자 m042 접근"}
     >
       <Settings size={18} aria-hidden="true" />
-      <span>{adminMode ? "m042 관리자" : "관리자"}</span>
     </button>
   );
 
@@ -717,25 +823,27 @@ export default function Home() {
             activeCreatedCharacterId={stageCharacterId}
             onSelectCreatedCharacter={selectCreatedCharacter}
             onSelectVrm={() => setStageCharacterId(null)}
-            onCaptureReady={setLatestCapture}
+            onCaptureReady={handleCaptureReady}
           />
         ) : mode === "creator" ? (
-          <>
-            <SavedCharacterLibrary
-              characters={savedCharacters}
-              activeId={activeCharacterId}
-              busy={characterLibraryBusy}
-              onSelect={selectCreatedCharacter}
-              onCreateNew={createNewCharacter}
-              onDelete={deleteSavedCharacter}
-            />
+          <div className="creator-workspace">
             <CharacterCreator
               initialArtwork={activeCharacterArtwork}
               initialArtworkKey={characterEditorKey}
               disabled={characterLibraryBusy}
               onSendToStudio={handleSendToStudio}
             />
-          </>
+            <div className="creator-library-column">
+              <SavedCharacterLibrary
+                characters={savedCharacters}
+                activeId={activeCharacterId}
+                busy={characterLibraryBusy}
+                onSelect={selectCreatedCharacter}
+                onCreateNew={createNewCharacter}
+                onDelete={deleteSavedCharacter}
+              />
+            </div>
+          </div>
         ) : (
           <Suspense
             fallback={

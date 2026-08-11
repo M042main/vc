@@ -2,8 +2,8 @@
 
 import {
   CircleAlert,
-  CloudUpload,
   Download,
+  Heart,
   Images,
   LoaderCircle,
   Pencil,
@@ -24,9 +24,10 @@ import {
 } from "react";
 import {
   deleteGalleryEntry,
-  publishGalleryEntry,
+  getGalleryLikeActorKey,
   subscribeClassRecords,
   subscribeGalleryEntries,
+  toggleGalleryEntryLike,
   type ClassRecord,
   type GalleryEntry,
 } from "../lib/firebaseGallery";
@@ -52,6 +53,7 @@ export interface OnlineGalleryProps {
   className?: string;
   isAdmin?: boolean;
   profile?: VisitorProfile | null;
+  /** @deprecated Automatic upload is owned by the always-mounted page controller. */
   onUploadComplete?: (entry: GalleryEntry | void) => void;
 }
 
@@ -119,17 +121,10 @@ function dateTimeValue(timestamp: number) {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-function isPngDataUrl(value: string | null | undefined): value is string {
-  return Boolean(value && /^data:image\/png(?:;[^,]*)?,/i.test(value));
-}
-
 export function OnlineGallery({
-  pendingCapture,
-  captureDataUrl: legacyCaptureDataUrl,
   className,
   isAdmin = false,
   profile = null,
-  onUploadComplete,
 }: OnlineGalleryProps) {
   const headingId = useId();
   const nameHeadingId = useId();
@@ -143,8 +138,18 @@ export function OnlineGallery({
   const [nameDraft, setNameDraft] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
   const [nameAction, setNameAction] = useState<NameAction | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [likeActor, setLikeActor] = useState<{
+    owner: string;
+    key: string;
+  } | null>(null);
+  const [likingIds, setLikingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [optimisticLikes, setOptimisticLikes] = useState<
+    Record<string, boolean>
+  >({});
+  const [likeErrors, setLikeErrors] = useState<Record<string, string>>({});
   const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -155,13 +160,40 @@ export function OnlineGallery({
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const objectUrlsRef = useRef(new Set<string>());
   const revokeTimersRef = useRef(new Set<number>());
-  const captureDataUrl = pendingCapture?.imageDataUrl ?? legacyCaptureDataUrl;
-  const captureReady = isPngDataUrl(captureDataUrl);
+  const likeInFlightRef = useRef(new Set<string>());
+  const likeOwner =
+    profile && !profile.guest
+      ? `${profile.classId ?? ""}:${profile.name}`
+      : null;
+  const likeActorKey =
+    likeActor && likeActor.owner === likeOwner ? likeActor.key : null;
 
   useEffect(() => {
     const timer = window.setTimeout(() => setViewerName(readNameCookie()), 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const owner = likeOwner;
+    const timer = window.setTimeout(() => {
+      if (!active || !owner || !profile || profile.guest) return;
+      try {
+        const key = getGalleryLikeActorKey(profile);
+        if (active) setLikeActor({ owner, key });
+      } catch (error) {
+        if (active) {
+          setActionMessage(
+            errorMessage(error, "좋아요 기능을 준비하지 못했습니다."),
+          );
+        }
+      }
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [likeOwner, profile]);
 
   useEffect(() => {
     let active = true;
@@ -183,6 +215,10 @@ export function OnlineGallery({
           onError: (error) => {
             if (!active) return;
             setGalleryLoading(false);
+            if (error instanceof AggregateError) {
+              setActionMessage(error.message);
+              return;
+            }
             setGalleryError(
               errorMessage(error, "온라인 갤러리를 불러오지 못했습니다."),
             );
@@ -298,39 +334,6 @@ export function OnlineGallery({
     [viewerName],
   );
 
-  const uploadCapture = useCallback(
-    async (activeProfile: VisitorProfile) => {
-      if (!isPngDataUrl(captureDataUrl)) {
-        setActionMessage("먼저 현재 캐릭터를 PNG로 캡처해 주세요.");
-        return;
-      }
-      if (isUploading) return;
-      setIsUploading(true);
-      setActionMessage("현재 캡처를 온라인 갤러리에 올리는 중입니다.");
-      try {
-        const entry = await publishGalleryEntry({
-          profile: activeProfile,
-          imageDataUrl: captureDataUrl,
-        });
-        setEntries((currentEntries) => [
-          entry,
-          ...currentEntries.filter((currentEntry) => currentEntry.id !== entry.id),
-        ]);
-        setActionMessage(
-          `${entry.name} 이름으로 저장했습니다. 온라인 갤러리에 바로 표시됩니다.`,
-        );
-        onUploadComplete?.(entry);
-      } catch (error) {
-        setActionMessage(
-          errorMessage(error, "캐릭터를 온라인 갤러리에 올리지 못했습니다."),
-        );
-      } finally {
-        setIsUploading(false);
-      }
-    },
-    [captureDataUrl, isUploading, onUploadComplete],
-  );
-
   const downloadEntry = useCallback(
     async (entry: GalleryEntry, downloaderName: string) => {
       if (downloadingId) return;
@@ -365,22 +368,6 @@ export function OnlineGallery({
     [downloadingId],
   );
 
-  const requestUpload = useCallback(
-    () => {
-      if (!captureReady || isUploading) return;
-      if (!profile) {
-        setActionMessage("먼저 이름과 학급 프로필을 설정해 주세요.");
-        return;
-      }
-      if (profile.guest) {
-        setActionMessage("게스트는 온라인 갤러리에 저장할 수 없습니다.");
-        return;
-      }
-      void uploadCapture(profile);
-    },
-    [captureReady, isUploading, profile, uploadCapture],
-  );
-
   const requestDownload = useCallback(
     (entry: GalleryEntry, event: ReactMouseEvent<HTMLButtonElement>) => {
       const downloaderName = profile?.name || viewerName;
@@ -391,6 +378,87 @@ export function OnlineGallery({
       void downloadEntry(entry, downloaderName);
     },
     [downloadEntry, openNameDialog, profile?.name, viewerName],
+  );
+
+  const requestLike = useCallback(
+    async (entry: GalleryEntry) => {
+      if (!profile) {
+        setActionMessage("좋아요를 누르려면 먼저 학급 프로필을 설정해 주세요.");
+        return;
+      }
+      if (profile.guest) {
+        setActionMessage(
+          "게스트는 로컬 체험만 가능해요. 학급 프로필로 참여하면 좋아요를 남길 수 있습니다.",
+        );
+        return;
+      }
+      if (!likeActorKey) {
+        setActionMessage("좋아요 기능을 준비하고 있습니다. 잠시 후 다시 눌러 주세요.");
+        return;
+      }
+      if (likeInFlightRef.current.has(entry.id)) return;
+
+      const wasLiked = entry.likeActorKeys.includes(likeActorKey);
+      const nextLiked = !wasLiked;
+      likeInFlightRef.current.add(entry.id);
+      setLikingIds((current) => new Set(current).add(entry.id));
+      setOptimisticLikes((current) => ({
+        ...current,
+        [entry.id]: nextLiked,
+      }));
+      setLikeErrors((current) => {
+        const next = { ...current };
+        delete next[entry.id];
+        return next;
+      });
+
+      try {
+        const savedLiked = await toggleGalleryEntryLike({
+          entryId: entry.id,
+          actorKey: likeActorKey,
+          liked: nextLiked,
+        });
+        setEntries((currentEntries) =>
+          currentEntries.map((currentEntry) => {
+            if (currentEntry.id !== entry.id) return currentEntry;
+            const alreadyIncluded =
+              currentEntry.likeActorKeys.includes(likeActorKey);
+            const likeActorKeys = savedLiked
+              ? alreadyIncluded
+                ? currentEntry.likeActorKeys
+                : [...currentEntry.likeActorKeys, likeActorKey].sort()
+              : currentEntry.likeActorKeys.filter(
+                  (actorKey) => actorKey !== likeActorKey,
+                );
+            return {
+              ...currentEntry,
+              likeActorKeys,
+              likeCount: likeActorKeys.length,
+            };
+          }),
+        );
+        setActionMessage(
+          savedLiked ? `${entry.name}님의 캐릭터를 좋아합니다.` : "좋아요를 취소했습니다.",
+        );
+      } catch (error) {
+        const message = errorMessage(error, "좋아요를 저장하지 못했습니다.");
+        setLikeErrors((current) => ({ ...current, [entry.id]: message }));
+        setActionMessage(message);
+      } finally {
+        likeInFlightRef.current.delete(entry.id);
+        setOptimisticLikes((current) => {
+          const next = { ...current };
+          delete next[entry.id];
+          return next;
+        });
+        setLikingIds((current) => {
+          const next = new Set(current);
+          next.delete(entry.id);
+          return next;
+        });
+      }
+    },
+    [likeActorKey, profile],
   );
 
   const requestDelete = useCallback(
@@ -498,10 +566,6 @@ export function OnlineGallery({
             <span aria-hidden="true" /> ONLINE GALLERY · LIVE
           </span>
           <h2 id={headingId}>함께 만든 캐릭터를 둘러보세요</h2>
-          <p>
-            현재 캡처를 올리고, 마음에 드는 캐릭터는 PNG로 내려받을 수
-            있습니다. 목록은 Firebase에서 실시간으로 업데이트됩니다.
-          </p>
         </div>
         <div className={styles.liveCount} aria-label={`갤러리 캐릭터 ${formattedCount}개`}>
           <strong>{formattedCount}</strong>
@@ -510,40 +574,6 @@ export function OnlineGallery({
       </header>
 
       <div className={styles.toolbar}>
-        <div className={styles.capturePanel} data-ready={captureReady}>
-          <div className={styles.capturePreview}>
-            {captureReady ? (
-              // The image is a browser-local PNG Data URL supplied by the studio.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={captureDataUrl} alt="현재 캡처 PNG 미리보기" />
-            ) : (
-              <Images size={24} aria-hidden="true" />
-            )}
-          </div>
-          <div className={styles.captureCopy}>
-            <span>현재 캡처</span>
-            <strong>
-              {captureReady
-                ? pendingCapture?.fileName || "업로드 준비 완료"
-                : "PNG 캡처를 준비해 주세요"}
-            </strong>
-          </div>
-          <button
-            type="button"
-            className={styles.uploadButton}
-            onClick={requestUpload}
-            disabled={!captureReady || isUploading || !profile || profile.guest}
-            aria-label="현재 캡처 PNG를 온라인 갤러리에 업로드"
-          >
-            {isUploading ? (
-              <LoaderCircle className={styles.spinner} size={17} aria-hidden="true" />
-            ) : (
-              <CloudUpload size={17} aria-hidden="true" />
-            )}
-            {isUploading ? "올리는 중" : "갤러리에 올리기"}
-          </button>
-        </div>
-
         <div className={styles.namePanel}>
           <span className={styles.userIcon} aria-hidden="true">
             <UserRound size={18} />
@@ -558,7 +588,7 @@ export function OnlineGallery({
           </div>
           {profile ? (
             <span className={styles.profileState}>
-              {profile.guest ? "클라우드 저장 꺼짐" : "자동 이름 저장"}
+              {profile.guest ? "로컬 체험" : "캡처 자동 저장"}
             </span>
           ) : (
             <button
@@ -575,6 +605,13 @@ export function OnlineGallery({
           )}
         </div>
       </div>
+
+      {profile?.guest ? (
+        <p className={styles.guestNotice} role="note">
+          게스트 체험에서는 캐릭터와 캡처가 이 기기에만 남습니다. 온라인
+          갤러리 업로드와 좋아요는 학급 프로필로 참여할 때 사용할 수 있어요.
+        </p>
+      ) : null}
 
       <div className={styles.galleryFilter}>
         <label htmlFor={`${headingId}-class-filter`}>학급별 보기</label>
@@ -627,7 +664,27 @@ export function OnlineGallery({
           </div>
         ) : (
           <div className={styles.grid} role="list" aria-label="온라인 캐릭터 목록">
-            {visibleEntries.map((entry) => (
+            {visibleEntries.map((entry) => {
+              const serverLiked = Boolean(
+                likeActorKey && entry.likeActorKeys.includes(likeActorKey),
+              );
+              const optimisticLiked = optimisticLikes[entry.id];
+              const displayedLiked = optimisticLiked ?? serverLiked;
+              const displayedLikeCount = Math.max(
+                0,
+                entry.likeCount +
+                  (optimisticLiked === undefined || optimisticLiked === serverLiked
+                    ? 0
+                    : optimisticLiked
+                      ? 1
+                      : -1),
+              );
+              const likeBusy = likingIds.has(entry.id);
+              const likeLabel = `${entry.name}님의 캐릭터 좋아요${
+                displayedLiked ? " 취소" : ""
+              }, 현재 ${displayedLikeCount}개`;
+
+              return (
               <article className={styles.card} role="listitem" key={entry.id}>
                 <div className={styles.cardImage}>
                   {/* Firebase entries contain PNG Data URLs created by this app. */}
@@ -657,7 +714,12 @@ export function OnlineGallery({
                       className={styles.downloadButton}
                       onClick={(event) => requestDownload(entry, event)}
                       disabled={downloadingId !== null || deletingId !== null}
-                      aria-label={`${entry.name}님의 캐릭터 PNG 다운로드`}
+                      aria-label={
+                        downloadingId === entry.id
+                          ? `${entry.name}님의 캐릭터 PNG 준비 중`
+                          : `${entry.name}님의 캐릭터 PNG 다운로드`
+                      }
+                      title={`${entry.name}님의 캐릭터 PNG 다운로드`}
                     >
                       {downloadingId === entry.id ? (
                         <LoaderCircle
@@ -668,7 +730,31 @@ export function OnlineGallery({
                       ) : (
                         <Download size={17} aria-hidden="true" />
                       )}
-                      <span>{downloadingId === entry.id ? "준비 중" : "PNG 받기"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.likeButton}
+                      data-liked={displayedLiked}
+                      onClick={() => void requestLike(entry)}
+                      disabled={likeBusy || deletingId !== null}
+                      aria-label={likeLabel}
+                      aria-pressed={displayedLiked}
+                      title={likeLabel}
+                    >
+                      {likeBusy ? (
+                        <LoaderCircle
+                          className={styles.spinner}
+                          size={17}
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Heart
+                          size={17}
+                          fill={displayedLiked ? "currentColor" : "none"}
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span aria-hidden="true">{displayedLikeCount}</span>
                     </button>
                     {/* 관리자 UI는 실수 방지용이며, 실제 삭제 권한은 동일 출처 서버 경로에서 인증 이메일로 확인합니다. */}
                     {isAdmin ? (
@@ -691,6 +777,11 @@ export function OnlineGallery({
                     ) : null}
                   </div>
                 </div>
+                {likeErrors[entry.id] ? (
+                  <p className={styles.likeError} role="alert">
+                    {likeErrors[entry.id]}
+                  </p>
+                ) : null}
                 {isAdmin && deleteCandidateId === entry.id ? (
                   <div
                     id={`delete-confirm-${entry.id}`}
@@ -736,7 +827,8 @@ export function OnlineGallery({
                   </div>
                 ) : null}
               </article>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

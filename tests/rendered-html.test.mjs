@@ -57,7 +57,8 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(page, /<VrmStudio/);
   assert.match(page, /<CharacterCreator/);
   assert.match(page, /<OnlineGallery/);
-  assert.match(page, /onCaptureReady=\{setLatestCapture\}/);
+  assert.match(page, /onCaptureReady=\{handleCaptureReady\}/);
+  assert.match(page, /handleCaptureReady[\s\S]{0,1200}publishGalleryEntry\s*\(/);
   assert.match(page, /isAdmin=\{adminMode\}/);
   assert.match(page, /ADMIN_ID\s*=\s*"m042"/);
   assert.match(page, /VIRTUAL CREATOR/);
@@ -67,7 +68,8 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(studio, /captureVrmFullBodyPng/);
   assert.match(studio, /createHolisticTrackingWorker/);
   assert.match(creator, /onSendToStudio/);
-  assert.match(gallery, /publishGalleryEntry/);
+  assert.doesNotMatch(gallery, /publishGalleryEntry/);
+  assert.match(firebaseGallery, /publishGalleryEntry/);
   assert.match(gallery, /document\.cookie/);
   assert.match(firebaseGallery, /motion_ink_gallery_a7f3c9/);
   assert.match(packageJson, /"firebase":\s*"11\.6\.1"/);

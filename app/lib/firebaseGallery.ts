@@ -7,6 +7,7 @@ import {
   push,
   query,
   ref,
+  runTransaction,
   set,
   update,
   type DataSnapshot,
@@ -50,6 +51,12 @@ const GALLERY_DELETE_API_PATH = "/api/gallery/delete";
 const GALLERY_CLASSES_API_PATH = "/api/gallery/classes";
 const MAX_CLASS_NAME_LENGTH = 40;
 const CHARACTER_SLOT_PATTERN = /^slot-[1-3]$/u;
+const GALLERY_LIKE_ACTOR_PATTERN = /^like-[0-9a-f]{32}$/u;
+const GALLERY_LIKE_ACTOR_STORAGE_PREFIX =
+  "virtual-creator.gallery-like-actor.v1";
+const MAX_GALLERY_LIKES = 10_000;
+const MAX_GALLERY_LIKE_CHILDREN_INSPECTED = MAX_GALLERY_LIKES * 2;
+const volatileGalleryLikeActors = new Map<string, string>();
 export const MAX_SAVED_CHARACTERS = 3;
 
 export type GalleryEntry = {
@@ -59,9 +66,14 @@ export type GalleryEntry = {
   className: string | null;
   imageDataUrl: string;
   createdAt: number;
+  likeCount: number;
+  likeActorKeys: readonly string[];
 };
 
-type GalleryRecord = Omit<GalleryEntry, "id">;
+type GalleryRecord = Omit<
+  GalleryEntry,
+  "id" | "likeCount" | "likeActorKeys"
+>;
 
 export type ClassRecord = {
   id: string;
@@ -89,6 +101,12 @@ export type GallerySubscription = {
 export type PublishGalleryEntryInput = {
   profile: VisitorProfile;
   imageDataUrl: string;
+};
+
+export type ToggleGalleryEntryLikeInput = {
+  entryId: string;
+  actorKey: string;
+  liked: boolean;
 };
 
 export class GalleryServiceError extends Error {
@@ -230,9 +248,66 @@ function validateCreatedAt(value: unknown): number {
 
 function validateGalleryEntryId(value: unknown): string {
   if (typeof value !== "string" || !FIREBASE_PUSH_KEY_PATTERN.test(value)) {
-    throw new Error("삭제할 갤러리 항목 ID가 올바르지 않습니다.");
+    throw new Error("갤러리 항목 ID가 올바르지 않습니다.");
   }
   return value;
+}
+
+function validateGalleryLikeActorKey(value: unknown): string {
+  if (typeof value !== "string" || !GALLERY_LIKE_ACTOR_PATTERN.test(value)) {
+    throw new Error("좋아요 사용자 키가 올바르지 않습니다.");
+  }
+  return value;
+}
+
+function createGalleryLikeActorKey() {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.getRandomValues) {
+    throw new Error("이 브라우저에서는 안전한 좋아요 사용자 키를 만들 수 없습니다.");
+  }
+  const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+  const encoded = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return validateGalleryLikeActorKey(`like-${encoded}`);
+}
+
+export function getGalleryLikeActorKey(profile: VisitorProfile): string {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) {
+    throw new Error("게스트 체험에서는 온라인 좋아요를 사용할 수 없습니다.");
+  }
+  const profileKey = visitorArtworkKey(activeProfile);
+  const storageKey = `${GALLERY_LIKE_ACTOR_STORAGE_PREFIX}:${profileKey}`;
+
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (stored) return validateGalleryLikeActorKey(stored);
+    } catch {
+      // A stable in-memory key still prevents duplicate clicks in this session.
+    }
+  }
+
+  const volatileActor = volatileGalleryLikeActors.get(profileKey);
+  if (volatileActor) return volatileActor;
+  const actorKey = createGalleryLikeActorKey();
+  volatileGalleryLikeActors.set(profileKey, actorKey);
+
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(storageKey, actorKey);
+      const persisted = window.localStorage.getItem(storageKey);
+      if (persisted) {
+        const persistedActor = validateGalleryLikeActorKey(persisted);
+        volatileGalleryLikeActors.set(profileKey, persistedActor);
+        return persistedActor;
+      }
+    } catch {
+      // Private browsing can deny storage; keep the session-scoped key above.
+    }
+  }
+  return actorKey;
 }
 
 function validateCharacterSlotId(value: unknown): SavedCharacterSlot["id"] {
@@ -272,11 +347,32 @@ function validateRecordSize(record: GalleryRecord) {
   }
 }
 
+function parseGalleryLikeActorKeys(value: unknown): readonly string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const candidate = value as Record<string, unknown>;
+  const actorKeys: string[] = [];
+  let inspected = 0;
+  for (const actorKey in candidate) {
+    if (!Object.prototype.hasOwnProperty.call(candidate, actorKey)) continue;
+    inspected += 1;
+    if (inspected > MAX_GALLERY_LIKE_CHILDREN_INSPECTED) break;
+    if (
+      candidate[actorKey] === true &&
+      GALLERY_LIKE_ACTOR_PATTERN.test(actorKey)
+    ) {
+      actorKeys.push(actorKey);
+      if (actorKeys.length >= MAX_GALLERY_LIKES) break;
+    }
+  }
+  return actorKeys.sort();
+}
+
 function parseGalleryEntry(id: string, value: unknown): GalleryEntry {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("갤러리 레코드 형식이 올바르지 않습니다.");
   }
 
+  const validatedId = validateGalleryEntryId(id);
   const candidate = value as Record<string, unknown>;
   const hasClassMetadata =
     typeof candidate.classId === "string" &&
@@ -290,7 +386,13 @@ function parseGalleryEntry(id: string, value: unknown): GalleryEntry {
     createdAt: validateCreatedAt(candidate.createdAt),
   };
   validateRecordSize(record);
-  return { id, ...record };
+  const likeActorKeys = parseGalleryLikeActorKeys(candidate.likes);
+  return {
+    id: validatedId,
+    ...record,
+    likeCount: likeActorKeys.length,
+    likeActorKeys,
+  };
 }
 
 function entriesFromSnapshot(snapshot: DataSnapshot) {
@@ -428,7 +530,60 @@ export async function publishGalleryEntry({
   const entryRef = push(entriesRef);
   const id = validateGalleryEntryId(entryRef.key);
   await set(entryRef, record);
-  return { id, ...record };
+  return { id, ...record, likeCount: 0, likeActorKeys: [] };
+}
+
+export async function toggleGalleryEntryLike({
+  entryId,
+  actorKey,
+  liked,
+}: ToggleGalleryEntryLikeInput): Promise<boolean> {
+  const id = validateGalleryEntryId(entryId);
+  const validatedActorKey = validateGalleryLikeActorKey(actorKey);
+  const database = getGalleryDatabase();
+  const likeRef = ref(
+    database,
+    `${GALLERY_ENTRIES_PATH}/${id}/likes/${validatedActorKey}`,
+  );
+
+  try {
+    const result = await runTransaction(
+      likeRef,
+      () => (liked ? true : null),
+      { applyLocally: true },
+    );
+    if (!result.committed) {
+      throw new Error("좋아요 변경이 완료되지 않았습니다.");
+    }
+    const entryMarker = await get(
+      ref(database, `${GALLERY_ENTRIES_PATH}/${id}/createdAt`),
+    );
+    if (!entryMarker.exists()) {
+      await set(likeRef, null);
+      throw new GalleryServiceError(
+        "삭제된 캐릭터에는 좋아요를 남길 수 없습니다.",
+        {
+          code: "gallery_entry_missing",
+          retryable: false,
+          status: null,
+        },
+      );
+    }
+    return result.snapshot.val() === true;
+  } catch (error) {
+    if (error instanceof GalleryServiceError) throw error;
+    throw new GalleryServiceError(
+      liked
+        ? "좋아요를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+        : "좋아요 취소를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      {
+        code: "gallery_like_write_failed",
+        retryable: true,
+        status: null,
+        cause: error,
+      },
+    );
+  }
 }
 
 export async function deleteGalleryEntry(id: string): Promise<void> {

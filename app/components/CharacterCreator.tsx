@@ -476,9 +476,9 @@ export function CharacterCreator({
       if (failed) {
         setStatus("저장된 캐릭터를 불러오지 못해 투명 캔버스로 시작했어요.");
       } else if (loadedImage) {
-        setStatus("저장된 T-포즈 캐릭터를 불러왔어요. 그대로 이어 그릴 수 있어요.");
+        setStatus("캐릭터를 불러왔어요.");
       } else {
-        setStatus("새 투명 T-포즈 캔버스를 준비했어요.");
+        setStatus("새 투명 캔버스를 준비했어요.");
       }
     };
 
@@ -933,16 +933,6 @@ export function CharacterCreator({
             </button>
           </div>
 
-          <div className={styles.tipBox}>
-            <span aria-hidden="true">✦</span>
-            <p>
-              팔은 수평 T-포즈를 따라 그리세요. 앞면 얼굴은 주황 점을 기준으로
-              좌우 눈·눈썹, 콧대·코끝·콧방울, 윗입술·아랫입술·양 입꼬리·턱을
-              나눠 그리면 각 표정이 더 정확히 반영돼요.
-              모든 가이드와 체크무늬는 결과물에 저장되지 않습니다.
-            </p>
-          </div>
-
           <div className={styles.panelActions} aria-label="캐릭터 저장">
             <button
               type="button"
@@ -984,9 +974,9 @@ export function CharacterCreator({
           </div>
 
           {side === "front" ? (
-            <p id="character-face-guide-help" className={styles.faceGuideHint} role="note">
-              <strong>얼굴 가이드:</strong> 주황 점을 잇듯 좌우 눈·눈썹을 따로 그리고,
-              코 4지점과 윗입술·아랫입술·양 입꼬리·턱선을 분리해 주세요.
+            <p id="character-face-guide-help" className={styles.srOnly}>
+              얼굴 가이드에는 좌우 눈과 눈썹, 코, 입술, 입꼬리, 턱 기준점이
+              표시됩니다.
             </p>
           ) : null}
 
@@ -1015,12 +1005,11 @@ export function CharacterCreator({
             </span>
           </div>
 
-          <p id="character-canvas-help" className={styles.canvasHelp}>
-            체크무늬는 투명 영역입니다. T-포즈 안팎 어디든 그릴 수 있으며 몸
-            밖의 픽셀도 가장 가까운 머리·몸통·팔·다리에 자동으로 붙습니다.
+          <p id="character-canvas-help" className={styles.srOnly}>
+            투명 캔버스의 T-포즈 안팎 어디든 그릴 수 있으며, 모든 가이드와 체크무늬는 결과물에 저장되지 않습니다.
           </p>
 
-          <div className={styles.status} aria-live="polite">
+          <div className={styles.srOnly} role="status" aria-live="polite">
             {status}
           </div>
 

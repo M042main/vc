@@ -78,7 +78,8 @@ test("stores class metadata while keeping legacy gallery records readable and fi
   assert.match(gallery, /effectiveClassFilter\s*===\s*["']unclassified["']/);
   assert.match(gallery, /!entry\.classId\s*\|\|\s*!activeClassIds\.has\s*\(\s*entry\.classId\s*\)/);
   assert.match(gallery, /visibleEntries\.map\s*\(/);
-  assert.match(gallery, /profile\.guest[\s\S]{0,180}게스트는 온라인 갤러리에 저장할 수 없습니다/);
+  assert.match(gallery, /profile\.guest[\s\S]{0,220}게스트는 로컬 체험만 가능/);
+  assert.match(gallery, /profile\?\.guest[\s\S]{0,320}온라인\s*갤러리 업로드와 좋아요/);
 });
 
 test("uses deterministic class-plus-normalized-name keys and bounded PNG validation for artwork", async () => {

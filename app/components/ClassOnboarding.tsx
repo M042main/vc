@@ -194,6 +194,7 @@ export function VisitorProfileActions({
         </span>
         <span>
           <small>{profile.className}</small>
+          <span className={styles.profileSeparator} aria-hidden="true">·</span>
           <strong>{profile.name}</strong>
         </span>
       </div>

@@ -116,12 +116,11 @@
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   margin-top: 18px;
 }
 
-.capturePanel,
 .namePanel {
   min-width: 0;
   border: 1px solid rgba(23, 23, 19, 0.14);
@@ -129,53 +128,12 @@
   background: rgba(255, 255, 255, 0.78);
 }
 
-.capturePanel {
-  display: grid;
-  grid-template-columns: 62px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 13px;
-  padding: 10px 11px;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
-}
-
-.capturePanel[data-ready="true"] {
-  border-color: rgba(98, 145, 0, 0.48);
-  box-shadow: inset 0 0 0 1px rgba(128, 187, 0, 0.1);
-}
-
-.capturePreview {
-  display: grid;
-  width: 62px;
-  height: 62px;
-  overflow: hidden;
-  place-items: center;
-  border: 1px solid rgba(23, 23, 19, 0.12);
-  border-radius: 13px;
-  background-color: #ebe8e1;
-  background-image:
-    linear-gradient(45deg, #fff 25%, transparent 25%),
-    linear-gradient(-45deg, #fff 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #fff 75%),
-    linear-gradient(-45deg, transparent 75%, #fff 75%);
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-  background-size: 16px 16px;
-  color: #77746c;
-}
-
-.capturePreview img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.captureCopy,
 .namePanel > div {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.captureCopy span,
 .namePanel > div > span {
   color: #77746c;
   font-size: 9px;
@@ -184,7 +142,6 @@
   text-transform: uppercase;
 }
 
-.captureCopy strong,
 .namePanel > div > strong {
   overflow: hidden;
   font-size: 12px;
@@ -194,7 +151,6 @@
   white-space: nowrap;
 }
 
-.uploadButton,
 .confirmNameButton {
   display: inline-flex;
   align-items: center;
@@ -209,12 +165,6 @@
   font-size: 11px;
   font-weight: 900;
   transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
-}
-
-.uploadButton:disabled {
-  border-color: #c8c5bc;
-  background: #dedbd3;
-  color: #77746c;
 }
 
 .namePanel {
@@ -237,6 +187,7 @@
 
 .editNameButton,
 .downloadButton,
+.likeButton,
 .deleteButton,
 .confirmDeleteButton,
 .cancelDeleteButton,
@@ -263,6 +214,18 @@
   font-size: 9px;
   font-weight: 850;
   white-space: nowrap;
+}
+
+.guestNotice {
+  margin: 10px 2px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(112, 81, 0, 0.22);
+  border-radius: 12px;
+  background: #fff6d8;
+  color: #67521d;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.55;
 }
 
 .galleryFilter {
@@ -459,7 +422,8 @@
 }
 
 .downloadButton {
-  min-width: 96px;
+  min-width: 44px;
+  padding: 0;
   border-color: #171713;
   background: #dfff45;
 }
@@ -468,6 +432,26 @@
   border-color: #c8c5bc;
   background: #eeeae2;
   color: #817e76;
+}
+
+.likeButton {
+  min-width: 58px;
+  padding: 0 10px;
+  border-color: rgba(153, 35, 69, 0.28);
+  background: #fff7fa;
+  color: #7f2943;
+}
+
+.likeButton[data-liked="true"] {
+  border-color: #a72049;
+  background: #ffe0ea;
+  color: #a72049;
+}
+
+.likeButton span {
+  min-width: 1ch;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .deleteButton {
@@ -529,6 +513,14 @@
 }
 
 .deleteError {
+  color: #942e26;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.likeError {
+  margin: -4px 12px 11px;
   color: #942e26;
   font-size: 10px;
   font-weight: 800;
@@ -656,7 +648,6 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .uploadButton:not(:disabled):hover,
   .confirmNameButton:hover {
     background: #dfff45;
     color: #171713;
@@ -672,6 +663,12 @@
 
   .downloadButton:not(:disabled):hover {
     background: #cffa00;
+    transform: translateY(-1px);
+  }
+
+  .likeButton:not(:disabled):hover {
+    border-color: #a72049;
+    background: #ffe8ef;
     transform: translateY(-1px);
   }
 
@@ -733,20 +730,6 @@
     text-align: left;
   }
 
-  .capturePanel {
-    grid-template-columns: 54px minmax(0, 1fr);
-  }
-
-  .capturePreview {
-    width: 54px;
-    height: 54px;
-  }
-
-  .uploadButton {
-    grid-column: 1 / -1;
-    width: 100%;
-  }
-
   .namePanel {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -806,6 +789,7 @@
   .eyebrow > span,
   .liveCount,
   .downloadButton,
+  .likeButton,
   .dialogIcon,
   .confirmNameButton {
     forced-color-adjust: none;

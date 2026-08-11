@@ -12,14 +12,14 @@
     #fff;
   border: 1px solid #e6e4dd;
   border-radius: 30px;
-  padding: clamp(22px, 4vw, 50px);
+  padding: clamp(20px, 2.6vw, 36px);
   box-shadow: 0 24px 70px rgba(27, 31, 39, 0.08);
 }
 
 .editorGrid {
   display: grid;
   grid-template-columns: 246px minmax(0, 1fr);
-  gap: clamp(22px, 4vw, 48px);
+  gap: clamp(20px, 3vw, 40px);
   align-items: start;
 }
 
@@ -271,28 +271,6 @@
   }
 }
 
-.tipBox {
-  display: flex;
-  gap: 9px;
-  padding: 12px;
-  color: #6b5a3f;
-  background: #fff6dd;
-  border: 1px solid #f0dfad;
-  border-radius: 13px;
-}
-
-.tipBox > span {
-  color: #e19325;
-  font-size: 15px;
-}
-
-.tipBox p {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.55;
-  word-break: keep-all;
-}
-
 .stageColumn {
   min-width: 0;
 }
@@ -325,20 +303,6 @@
 .guideNotice {
   color: #8a8e94;
   font-weight: 600;
-}
-
-.faceGuideHint {
-  width: min(100%, 610px);
-  margin: 0 auto 10px;
-  padding: 9px 12px;
-  border: 1px solid #f0d3c9;
-  border-radius: 12px;
-  background: #fff6f2;
-  color: #755044;
-  font-size: 11px;
-  line-height: 1.55;
-  text-align: center;
-  word-break: keep-all;
 }
 
 .canvasFrame {
@@ -388,25 +352,6 @@
   font-weight: 900;
   letter-spacing: 0.14em;
   pointer-events: none;
-}
-
-.canvasHelp {
-  max-width: 610px;
-  margin: 16px auto 0;
-  color: #747983;
-  font-size: 12px;
-  line-height: 1.65;
-  text-align: center;
-  word-break: keep-all;
-}
-
-.status {
-  min-height: 21px;
-  margin: 8px auto 0;
-  color: #4e5662;
-  font-size: 12px;
-  font-weight: 650;
-  text-align: center;
 }
 
 .panelActions {
@@ -517,10 +462,6 @@
     gap: 18px;
   }
 
-  .tipBox {
-    grid-column: 1 / -1;
-  }
-
   .panelActions {
     grid-column: 1 / -1;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -542,10 +483,6 @@
   .controlPanel {
     grid-template-columns: 1fr;
     padding: 16px;
-  }
-
-  .tipBox {
-    grid-column: auto;
   }
 
   .palette {
