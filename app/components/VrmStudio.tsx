@@ -443,7 +443,6 @@ export function VrmStudio({
   const syncThreeBackgroundRef = useRef<() => void>(() => undefined);
   const lastFrameRef = useRef(0);
   const cameraAspectRatioRef = useRef(16 / 9);
-  const lastStatsRef = useRef(0);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captureBusyRef = useRef(false);
   const captureDialogRef = useRef<HTMLDivElement>(null);
@@ -473,8 +472,6 @@ export function VrmStudio({
   const [stageBackgroundFit, setStageBackgroundFit] =
     useState<StudioBackgroundFit>("cover");
   const [persistenceReady, setPersistenceReady] = useState(false);
-  const [delegate, setDelegate] = useState<"GPU" | "CPU" | "—">("—");
-  const [inferenceMs, setInferenceMs] = useState<number | null>(null);
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
   const [isDragging, setIsDragging] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -1041,8 +1038,6 @@ export function VrmStudio({
     if (videoRef.current) videoRef.current.srcObject = null;
     trackingOverlayRef.current?.clear();
     setTrackingState("idle");
-    setDelegate("—");
-    setInferenceMs(null);
   }, []);
 
   const stopVrmAnimation = useCallback(() => {
@@ -1581,7 +1576,6 @@ export function VrmStudio({
         const message = event.data;
         if (message.type === "READY") {
           engineReady = true;
-          setDelegate(message.delegate);
           setTrackingState("running");
           showToast("카메라 트래킹을 시작했어요.");
           runTrackingFrames();
@@ -1589,7 +1583,6 @@ export function VrmStudio({
         }
 
         if (message.type === "DELEGATE") {
-          setDelegate(message.delegate);
           setError(null);
           showToast(message.message);
           return;
@@ -1632,11 +1625,6 @@ export function VrmStudio({
             applyHipsRotation: !legsLockedRef.current,
           });
           if (legsLockedRef.current) vrmLegLockRef.current?.enforce();
-        }
-
-        if (performance.now() - lastStatsRef.current > 500) {
-          lastStatsRef.current = performance.now();
-          setInferenceMs(message.inferenceMs);
         }
       };
 
@@ -2531,18 +2519,6 @@ export function VrmStudio({
           )}
         </div>
 
-        <span className={styles.sectionLabel}>Tracking health</span>
-        <div className={styles.metrics}>
-          <div className={styles.metric}>
-            <span>ENGINE</span>
-            <strong>{trackingRunning ? delegate : "OFF"}</strong>
-          </div>
-          <div className={styles.metric}>
-            <span>INFERENCE</span>
-            <strong>{inferenceMs ? `${Math.round(inferenceMs)} ms` : "—"}</strong>
-          </div>
-        </div>
-
         <button
           type="button"
           className={styles.legLockButton}
@@ -2562,23 +2538,6 @@ export function VrmStudio({
             <small>{legsLocked ? "눌러서 다리 풀기" : "눌러서 현재 자세 고정"}</small>
           </span>
         </button>
-
-        <span className={styles.sectionLabel}>Export</span>
-        <div className={styles.metrics}>
-          <div className={styles.metric}>
-            <span>SIZE</span>
-            <strong>1600 × 2000</strong>
-          </div>
-          <div className={styles.metric}>
-            <span>FORMAT</span>
-            <strong>{characterReady ? "PNG · WEBM" : "PNG · 투명"}</strong>
-          </div>
-        </div>
-        <p className={styles.exportNote}>
-          {characterReady
-            ? "현재 포즈는 투명 PNG로, 선택한 동작은 브라우저에서 바로 WebM으로 저장합니다."
-            : "저장할 때 현재 포즈의 실제 범위를 다시 계산해 머리부터 발끝까지 자동으로 화면 안에 맞춥니다."}
-        </p>
       </aside>
 
       {captureDialogOpen ? (
