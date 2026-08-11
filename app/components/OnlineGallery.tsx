@@ -25,9 +25,12 @@ import {
 import {
   deleteGalleryEntry,
   publishGalleryEntry,
+  subscribeClassRecords,
   subscribeGalleryEntries,
+  type ClassRecord,
   type GalleryEntry,
 } from "../lib/firebaseGallery";
+import type { VisitorProfile } from "../lib/visitorProfile";
 import styles from "./OnlineGallery.module.css";
 
 const GALLERY_NAME_COOKIE = "motion_ink_gallery_name";
@@ -36,7 +39,6 @@ const NAME_MAX_LENGTH = 24;
 
 type NameAction =
   | { kind: "download"; entry: GalleryEntry }
-  | { kind: "upload" }
   | { kind: "edit" };
 
 export interface OnlineGalleryProps {
@@ -49,6 +51,7 @@ export interface OnlineGalleryProps {
   captureDataUrl?: string | null;
   className?: string;
   isAdmin?: boolean;
+  profile?: VisitorProfile | null;
   onUploadComplete?: (entry: GalleryEntry | void) => void;
 }
 
@@ -125,12 +128,14 @@ export function OnlineGallery({
   captureDataUrl: legacyCaptureDataUrl,
   className,
   isAdmin = false,
+  profile = null,
   onUploadComplete,
 }: OnlineGalleryProps) {
   const headingId = useId();
   const nameHeadingId = useId();
   const nameDescriptionId = useId();
   const [entries, setEntries] = useState<GalleryEntry[]>([]);
+  const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [galleryError, setGalleryError] = useState<string | null>(null);
   const [subscriptionVersion, setSubscriptionVersion] = useState(0);
@@ -144,6 +149,7 @@ export function OnlineGallery({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
+  const [classFilter, setClassFilter] = useState("all");
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -200,6 +206,27 @@ export function OnlineGallery({
   }, [subscriptionVersion]);
 
   useEffect(() => {
+    let active = true;
+    let unsubscribe: () => void = () => undefined;
+    const timer = window.setTimeout(() => {
+      if (!active) return;
+      unsubscribe = subscribeClassRecords({
+        onData: (nextClasses) => {
+          if (active) setClasses(nextClasses);
+        },
+        onError: () => {
+          // Gallery entries remain available under "all" when class metadata fails.
+        },
+      });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const urls = objectUrlsRef.current;
     const timers = revokeTimersRef.current;
     return () => {
@@ -232,6 +259,28 @@ export function OnlineGallery({
     () => new Intl.NumberFormat("ko-KR").format(entries.length),
     [entries.length],
   );
+  const classOptions = classes;
+  const activeClassIds = useMemo(
+    () => new Set(classes.map((classRecord) => classRecord.id)),
+    [classes],
+  );
+  const effectiveClassFilter =
+    classFilter === "all" ||
+    classFilter === "unclassified" ||
+    activeClassIds.has(classFilter)
+      ? classFilter
+      : "unclassified";
+  const visibleEntries = useMemo(
+    () =>
+      entries.filter((entry) => {
+        if (effectiveClassFilter === "all") return true;
+        if (effectiveClassFilter === "unclassified") {
+          return !entry.classId || !activeClassIds.has(entry.classId);
+        }
+        return entry.classId === effectiveClassFilter;
+      }),
+    [activeClassIds, effectiveClassFilter, entries],
+  );
 
   const closeNameDialog = useCallback(() => {
     setNameAction(null);
@@ -250,7 +299,7 @@ export function OnlineGallery({
   );
 
   const uploadCapture = useCallback(
-    async (name: string) => {
+    async (activeProfile: VisitorProfile) => {
       if (!isPngDataUrl(captureDataUrl)) {
         setActionMessage("먼저 현재 캐릭터를 PNG로 캡처해 주세요.");
         return;
@@ -260,7 +309,7 @@ export function OnlineGallery({
       setActionMessage("현재 캡처를 온라인 갤러리에 올리는 중입니다.");
       try {
         const entry = await publishGalleryEntry({
-          name,
+          profile: activeProfile,
           imageDataUrl: captureDataUrl,
         });
         setEntries((currentEntries) => [
@@ -317,26 +366,31 @@ export function OnlineGallery({
   );
 
   const requestUpload = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>) => {
+    () => {
       if (!captureReady || isUploading) return;
-      if (!viewerName) {
-        openNameDialog({ kind: "upload" }, event.currentTarget);
+      if (!profile) {
+        setActionMessage("먼저 이름과 학급 프로필을 설정해 주세요.");
         return;
       }
-      void uploadCapture(viewerName);
+      if (profile.guest) {
+        setActionMessage("게스트는 온라인 갤러리에 저장할 수 없습니다.");
+        return;
+      }
+      void uploadCapture(profile);
     },
-    [captureReady, isUploading, openNameDialog, uploadCapture, viewerName],
+    [captureReady, isUploading, profile, uploadCapture],
   );
 
   const requestDownload = useCallback(
     (entry: GalleryEntry, event: ReactMouseEvent<HTMLButtonElement>) => {
-      if (!viewerName) {
+      const downloaderName = profile?.name || viewerName;
+      if (!downloaderName) {
         openNameDialog({ kind: "download", entry }, event.currentTarget);
         return;
       }
-      void downloadEntry(entry, viewerName);
+      void downloadEntry(entry, downloaderName);
     },
-    [downloadEntry, openNameDialog, viewerName],
+    [downloadEntry, openNameDialog, profile?.name, viewerName],
   );
 
   const requestDelete = useCallback(
@@ -395,12 +449,11 @@ export function OnlineGallery({
       const action = nameAction;
       setNameAction(null);
       setNameError(null);
-      if (action?.kind === "upload") void uploadCapture(nextName);
       if (action?.kind === "download") void downloadEntry(action.entry, nextName);
       if (action?.kind === "edit") setActionMessage("사용할 이름을 수정했습니다.");
       window.setTimeout(() => returnFocusRef.current?.focus(), 0);
     },
-    [downloadEntry, nameAction, nameDraft, uploadCapture],
+    [downloadEntry, nameAction, nameDraft],
   );
 
   const handleDialogKeyDown = useCallback(
@@ -479,7 +532,7 @@ export function OnlineGallery({
             type="button"
             className={styles.uploadButton}
             onClick={requestUpload}
-            disabled={!captureReady || isUploading}
+            disabled={!captureReady || isUploading || !profile || profile.guest}
             aria-label="현재 캡처 PNG를 온라인 갤러리에 업로드"
           >
             {isUploading ? (
@@ -496,21 +549,47 @@ export function OnlineGallery({
             <UserRound size={18} />
           </span>
           <div>
-            <span>저장된 이름</span>
-            <strong>{viewerName || "아직 설정하지 않았어요"}</strong>
+            <span>활성 프로필</span>
+            <strong>
+              {profile
+                ? `${profile.className} · ${profile.name}`
+                : viewerName || "프로필을 먼저 설정해 주세요"}
+            </strong>
           </div>
-          <button
-            type="button"
-            className={styles.editNameButton}
-            onClick={(event) =>
-              openNameDialog({ kind: "edit" }, event.currentTarget)
-            }
-            aria-label={viewerName ? "저장된 이름 수정" : "다운로드에 사용할 이름 설정"}
-          >
-            <Pencil size={15} aria-hidden="true" />
-            {viewerName ? "수정" : "설정"}
-          </button>
+          {profile ? (
+            <span className={styles.profileState}>
+              {profile.guest ? "클라우드 저장 꺼짐" : "자동 이름 저장"}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={styles.editNameButton}
+              onClick={(event) =>
+                openNameDialog({ kind: "edit" }, event.currentTarget)
+              }
+              aria-label={viewerName ? "저장된 이름 수정" : "다운로드에 사용할 이름 설정"}
+            >
+              <Pencil size={15} aria-hidden="true" />
+              {viewerName ? "수정" : "설정"}
+            </button>
+          )}
         </div>
+      </div>
+
+      <div className={styles.galleryFilter}>
+        <label htmlFor={`${headingId}-class-filter`}>학급별 보기</label>
+        <select
+          id={`${headingId}-class-filter`}
+          value={effectiveClassFilter}
+          onChange={(event) => setClassFilter(event.target.value)}
+        >
+          <option value="all">전체 학급</option>
+          {classOptions.map((item) => (
+            <option key={item.id} value={item.id}>{item.name}</option>
+          ))}
+          <option value="unclassified">미분류 · 이전 갤러리</option>
+        </select>
+        <span>{visibleEntries.length}개 표시</span>
       </div>
 
       <p className={styles.actionStatus} role="status" aria-live="polite">
@@ -540,7 +619,7 @@ export function OnlineGallery({
               <RefreshCw size={16} aria-hidden="true" /> 다시 시도
             </button>
           </div>
-        ) : entries.length === 0 ? (
+        ) : visibleEntries.length === 0 ? (
           <div className={styles.emptyState} role="status">
             <Images size={34} aria-hidden="true" />
             <strong>아직 올라온 캐릭터가 없습니다.</strong>
@@ -548,7 +627,7 @@ export function OnlineGallery({
           </div>
         ) : (
           <div className={styles.grid} role="list" aria-label="온라인 캐릭터 목록">
-            {entries.map((entry) => (
+            {visibleEntries.map((entry) => (
               <article className={styles.card} role="listitem" key={entry.id}>
                 <div className={styles.cardImage}>
                   {/* Firebase entries contain PNG Data URLs created by this app. */}
@@ -563,6 +642,11 @@ export function OnlineGallery({
                 <div className={styles.cardBody}>
                   <div>
                     <h3>{entry.name}</h3>
+                    <span className={styles.cardClass}>
+                      {entry.classId && activeClassIds.has(entry.classId)
+                        ? entry.className
+                        : "미분류 · 이전 기록"}
+                    </span>
                     <time dateTime={dateTimeValue(entry.createdAt)}>
                       {formatDate(entry.createdAt)}
                     </time>
@@ -709,9 +793,7 @@ export function OnlineGallery({
               <button type="submit" className={styles.confirmNameButton}>
                 {nameAction.kind === "download"
                   ? "이름 저장하고 다운로드"
-                  : nameAction.kind === "upload"
-                    ? "이름 저장하고 업로드"
-                    : "이름 저장"}
+                  : "이름 저장"}
               </button>
             </form>
           </div>

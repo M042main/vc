@@ -24,13 +24,21 @@ test("isolates T-pose artwork without deleting or restoring the legacy downward-
   assert.doesNotMatch(source, /["']motion-ink\.saved-character\.v1["']/);
   assert.doesNotMatch(source, /["']motion-ink-latest-character["']/);
 
-  const restore = blockFrom(source, "useEffect(() => {", 2_200);
-  assert.match(restore, /localStorage\.getItem\(SAVED_CHARACTER_KEY\)/);
-  assert.match(restore, /\.get\(SAVED_CHARACTER_ID\)/);
+  assert.match(source, /function characterStorageId\(profile/);
+  assert.match(source, /`\$\{SAVED_CHARACTER_ID\}:\$\{visitorArtworkKey\(profile\)\}`/);
 
-  const save = blockFrom(source, "const handleSendToStudio", 1_300);
+  const restore = blockFrom(source, "if (!profileReady) return;", 3_200);
+  assert.match(restore, /if \(profile\.guest\)/);
+  assert.match(restore, /localStorage\.getItem\(SAVED_CHARACTER_KEY\)/);
+  assert.match(restore, /\.get\(storageId\)/);
+  assert.match(restore, /loadLatestCharacterArtwork\(profile\)/);
+
+  const save = blockFrom(source, "const handleSendToStudio", 2_000);
+  assert.match(save, /const storageId = characterStorageId\(profile\)/);
+  assert.match(save, /id:\s*storageId/);
+  assert.match(save, /if \(profile\.guest\)/);
   assert.match(save, /localStorage\.setItem\(SAVED_CHARACTER_KEY, dataUrl\)/);
-  assert.match(save, /id:\s*SAVED_CHARACTER_ID/);
+  assert.match(save, /saveLatestCharacterArtwork\(profile, dataUrl\)/);
 
   assert.doesNotMatch(source, /localStorage\.removeItem\(/);
   assert.doesNotMatch(source, /\.remove\(\s*["']motion-ink-latest-character["']/);

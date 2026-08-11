@@ -459,6 +459,12 @@
   transform: translateY(-2px);
 }
 
+.actions button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
+}
+
 .downloadButton {
   color: #3d444e;
   background: #fff;

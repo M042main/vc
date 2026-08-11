@@ -1,0 +1,312 @@
+.panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(23, 23, 19, 0.16);
+  border-radius: 20px;
+  background: rgba(255, 253, 248, 0.92);
+  color: #171713;
+}
+
+.blockingBackdrop {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  display: grid;
+  overflow: auto;
+  place-items: center;
+  padding: 20px;
+  background: rgba(23, 23, 19, 0.68);
+  backdrop-filter: blur(9px);
+}
+
+.blockingBackdrop .panel {
+  width: min(100%, 720px);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: clamp(18px, 4vw, 30px);
+  border-color: #171713;
+  box-shadow: 8px 8px 0 #dfff45, 0 32px 90px rgba(0, 0, 0, 0.32);
+}
+
+.panel button,
+.panel input,
+.panel select {
+  min-height: 44px;
+  font: inherit;
+}
+
+.panel button {
+  cursor: pointer;
+}
+
+.panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.profileIcon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dfff45;
+}
+
+.summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.summary span,
+.adminArea > div span {
+  color: #6d6a62;
+  font-size: 10px;
+}
+
+.summary strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary button,
+.adminArea button {
+  padding: 0 13px;
+  border: 1px solid rgba(23, 23, 19, 0.22);
+  border-radius: 12px;
+  background: #fff;
+  color: #171713;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.profileForm {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 11px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(23, 23, 19, 0.12);
+}
+
+.profileForm > label,
+.adminArea form label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.profileForm input,
+.profileForm select,
+.adminArea input {
+  width: 100%;
+  padding: 0 12px;
+  border: 1px solid rgba(23, 23, 19, 0.25);
+  border-radius: 11px;
+  background: #fff;
+  color: #171713;
+}
+
+.profileForm fieldset {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(23, 23, 19, 0.16);
+  border-radius: 11px;
+}
+
+.profileForm fieldset legend {
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.profileForm fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.profileForm fieldset input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.primaryButton {
+  border: 1px solid #171713;
+  border-radius: 12px;
+  background: #171713;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.adminRequestButton {
+  justify-self: start;
+  padding: 0 14px;
+  border: 1px solid rgba(23, 23, 19, 0.28);
+  border-radius: 12px;
+  background: #fff;
+  color: #171713;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.guestNotice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: #f1eee7;
+  color: #65625b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.adminArea {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(23, 23, 19, 0.12);
+}
+
+.adminArea > div {
+  display: grid;
+  gap: 3px;
+}
+
+.adminArea form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.adminArea form label {
+  grid-column: 1;
+}
+
+.adminArea form input {
+  grid-column: 1;
+}
+
+.adminArea form button {
+  grid-column: 2;
+  grid-row: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.adminArea ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adminArea li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 50px;
+  padding: 4px 4px 4px 11px;
+  border: 1px solid rgba(23, 23, 19, 0.12);
+  border-radius: 12px;
+}
+
+.deleteConfirm {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.deleteConfirm button:first-child {
+  border-color: #942e26;
+  background: #942e26;
+  color: #fff;
+}
+
+.error,
+.status {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.error {
+  color: #942e26;
+}
+
+.status {
+  min-height: 15px;
+  color: #4f5f28;
+}
+
+.spinner {
+  animation: spin 0.85s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 620px) {
+  .blockingBackdrop {
+    align-items: end;
+    padding: 10px;
+  }
+
+  .blockingBackdrop .panel {
+    max-height: calc(100dvh - 20px);
+    border-radius: 22px 22px 12px 12px;
+  }
+
+  .profileForm {
+    grid-template-columns: 1fr;
+  }
+
+  .summary {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .summary > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .adminArea li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .adminArea li > button,
+  .deleteConfirm,
+  .deleteConfirm button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 0.01ms;
+  }
+}

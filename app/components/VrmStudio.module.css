@@ -724,6 +724,86 @@
   outline: 2px solid #171713;
 }
 
+.backgroundImagePanel {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  margin-top: 11px;
+  padding: 10px;
+  border: 1px solid rgba(23, 23, 19, 0.13);
+  border-radius: 13px;
+  background: #f3efe7;
+}
+
+.backgroundImagePanel[data-active="true"] {
+  border-color: rgba(116, 92, 255, 0.45);
+  background: #f5f2ff;
+}
+
+.backgroundImagePanel small {
+  color: #77746b;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.backgroundUploadButton,
+.backgroundRemoveButton,
+.backgroundFitControls button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(23, 23, 19, 0.16);
+  border-radius: 10px;
+  background: #fffdf8;
+  color: #35342f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.backgroundUploadButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.backgroundFileName {
+  overflow: hidden;
+  color: #4f4c59;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backgroundFitControls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.backgroundFitControls button {
+  min-height: 38px;
+  padding: 0 5px;
+  font-size: 8px;
+}
+
+.backgroundFitControls button[data-selected="true"] {
+  border-color: #171713;
+  background: #dfff45;
+  color: #171713;
+  box-shadow: 1px 1px 0 #171713;
+}
+
+.backgroundRemoveButton {
+  min-height: 38px;
+  border-color: rgba(148, 46, 38, 0.25);
+  background: #fff8f7;
+  color: #8b3028;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: 1fr 1fr;

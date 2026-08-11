@@ -17,7 +17,7 @@ function blockFrom(source, marker, length = 3_500) {
   return source.slice(start, start + length);
 }
 
-test("lets the brush and exported artwork extend beyond the body guide", async () => {
+test("keeps authoring and exported artwork transparent beyond the body guide", async () => {
   const source = await readFile(creatorUrl, "utf8");
   const stroke = blockFrom(source, "function drawStroke", 1_800);
   const preview = blockFrom(source, "const paintVisibleCanvas", 1_400);
@@ -28,19 +28,25 @@ test("lets the brush and exported artwork extend beyond the body guide", async (
     /clip\s*\(\s*createSilhouettePath\s*\(\s*\)\s*\)/,
     "freehand strokes must not be clipped to the body silhouette",
   );
+  assert.doesNotMatch(
+    preview,
+    /clip\s*\(\s*createSilhouettePath|fillStyle\s*=\s*["']#FFFCF5/,
+    "preview must not add an opaque default body",
+  );
   assert.match(
     preview,
-    /context\.restore\s*\(\s*\)\s*;\s*context\.drawImage\(drawingLayer/,
-    "preview artwork must be composited after the body-only base fill",
+    /drawWorkspace\(context\)[\s\S]{0,300}context\.drawImage\(drawingLayer[\s\S]{0,300}drawGuide\(context/,
+    "checkerboard and guide must remain display-only layers around the artwork",
   );
-  assert.match(
+  assert.doesNotMatch(
     exportArtwork,
-    /context\.restore\s*\(\s*\)\s*;\s*context\.drawImage\(drawingLayer/,
-    "PNG artwork outside the silhouette must survive export",
+    /clip\s*\(\s*createSilhouettePath|fillRect\s*\(/,
+    "export must not bake in a body fill or guide background",
   );
+  assert.match(exportArtwork, /context\.drawImage\(drawingLayer, 0, 0\)/);
   assert.match(source, /const\s+joints\s*=\s*\{[\s\S]{0,900}leftShoulder[\s\S]{0,900}rightAnkle/);
   assert.match(source, /for\s*\(const\s+\[from,\s*to\]\s+of\s+bones\)/);
-  assert.match(source, /파란 스켈레톤과 회색 실루엣은 결과물에 저장되지 않습니다/);
+  assert.match(source, /모든\s+가이드와 체크무늬는 결과물에 저장되지 않습니다/);
 });
 
 test("auto-binds every opaque outside pixel to a nearby animated body region", async () => {

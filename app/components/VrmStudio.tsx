@@ -10,6 +10,7 @@ import {
   Film,
   Focus,
   Image as ImageIcon,
+  ImagePlus,
   LoaderCircle,
   LockOpen,
   LockKeyhole,
@@ -19,6 +20,7 @@ import {
   RotateCcw,
   RotateCw,
   Sparkles,
+  Trash2,
   Upload,
   Video,
   VideoOff,
@@ -33,6 +35,19 @@ import {
   downloadBlob,
 } from "../lib/vrmCapture";
 import { createHolisticTrackingWorker } from "../lib/holisticWorker";
+import {
+  MAX_PERSISTED_VRM_BYTES,
+  MAX_STAGE_BACKGROUND_BYTES,
+  STAGE_BACKGROUND_TYPES,
+  clearPersistedStageBackground,
+  clearPersistedVrmFile,
+  isSupportedStageBackground,
+  loadPersistedStudio,
+  savePersistedStageBackground,
+  savePersistedVrmFile,
+  saveStudioSettings,
+  type StudioBackgroundFit,
+} from "../lib/studioPersistence";
 import {
   getPaperDollMotionPreset,
 } from "../lib/paperDollMotion";
@@ -75,7 +90,8 @@ const STAGE_COLORS = [
   { value: CHROMA_KEY_GREEN, label: "크로마키 초록" },
 ] as const;
 type StageColor = (typeof STAGE_COLORS)[number]["value"];
-const MAX_VRM_SIZE = 80 * 1024 * 1024;
+const MAX_VRM_SIZE = MAX_PERSISTED_VRM_BYTES;
+const MAX_STAGE_BACKGROUND_DIMENSION = 8192;
 const TRACKING_INPUT_MAX_WIDTH = 480;
 const TRACKING_INPUT_MAX_HEIGHT = 360;
 
@@ -219,6 +235,62 @@ function pngBlobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+function decodeStageBackground(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new Image();
+    const release = () => URL.revokeObjectURL(objectUrl);
+    image.decoding = "async";
+    image.onload = () => {
+      release();
+      if (
+        image.naturalWidth < 1 ||
+        image.naturalHeight < 1 ||
+        image.naturalWidth > MAX_STAGE_BACKGROUND_DIMENSION ||
+        image.naturalHeight > MAX_STAGE_BACKGROUND_DIMENSION
+      ) {
+        reject(new Error("배경 이미지는 가로·세로 8192px 이하만 사용할 수 있습니다."));
+        return;
+      }
+      resolve(image);
+    };
+    image.onerror = () => {
+      release();
+      reject(new Error("배경 이미지를 읽지 못했습니다."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function drawStageBackground(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement,
+  fit: StudioBackgroundFit,
+  stageColor: string,
+  width: number,
+  height: number,
+) {
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.fillStyle = stageColor;
+  context.fillRect(0, 0, width, height);
+  const scale =
+    fit === "cover"
+      ? Math.max(width / image.naturalWidth, height / image.naturalHeight)
+      : Math.min(width / image.naturalWidth, height / image.naturalHeight);
+  const drawWidth = image.naturalWidth * scale;
+  const drawHeight = image.naturalHeight * scale;
+  context.drawImage(
+    image,
+    (width - drawWidth) / 2,
+    (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight,
+  );
+}
+
 function formatCameraError(error: unknown) {
   if (!(error instanceof DOMException)) {
     return "카메라를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -253,6 +325,7 @@ export function VrmStudio({
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const pipOwnedVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -282,6 +355,16 @@ export function VrmStudio({
   const stageVisibleRef = useRef(true);
   const frameInFlightRef = useRef(false);
   const modelLoadSessionRef = useRef(0);
+  const modelInteractionRef = useRef(0);
+  const restoreModelLoaderRef = useRef<
+    (file?: File, options?: { restored?: boolean }) => Promise<void>
+  >(async () => undefined);
+  const backgroundLoadSessionRef = useRef(0);
+  const settingsInteractionRef = useRef(0);
+  const stageColorRef = useRef<StageColor>(STAGE_COLORS[0].value);
+  const stageBackgroundImageRef = useRef<HTMLImageElement | null>(null);
+  const stageBackgroundFitRef = useRef<StudioBackgroundFit>("cover");
+  const syncThreeBackgroundRef = useRef<() => void>(() => undefined);
   const lastFrameRef = useRef(0);
   const cameraAspectRatioRef = useRef(16 / 9);
   const lastStatsRef = useRef(0);
@@ -301,6 +384,12 @@ export function VrmStudio({
   const [modelName, setModelName] = useState("아직 불러온 모델이 없어요");
   const [modelSize, setModelSize] = useState("");
   const [stageColor, setStageColor] = useState<StageColor>(STAGE_COLORS[0].value);
+  const [stageBackgroundImage, setStageBackgroundImage] =
+    useState<HTMLImageElement | null>(null);
+  const [stageBackgroundName, setStageBackgroundName] = useState("");
+  const [stageBackgroundFit, setStageBackgroundFit] =
+    useState<StudioBackgroundFit>("cover");
+  const [persistenceReady, setPersistenceReady] = useState(false);
   const [delegate, setDelegate] = useState<"GPU" | "CPU" | "—">("—");
   const [inferenceMs, setInferenceMs] = useState<number | null>(null);
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
@@ -496,8 +585,15 @@ export function VrmStudio({
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(stageColor);
+    scene.background = new THREE.Color(stageColorRef.current);
     sceneRef.current = scene;
+
+    const backgroundCanvas = document.createElement("canvas");
+    const backgroundTexture = new THREE.CanvasTexture(backgroundCanvas);
+    backgroundTexture.colorSpace = THREE.SRGBColorSpace;
+    backgroundTexture.generateMipmaps = false;
+    backgroundTexture.minFilter = THREE.LinearFilter;
+    backgroundTexture.magFilter = THREE.LinearFilter;
 
     const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
     camera.position.set(0, 1.05, 4.1);
@@ -517,6 +613,29 @@ export function VrmStudio({
     renderer.setClearAlpha(1);
     mount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    const syncStageBackground = () => {
+      const image = stageBackgroundImageRef.current;
+      if (!image) {
+        scene.background = new THREE.Color(stageColorRef.current);
+        return;
+      }
+      const pixelRatio = Math.min(window.devicePixelRatio, 1.5);
+      const sourceWidth = Math.max(1, Math.round(mount.clientWidth * pixelRatio));
+      const sourceHeight = Math.max(1, Math.round(mount.clientHeight * pixelRatio));
+      const scale = Math.min(1, 1920 / Math.max(sourceWidth, sourceHeight));
+      drawStageBackground(
+        backgroundCanvas,
+        image,
+        stageBackgroundFitRef.current,
+        stageColorRef.current,
+        Math.max(1, Math.round(sourceWidth * scale)),
+        Math.max(1, Math.round(sourceHeight * scale)),
+      );
+      backgroundTexture.needsUpdate = true;
+      scene.background = backgroundTexture;
+    };
+    syncThreeBackgroundRef.current = syncStageBackground;
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -569,6 +688,7 @@ export function VrmStudio({
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      syncStageBackground();
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -640,23 +760,30 @@ export function VrmStudio({
       (floor.material as THREE.Material).dispose();
       grid.geometry.dispose();
       gridMaterials.forEach((material) => material.dispose());
+      backgroundTexture.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       rendererRef.current = null;
       sceneRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
+      syncThreeBackgroundRef.current = () => undefined;
     };
-    // Three scene is intentionally initialized once; stage color is synced below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (sceneRef.current) sceneRef.current.background = new THREE.Color(stageColor);
-    const showStageHelpers = stageColor !== CHROMA_KEY_GREEN;
+    if (sceneRef.current && !stageBackgroundImage) {
+      sceneRef.current.background = new THREE.Color(stageColor);
+    }
+    stageColorRef.current = stageColor;
+    stageBackgroundImageRef.current = stageBackgroundImage;
+    stageBackgroundFitRef.current = stageBackgroundFit;
+    syncThreeBackgroundRef.current();
+    const showStageHelpers =
+      !stageBackgroundImage && stageColor !== CHROMA_KEY_GREEN;
     if (gridRef.current) gridRef.current.visible = showStageHelpers;
     if (floorRef.current) floorRef.current.visible = showStageHelpers;
-  }, [stageColor]);
+  }, [stageBackgroundFit, stageBackgroundImage, stageColor]);
 
   useEffect(() => {
     if (mannequinRef.current) {
@@ -781,9 +908,79 @@ export function VrmStudio({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [cancelRecording, stopVrmAnimation]);
 
-  const handleModelFile = useCallback(
+  const handleBackgroundFile = useCallback(
     async (file?: File) => {
       if (!file) return;
+      settingsInteractionRef.current += 1;
+      const backgroundSession = ++backgroundLoadSessionRef.current;
+      setError(null);
+
+      if (!isSupportedStageBackground(file)) {
+        const allowed = STAGE_BACKGROUND_TYPES.map((type) =>
+          type.replace("image/", "").replace("jpeg", "JPEG").toUpperCase(),
+        ).join(" · ");
+        setError(
+          file.size > MAX_STAGE_BACKGROUND_BYTES
+            ? "배경 이미지는 12MB 이하만 사용할 수 있습니다."
+            : `배경 이미지는 ${allowed} 형식만 사용할 수 있습니다.`,
+        );
+        return;
+      }
+
+      try {
+        const image = await decodeStageBackground(file);
+        if (backgroundLoadSessionRef.current !== backgroundSession) return;
+        setStageBackgroundImage(image);
+        setStageBackgroundName(file.name);
+        const persisted = await savePersistedStageBackground(file);
+        if (backgroundLoadSessionRef.current !== backgroundSession) return;
+        showToast(
+          persisted.ok
+            ? "사진 배경을 무대에 적용하고 이 기기에 저장했어요."
+            : "사진 배경은 적용했지만 저장 공간 제한으로 새로고침 뒤에는 복원되지 않을 수 있어요.",
+        );
+      } catch (backgroundError) {
+        if (backgroundLoadSessionRef.current !== backgroundSession) return;
+        setError(
+          backgroundError instanceof Error
+            ? backgroundError.message
+            : "배경 이미지를 적용하지 못했습니다.",
+        );
+      }
+    },
+    [showToast],
+  );
+
+  const selectStageColor = useCallback((color: StageColor) => {
+    settingsInteractionRef.current += 1;
+    backgroundLoadSessionRef.current += 1;
+    setStageColor(color);
+    setStageBackgroundImage(null);
+    setStageBackgroundName("");
+    void clearPersistedStageBackground();
+  }, []);
+
+  const removeStageBackgroundImage = useCallback(() => {
+    settingsInteractionRef.current += 1;
+    backgroundLoadSessionRef.current += 1;
+    setStageBackgroundImage(null);
+    setStageBackgroundName("");
+    void clearPersistedStageBackground();
+    showToast("사진 배경을 지우고 단색 배경으로 돌아왔어요.");
+  }, [showToast]);
+
+  const changeStageBackgroundFit = useCallback(
+    (fit: StudioBackgroundFit) => {
+      settingsInteractionRef.current += 1;
+      setStageBackgroundFit(fit);
+    },
+    [],
+  );
+
+  const handleModelFile = useCallback(
+    async (file?: File, options: { restored?: boolean } = {}) => {
+      if (!file) return;
+      if (!options.restored) modelInteractionRef.current += 1;
       if (isRecording) {
         showToast("애니메이션 저장이 끝난 뒤 VRM을 선택해 주세요.");
         return;
@@ -860,9 +1057,20 @@ export function VrmStudio({
         setModelName(file.name);
         setModelSize(`${(file.size / 1024 / 1024).toFixed(1)} MB · VRM 캐릭터`);
         setModelState("ready");
-        showToast("VRM을 불러왔어요. 이제 카메라를 연결해 보세요.");
+        if (options.restored) {
+          showToast("이 기기에 저장한 VRM과 무대 설정을 복원했어요.");
+        } else {
+          showToast("VRM을 불러왔어요. 이제 카메라를 연결해 보세요.");
+          void savePersistedVrmFile(file).then((persisted) => {
+            if (modelLoadSessionRef.current !== loadSession || persisted.ok) return;
+            showToast(
+              "VRM은 열었지만 저장 공간 제한으로 새로고침 뒤에는 복원되지 않을 수 있어요.",
+            );
+          });
+        }
       } catch (loadError) {
         if (modelLoadSessionRef.current !== loadSession) return;
+        if (options.restored) void clearPersistedVrmFile();
         setModelState(vrmRef.current ? "ready" : "error");
         setError(
           loadError instanceof Error
@@ -879,6 +1087,98 @@ export function VrmStudio({
       stopVrmAnimation,
     ],
   );
+
+  useEffect(() => {
+    restoreModelLoaderRef.current = handleModelFile;
+  }, [handleModelFile]);
+
+  useEffect(() => {
+    let active = true;
+    const modelInteraction = modelInteractionRef.current;
+    const backgroundInteraction = backgroundLoadSessionRef.current;
+    const settingsInteraction = settingsInteractionRef.current;
+
+    void (async () => {
+      const snapshot = await loadPersistedStudio();
+      if (!active) return;
+
+      if (
+        snapshot.settings &&
+        settingsInteractionRef.current === settingsInteraction
+      ) {
+        const restoredColor = STAGE_COLORS.find(
+          ({ value }) => value === snapshot.settings?.stageColor,
+        )?.value;
+        if (restoredColor) setStageColor(restoredColor);
+        setStageBackgroundFit(snapshot.settings.backgroundFit);
+        setSelectedMotion(snapshot.settings.selectedMotion);
+        setAnimationSpeed(snapshot.settings.animationSpeed);
+        legsLockedRef.current = snapshot.settings.legsLocked;
+        setLegsLocked(snapshot.settings.legsLocked);
+      }
+
+      const restoredBackground = snapshot.background;
+      if (
+        restoredBackground &&
+        snapshot.settings?.backgroundMode !== "solid" &&
+        backgroundLoadSessionRef.current === backgroundInteraction
+      ) {
+        try {
+          const image = await decodeStageBackground(restoredBackground.blob);
+          if (!active) return;
+          if (backgroundLoadSessionRef.current === backgroundInteraction) {
+            setStageBackgroundImage(image);
+            setStageBackgroundName(restoredBackground.name);
+          }
+        } catch {
+          if (
+            active &&
+            backgroundLoadSessionRef.current === backgroundInteraction
+          ) {
+            void clearPersistedStageBackground();
+          }
+        }
+      }
+
+      if (!active) return;
+      setPersistenceReady(true);
+
+      if (
+        snapshot.vrm &&
+        modelInteractionRef.current === modelInteraction
+      ) {
+        await restoreModelLoaderRef.current(snapshot.vrm.file, { restored: true });
+      }
+    })().catch(() => {
+      if (!active) return;
+      setPersistenceReady(true);
+    });
+
+    return () => {
+      active = false;
+      backgroundLoadSessionRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!persistenceReady) return;
+    void saveStudioSettings({
+      stageColor,
+      backgroundMode: stageBackgroundImage ? "image" : "solid",
+      backgroundFit: stageBackgroundFit,
+      selectedMotion,
+      animationSpeed,
+      legsLocked,
+    });
+  }, [
+    animationSpeed,
+    legsLocked,
+    persistenceReady,
+    selectedMotion,
+    stageBackgroundFit,
+    stageBackgroundImage,
+    stageColor,
+  ]);
 
   const runTrackingFrames = useCallback(() => {
     const tick = async (timestamp: number) => {
@@ -1104,6 +1404,7 @@ export function VrmStudio({
   const selectMotionPreset = useCallback(
     (preset: VrmMotionPresetId) => {
       if (!paperDollActive && !modelReady) return;
+      settingsInteractionRef.current += 1;
       if (trackingState !== "idle") stopTracking();
       setSelectedMotion(preset);
       if (paperDollActive) {
@@ -1159,12 +1460,14 @@ export function VrmStudio({
   ]);
 
   const changeAnimationSpeed = useCallback((speed: number) => {
+    settingsInteractionRef.current += 1;
     setAnimationSpeed(speed);
     paperDollRef.current?.setAnimationSpeed(speed);
     vrmMotionPlayerRef.current?.setPlaybackRate(speed);
   }, []);
 
   const toggleLegLock = useCallback(() => {
+    settingsInteractionRef.current += 1;
     const nextLocked = !legsLockedRef.current;
     legsLockedRef.current = nextLocked;
     setLegsLocked(nextLocked);
@@ -1437,6 +1740,17 @@ export function VrmStudio({
           onChange={(event) => handleModelFile(event.target.files?.[0])}
           aria-label="VRM 파일 선택"
         />
+        <input
+          ref={backgroundInputRef}
+          className={styles.hiddenInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(event) => {
+            void handleBackgroundFile(event.target.files?.[0]);
+            event.currentTarget.value = "";
+          }}
+          aria-label="무대 사진 배경 선택"
+        />
 
         <div className={styles.actionStack}>
           <button
@@ -1554,8 +1868,8 @@ export function VrmStudio({
         <div className={styles.privacyNote}>
           <LockKeyhole size={13} aria-hidden="true" />
           <span>
-            카메라 영상과 캐릭터 파일은 서버로 전송하지 않습니다. 현재
-            브라우저 탭 안에서만 사용됩니다.
+            카메라 영상은 서버로 전송하지 않습니다. VRM과 사진 배경은 다음
+            방문에 복원할 수 있도록 이 기기의 브라우저에만 저장됩니다.
           </span>
         </div>
       </aside>
@@ -1588,9 +1902,11 @@ export function VrmStudio({
         />
         {paperDollActive && artwork ? (
           <PaperDollStage
-              ref={paperDollRef}
-              artwork={artwork}
-              backgroundColor={stageColor}
+            ref={paperDollRef}
+            artwork={artwork}
+            backgroundColor={stageColor}
+            backgroundImage={stageBackgroundImage}
+            backgroundFit={stageBackgroundFit}
             className={styles.paperDollViewport}
             onAnimationPlayingChange={setAnimationPlaying}
           />
@@ -1780,14 +2096,64 @@ export function VrmStudio({
               type="button"
               className={styles.swatch}
               style={{ backgroundColor: value }}
-              data-selected={stageColor === value}
+              data-selected={!stageBackgroundImage && stageColor === value}
               data-chroma={value === CHROMA_KEY_GREEN}
-              aria-pressed={stageColor === value}
-              onClick={() => setStageColor(value)}
+              aria-pressed={!stageBackgroundImage && stageColor === value}
+              onClick={() => selectStageColor(value)}
               aria-label={`배경색 ${label}`}
               title={label}
             />
           ))}
+        </div>
+
+        <div
+          className={styles.backgroundImagePanel}
+          data-active={Boolean(stageBackgroundImage)}
+        >
+          <button
+            type="button"
+            className={styles.backgroundUploadButton}
+            onClick={() => backgroundInputRef.current?.click()}
+            disabled={isRecording}
+          >
+            <ImagePlus size={15} aria-hidden="true" />
+            {stageBackgroundImage ? "사진 배경 바꾸기" : "사진 배경 선택"}
+          </button>
+          {stageBackgroundImage ? (
+            <>
+              <strong className={styles.backgroundFileName} title={stageBackgroundName}>
+                {stageBackgroundName}
+              </strong>
+              <div className={styles.backgroundFitControls} aria-label="사진 배경 맞춤 방식">
+                <button
+                  type="button"
+                  data-selected={stageBackgroundFit === "cover"}
+                  aria-pressed={stageBackgroundFit === "cover"}
+                  onClick={() => changeStageBackgroundFit("cover")}
+                >
+                  화면 채우기
+                </button>
+                <button
+                  type="button"
+                  data-selected={stageBackgroundFit === "contain"}
+                  aria-pressed={stageBackgroundFit === "contain"}
+                  onClick={() => changeStageBackgroundFit("contain")}
+                >
+                  전체 보기
+                </button>
+              </div>
+              <button
+                type="button"
+                className={styles.backgroundRemoveButton}
+                onClick={removeStageBackgroundImage}
+              >
+                <Trash2 size={13} aria-hidden="true" />
+                사진 배경 지우기
+              </button>
+            </>
+          ) : (
+            <small>PNG · JPEG · WebP, 최대 12MB</small>
+          )}
         </div>
 
         <span className={styles.sectionLabel}>Tracking health</span>

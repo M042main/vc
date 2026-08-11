@@ -210,6 +210,10 @@ input:focus-visible {
   padding: clamp(18px, 2.4vw, 34px) clamp(16px, 4vw, 64px) 30px;
 }
 
+.profile-shell {
+  margin-bottom: 16px;
+}
+
 .gallery-loading-shell {
   display: grid;
   min-height: 420px;

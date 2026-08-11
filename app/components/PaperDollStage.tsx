@@ -28,8 +28,11 @@ export type DollExpression = {
   blinkLeft: number;
   blinkRight: number;
   mouthOpen: number;
+  jawOpen: number;
   smile: number;
   browUp: number;
+  browUpLeft: number;
+  browUpRight: number;
   lookX: number;
   lookY: number;
 };
@@ -61,9 +64,11 @@ export type PaperDollStageHandle = {
   rotate: (direction: -1 | 1) => void;
 };
 
-type PaperDollStageProps = {
+export type PaperDollStageProps = {
   artwork: string;
   backgroundColor?: string;
+  backgroundImage?: CanvasImageSource | null;
+  backgroundFit?: "cover" | "contain";
   className?: string;
   onAnimationPlayingChange?: (playing: boolean) => void;
 };
@@ -140,7 +145,8 @@ type LimbMesh = {
 type DollSprites = {
   limbs: readonly LimbMesh[];
   torso: RigSprite;
-  head: RigSprite;
+  headBase: RigSprite;
+  face: RigSprite;
 };
 
 const ARTWORK_WIDTH = 600;
@@ -157,6 +163,9 @@ const ARTWORK_OWNERS = [
 type ArtworkOwner = (typeof ARTWORK_OWNERS)[number];
 type OwnedSprites = Record<ArtworkOwner, RigSprite>;
 const OWNER_SEAM_BLEED_PX = 8;
+const FACE_REGION = { x: 236, y: 60, width: 128, height: 140 } as const;
+const FACE_MESH_X = [236, 252, 264, 276, 288, 300, 312, 324, 336, 348, 364] as const;
+const FACE_MESH_Y = [60, 78, 90, 100, 110, 120, 134, 146, 156, 170, 184, 200] as const;
 let artworkOwnerMapCache: Uint8Array | null = null;
 
 const NEUTRAL_EXPRESSION: DollExpression = {
@@ -164,8 +173,11 @@ const NEUTRAL_EXPRESSION: DollExpression = {
   blinkLeft: 0,
   blinkRight: 0,
   mouthOpen: 0,
+  jawOpen: 0,
   smile: 0,
   browUp: 0,
+  browUpLeft: 0,
+  browUpRight: 0,
   lookX: 0,
   lookY: 0,
 };
@@ -541,10 +553,32 @@ function expressionFromFaceLandmarks(
     : 0;
   const faceWidth = landmarkDistance(landmarks, 234, 454) || mouthWidth * 2.8;
   const smileRatio = faceWidth ? mouthWidth / faceWidth : 0.3;
-  const browDistance =
-    (landmarkDistance(landmarks, 105, 159) +
-      landmarkDistance(landmarks, 334, 386)) /
-    2;
+  const normalizedFaceWidth = Math.max(faceWidth, 0.001);
+  const leftBrowRatio = landmarkDistance(landmarks, 105, 159) / normalizedFaceWidth;
+  const rightBrowRatio = landmarkDistance(landmarks, 334, 386) / normalizedFaceWidth;
+  const browUpLeft = clamp((leftBrowRatio - 0.035) / 0.055, 0, 1);
+  const browUpRight = clamp((rightBrowRatio - 0.035) / 0.055, 0, 1);
+  const mouthOpen = clamp((mouthOpenRatio - 0.04) / 0.42, 0, 1);
+  const lowerJawRatio =
+    landmarkDistance(landmarks, 14, 152) / normalizedFaceWidth;
+  const jawFromChin = clamp((lowerJawRatio - 0.17) / 0.2, 0, 1);
+  const jawOpen = clamp(mouthOpen * 0.82 + jawFromChin * 0.18, 0, 1);
+  const upperLip = landmarks[13];
+  const lowerLip = landmarks[14];
+  const leftMouthCorner = landmarks[61];
+  const rightMouthCorner = landmarks[291];
+  const mouthCenterY =
+    upperLip && lowerLip ? (upperLip.y + lowerLip.y) / 2 : 0;
+  const mouthCornerY =
+    leftMouthCorner && rightMouthCorner
+      ? (leftMouthCorner.y + rightMouthCorner.y) / 2
+      : mouthCenterY;
+  const cornerLift = (mouthCenterY - mouthCornerY) / normalizedFaceWidth;
+  const smile = clamp(
+    (smileRatio - 0.28) / 0.16 + clamp((cornerLift - 0.004) / 0.045, 0, 1) * 0.35,
+    0,
+    1,
+  );
 
   let lookX = 0;
   let lookY = 0;
@@ -563,9 +597,12 @@ function expressionFromFaceLandmarks(
     blink: (blinkLeft + blinkRight) / 2,
     blinkLeft,
     blinkRight,
-    mouthOpen: clamp((mouthOpenRatio - 0.04) / 0.42, 0, 1),
-    smile: clamp((smileRatio - 0.28) / 0.16, 0, 1),
-    browUp: clamp((browDistance / Math.max(faceWidth, 0.001) - 0.035) / 0.055, 0, 1),
+    mouthOpen,
+    jawOpen,
+    smile,
+    browUp: (browUpLeft + browUpRight) / 2,
+    browUpLeft,
+    browUpRight,
     lookX,
     lookY,
   };
@@ -577,8 +614,11 @@ function expressionFromMotion(expression: PaperDollExpression): DollExpression {
     blinkLeft: expression.blinkLeft,
     blinkRight: expression.blinkRight,
     mouthOpen: expression.mouthOpen,
+    jawOpen: expression.mouthOpen * 0.82,
     smile: expression.smile,
     browUp: expression.browUp,
+    browUpLeft: expression.browUp,
+    browUpRight: expression.browUp,
     lookX: expression.lookX,
     lookY: expression.lookY,
   };
@@ -595,8 +635,13 @@ function blendExpression(
     blinkRight:
       current.blinkRight + (next.blinkRight - current.blinkRight) * amount,
     mouthOpen: current.mouthOpen + (next.mouthOpen - current.mouthOpen) * amount,
+    jawOpen: current.jawOpen + (next.jawOpen - current.jawOpen) * amount,
     smile: current.smile + (next.smile - current.smile) * amount,
     browUp: current.browUp + (next.browUp - current.browUp) * amount,
+    browUpLeft:
+      current.browUpLeft + (next.browUpLeft - current.browUpLeft) * amount,
+    browUpRight:
+      current.browUpRight + (next.browUpRight - current.browUpRight) * amount,
     lookX: current.lookX + (next.lookX - current.lookX) * amount,
     lookY: current.lookY + (next.lookY - current.lookY) * amount,
   };
@@ -998,14 +1043,65 @@ function createLimbMesh(
   return { sprite, upperBone, lowerBone, triangles };
 }
 
+function createFacialSprites(head: RigSprite) {
+  const baseCanvas = document.createElement("canvas");
+  baseCanvas.width = head.canvas.width;
+  baseCanvas.height = head.canvas.height;
+  const baseContext = baseCanvas.getContext("2d");
+  if (!baseContext) throw new Error("머리 레이어를 준비하지 못했습니다.");
+  baseContext.drawImage(head.canvas, 0, 0);
+
+  const faceX = Math.max(head.x, FACE_REGION.x);
+  const faceY = Math.max(head.y, FACE_REGION.y);
+  const faceRight = Math.min(
+    head.x + head.canvas.width,
+    FACE_REGION.x + FACE_REGION.width,
+  );
+  const faceBottom = Math.min(
+    head.y + head.canvas.height,
+    FACE_REGION.y + FACE_REGION.height,
+  );
+  const faceWidth = Math.max(1, faceRight - faceX);
+  const faceHeight = Math.max(1, faceBottom - faceY);
+  const faceCanvas = document.createElement("canvas");
+  faceCanvas.width = faceWidth;
+  faceCanvas.height = faceHeight;
+  const faceContext = faceCanvas.getContext("2d");
+  if (!faceContext) throw new Error("표정 레이어를 준비하지 못했습니다.");
+
+  if (faceRight > faceX && faceBottom > faceY) {
+    const sourceX = faceX - head.x;
+    const sourceY = faceY - head.y;
+    faceContext.drawImage(
+      head.canvas,
+      sourceX,
+      sourceY,
+      faceWidth,
+      faceHeight,
+      0,
+      0,
+      faceWidth,
+      faceHeight,
+    );
+    baseContext.clearRect(sourceX, sourceY, faceWidth, faceHeight);
+  }
+
+  return {
+    base: { canvas: baseCanvas, x: head.x, y: head.y } satisfies RigSprite,
+    face: { canvas: faceCanvas, x: faceX, y: faceY } satisfies RigSprite,
+  };
+}
+
 function createDollSprites(image: HTMLImageElement): DollSprites {
   const sprites = createOwnedSprites(image);
+  const head = createFacialSprites(sprites.head);
   return {
     limbs: LIMB_CHAINS.map(({ owner, upperBone, lowerBone }) =>
       createLimbMesh(sprites[owner], upperBone, lowerBone),
     ),
     torso: sprites.torso,
-    head: sprites.head,
+    headBase: head.base,
+    face: head.face,
   };
 }
 
@@ -1163,9 +1259,113 @@ function drawTorso(context: CanvasRenderingContext2D, sprite: RigSprite) {
   context.drawImage(sprite.canvas, sprite.x, sprite.y);
 }
 
-function drawHead(
+function regionInfluence(
+  point: Point,
+  centerX: number,
+  centerY: number,
+  radiusX: number,
+  radiusY: number,
+) {
+  const normalized = Math.hypot(
+    (point.x - centerX) / radiusX,
+    (point.y - centerY) / radiusY,
+  );
+  if (normalized >= 1) return 0;
+  const amount = 1 - normalized;
+  return amount * amount * (3 - 2 * amount);
+}
+
+function warpFacialPoint(source: Point, expression: DollExpression): Point {
+  const warped = { ...source };
+  const applyEye = (centerX: number, blink: number) => {
+    const influence = regionInfluence(source, centerX, 111, 27, 18);
+    warped.y += (111 - source.y) * blink * influence * 0.94;
+    warped.x += expression.lookX * 3 * influence * (1 - blink * 0.55);
+    warped.y += expression.lookY * 1.8 * influence * (1 - blink * 0.55);
+  };
+  applyEye(270, expression.blinkLeft);
+  applyEye(330, expression.blinkRight);
+
+  const leftBrow = regionInfluence(source, 270, 88, 32, 15);
+  const rightBrow = regionInfluence(source, 330, 88, 32, 15);
+  warped.y -= expression.browUpLeft * leftBrow * 7;
+  warped.y -= expression.browUpRight * rightBrow * 7;
+
+  const mouthInfluence = regionInfluence(source, 300, 152, 62, 24);
+  const lipAmount = clamp((source.y - 140) / 12, 0, 1);
+  const mouthX = (source.x - 300) / 62;
+  warped.x +=
+    (source.x - 300) * expression.smile * mouthInfluence * lipAmount * 0.1;
+  warped.y +=
+    (source.y - 152) * expression.mouthOpen * mouthInfluence * lipAmount * 0.7 -
+    Math.abs(mouthX) * expression.smile * mouthInfluence * lipAmount * 6.5;
+
+  const jawInfluence = regionInfluence(source, 300, 169, 64, 31);
+  const lowerFaceAmount = clamp((source.y - 150) / 42, 0, 1);
+  warped.y += expression.jawOpen * jawInfluence * lowerFaceAmount * 11;
+  warped.x +=
+    (source.x - 300) * expression.jawOpen * jawInfluence * lowerFaceAmount * 0.018;
+  return warped;
+}
+
+function meshAxis(
+  spriteStart: number,
+  spriteLength: number,
+  anchors: readonly number[],
+) {
+  const points = new Set<number>([0, spriteLength]);
+  const spriteEnd = spriteStart + spriteLength;
+  for (const anchor of anchors) {
+    if (anchor > spriteStart && anchor < spriteEnd) {
+      points.add(anchor - spriteStart);
+    }
+  }
+  return [...points].sort((left, right) => left - right);
+}
+
+function drawFacialFeatures(
   context: CanvasRenderingContext2D,
   sprite: RigSprite,
+  expression: DollExpression,
+) {
+  const columns = meshAxis(sprite.x, sprite.canvas.width, FACE_MESH_X);
+  const rows = meshAxis(sprite.y, sprite.canvas.height, FACE_MESH_Y);
+  const warp = (local: Point) =>
+    warpFacialPoint(
+      { x: sprite.x + local.x, y: sprite.y + local.y },
+      expression,
+    );
+
+  for (let row = 0; row < rows.length - 1; row += 1) {
+    for (let column = 0; column < columns.length - 1; column += 1) {
+      const left = columns[column];
+      const right = columns[column + 1];
+      const top = rows[row];
+      const bottom = rows[row + 1];
+      const a = { x: left, y: top };
+      const b = { x: right, y: top };
+      const c = { x: right, y: bottom };
+      const d = { x: left, y: bottom };
+      drawTexturedTriangle(
+        context,
+        sprite.canvas,
+        [a, b, c],
+        [warp(a), warp(b), warp(c)],
+      );
+      drawTexturedTriangle(
+        context,
+        sprite.canvas,
+        [a, c, d],
+        [warp(a), warp(c), warp(d)],
+      );
+    }
+  }
+}
+
+function drawHead(
+  context: CanvasRenderingContext2D,
+  base: RigSprite,
+  face: RigSprite,
   rotation: number,
   expression: DollExpression,
 ) {
@@ -1174,51 +1374,8 @@ function drawHead(
   context.translate(neck.x, neck.y);
   context.rotate(rotation);
   context.translate(-neck.x, -neck.y);
-
-  const columns = Math.max(1, Math.min(16, Math.ceil(sprite.canvas.width / 24)));
-  const rows = Math.max(1, Math.min(20, Math.ceil(sprite.canvas.height / 24)));
-  const warp = (local: Point): Point => {
-    const global = { x: sprite.x + local.x, y: sprite.y + local.y };
-    const eyeWarp = (centerX: number, blink: number) => {
-      const dx = (global.x - centerX) / 38;
-      const dy = (global.y - 111) / 25;
-      const influence = Math.exp(-(dx * dx * 1.5 + dy * dy * 2.2));
-      global.y += (111 - global.y) * blink * influence * 0.88;
-      global.x += expression.lookX * 2.2 * influence;
-      global.y += expression.lookY * 1.4 * influence;
-    };
-    eyeWarp(270, expression.blinkLeft);
-    eyeWarp(330, expression.blinkRight);
-
-    const mouthDx = (global.x - 300) / 62;
-    const mouthDy = (global.y - 147) / 34;
-    const mouthInfluence = Math.exp(-(mouthDx * mouthDx + mouthDy * mouthDy));
-    global.x += (global.x - 300) * expression.smile * mouthInfluence * 0.08;
-    global.y +=
-      (global.y - 147) * expression.mouthOpen * mouthInfluence * 0.58 -
-      Math.abs(mouthDx) * expression.smile * mouthInfluence * 5.5;
-
-    const browInfluence = Math.exp(
-      -Math.pow((global.y - 87) / 22, 2) - Math.pow((global.x - 300) / 82, 2),
-    );
-    global.y -= expression.browUp * browInfluence * 5;
-    return global;
-  };
-
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const left = (column / columns) * sprite.canvas.width;
-      const right = ((column + 1) / columns) * sprite.canvas.width;
-      const top = (row / rows) * sprite.canvas.height;
-      const bottom = ((row + 1) / rows) * sprite.canvas.height;
-      const a = { x: left, y: top };
-      const b = { x: right, y: top };
-      const c = { x: right, y: bottom };
-      const d = { x: left, y: bottom };
-      drawTexturedTriangle(context, sprite.canvas, [a, b, c], [warp(a), warp(b), warp(c)]);
-      drawTexturedTriangle(context, sprite.canvas, [a, c, d], [warp(a), warp(c), warp(d)]);
-    }
-  }
+  context.drawImage(base.canvas, base.x, base.y);
+  drawFacialFeatures(context, face, expression);
   context.restore();
 }
 
@@ -1263,9 +1420,56 @@ function findOpaqueBounds(canvas: HTMLCanvasElement) {
   };
 }
 
+function canvasImageSize(image: CanvasImageSource) {
+  const source = image as {
+    naturalWidth?: number;
+    naturalHeight?: number;
+    videoWidth?: number;
+    videoHeight?: number;
+    width?: number;
+    height?: number;
+  };
+  const width = source.naturalWidth || source.videoWidth || source.width || 0;
+  const height = source.naturalHeight || source.videoHeight || source.height || 0;
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ? { width, height }
+    : null;
+}
+
+function drawFittedBackground(
+  context: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  width: number,
+  height: number,
+  fit: "cover" | "contain",
+) {
+  const source = canvasImageSize(image);
+  if (!source) return;
+  const scale =
+    fit === "contain"
+      ? Math.min(width / source.width, height / source.height)
+      : Math.max(width / source.width, height / source.height);
+  const fittedWidth = source.width * scale;
+  const fittedHeight = source.height * scale;
+  context.drawImage(
+    image,
+    (width - fittedWidth) / 2,
+    (height - fittedHeight) / 2,
+    fittedWidth,
+    fittedHeight,
+  );
+}
+
 export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStageProps>(
   function PaperDollStage(
-    { artwork, backgroundColor, className, onAnimationPlayingChange },
+    {
+      artwork,
+      backgroundColor,
+      backgroundImage,
+      backgroundFit = "cover",
+      className,
+      onAnimationPlayingChange,
+    },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null);
@@ -1309,9 +1513,20 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
         }
 
         context.clearRect(0, 0, canvas.width, canvas.height);
-        if (!captureSafe && backgroundColor) {
-          context.fillStyle = backgroundColor;
-          context.fillRect(0, 0, canvas.width, canvas.height);
+        if (!captureSafe) {
+          if (backgroundColor) {
+            context.fillStyle = backgroundColor;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+          }
+          if (backgroundImage) {
+            drawFittedBackground(
+              context,
+              backgroundImage,
+              canvas.width,
+              canvas.height,
+              backgroundFit,
+            );
+          }
         }
         context.imageSmoothingEnabled = true;
         context.imageSmoothingQuality = quality;
@@ -1346,11 +1561,17 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           drawLimb(context, limb, targets);
         }
         drawTorso(context, sprites.torso);
-        drawHead(context, sprites.head, pose.headRotation, expression);
+        drawHead(
+          context,
+          sprites.headBase,
+          sprites.face,
+          pose.headRotation,
+          expression,
+        );
 
         context.restore();
       },
-      [backgroundColor],
+      [backgroundColor, backgroundFit, backgroundImage],
     );
 
     const redraw = useCallback(() => {

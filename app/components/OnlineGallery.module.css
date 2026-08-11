@@ -255,6 +255,49 @@
   transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
 }
 
+.profileState {
+  padding: 7px 9px;
+  border-radius: 999px;
+  background: #f0ede5;
+  color: #5f5c54;
+  font-size: 9px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.galleryFilter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid rgba(23, 23, 19, 0.13);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.galleryFilter label,
+.galleryFilter span {
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.galleryFilter select {
+  min-height: 38px;
+  padding: 0 32px 0 10px;
+  border: 1px solid rgba(23, 23, 19, 0.22);
+  border-radius: 10px;
+  background: #fff;
+  color: #171713;
+  font: inherit;
+  font-size: 11px;
+}
+
+.galleryFilter span {
+  margin-left: auto;
+  color: #706d65;
+}
+
 .actionStatus {
   min-height: 20px;
   margin: 10px 2px 0;
@@ -394,6 +437,18 @@
   font-size: 9px;
   font-weight: 700;
   line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardClass {
+  display: block;
+  overflow: hidden;
+  margin-bottom: 3px;
+  color: #4f5f28;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -699,6 +754,21 @@
   .editNameButton {
     grid-column: 1 / -1;
     width: 100%;
+  }
+
+  .profileState {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    text-align: center;
+  }
+
+  .galleryFilter {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .galleryFilter span {
+    margin-left: 0;
   }
 
   .grid {

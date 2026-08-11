@@ -1,5 +1,6 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import {
+  get,
   getDatabase,
   limitToLast,
   onValue,
@@ -11,6 +12,11 @@ import {
   type Database,
   type Unsubscribe,
 } from "firebase/database";
+import {
+  createVisitorProfile,
+  visitorArtworkKey,
+  type VisitorProfile,
+} from "./visitorProfile";
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDbqMEThRW9pXEbi-HuTpAgUzTcnCO_Luo",
@@ -29,6 +35,8 @@ const FIREBASE_APP_NAME = "motion-ink-gallery-a7f3c9";
 export const GALLERY_DATABASE_PATH =
   "/000000/박근석_t7/motion_ink_gallery_a7f3c9";
 const GALLERY_ENTRIES_PATH = `${GALLERY_DATABASE_PATH}/entries`;
+const GALLERY_CLASSES_PATH = `${GALLERY_DATABASE_PATH}/classes`;
+const GALLERY_ARTWORKS_PATH = `${GALLERY_DATABASE_PATH}/artworks`;
 
 const MAX_GALLERY_ENTRIES = 30;
 const MAX_GALLERY_NAME_LENGTH = 60;
@@ -38,25 +46,43 @@ const PNG_DATA_URL_PREFIX = "data:image/png;base64,";
 const PNG_BASE64_SIGNATURE = "iVBORw0KGgo";
 const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
 const GALLERY_DELETE_API_PATH = "/api/gallery/delete";
+const GALLERY_CLASSES_API_PATH = "/api/gallery/classes";
+const MAX_CLASS_NAME_LENGTH = 40;
 
 export type GalleryEntry = {
   id: string;
   name: string;
+  classId: string | null;
+  className: string | null;
   imageDataUrl: string;
   createdAt: number;
 };
 
 type GalleryRecord = Omit<GalleryEntry, "id">;
 
+export type ClassRecord = {
+  id: string;
+  name: string;
+  createdAt: number;
+};
+
+export type SavedCharacterArtwork = {
+  name: string;
+  classId: string;
+  className: string;
+  imageDataUrl: string;
+  updatedAt: number;
+};
+
 export type GallerySubscription = {
   onData: (entries: GalleryEntry[]) => void;
   onError: (error: Error) => void;
 };
 
-export type PublishGalleryEntryInput = Pick<
-  GalleryEntry,
-  "name" | "imageDataUrl"
->;
+export type PublishGalleryEntryInput = {
+  profile: VisitorProfile;
+  imageDataUrl: string;
+};
 
 function getGalleryApp(): FirebaseApp {
   const existingApp = getApps().find((app) => app.name === FIREBASE_APP_NAME);
@@ -92,6 +118,23 @@ function validateName(value: unknown): string {
     })
   ) {
     throw new Error("캐릭터 이름에는 제어 문자를 사용할 수 없습니다.");
+  }
+  return name;
+}
+
+function validateClassName(value: unknown): string {
+  if (typeof value !== "string") throw new Error("학급 이름이 올바르지 않습니다.");
+  const name = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  if (!name || Array.from(name).length > MAX_CLASS_NAME_LENGTH) {
+    throw new Error(`학급 이름은 ${MAX_CLASS_NAME_LENGTH}자 이하로 입력해 주세요.`);
+  }
+  if (
+    Array.from(name).some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || codePoint === 0x7f;
+    })
+  ) {
+    throw new Error("학급 이름에는 제어 문자를 사용할 수 없습니다.");
   }
   return name;
 }
@@ -149,8 +192,14 @@ function parseGalleryEntry(id: string, value: unknown): GalleryEntry {
   }
 
   const candidate = value as Record<string, unknown>;
+  const hasClassMetadata =
+    typeof candidate.classId === "string" &&
+    FIREBASE_PUSH_KEY_PATTERN.test(candidate.classId) &&
+    typeof candidate.className === "string";
   const record: GalleryRecord = {
     name: validateName(candidate.name),
+    classId: hasClassMetadata ? candidate.classId as string : null,
+    className: hasClassMetadata ? validateClassName(candidate.className) : null,
     imageDataUrl: validatePngDataUrl(candidate.imageDataUrl),
     createdAt: validateCreatedAt(candidate.createdAt),
   };
@@ -178,6 +227,28 @@ function entriesFromSnapshot(snapshot: DataSnapshot) {
       right.createdAt - left.createdAt || right.id.localeCompare(left.id),
   );
   return { entries, errors };
+}
+
+function classesFromSnapshot(snapshot: DataSnapshot): ClassRecord[] {
+  const classes: ClassRecord[] = [];
+  snapshot.forEach((child) => {
+    if (!child.key || !FIREBASE_PUSH_KEY_PATTERN.test(child.key)) return;
+    const value = child.val() as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const candidate = value as Record<string, unknown>;
+    try {
+      classes.push({
+        id: child.key,
+        name: validateClassName(candidate.name),
+        createdAt: validateCreatedAt(candidate.createdAt),
+      });
+    } catch {
+      // Invalid shared records are omitted without hiding the usable class list.
+    }
+  });
+  return classes.sort(
+    (left, right) => left.name.localeCompare(right.name, "ko") || left.id.localeCompare(right.id),
+  );
 }
 
 export function subscribeGalleryEntries({
@@ -208,12 +279,54 @@ export function subscribeGalleryEntries({
   );
 }
 
+export function subscribeClassRecords({
+  onData,
+  onError,
+}: {
+  onData: (classes: ClassRecord[]) => void;
+  onError: (error: Error) => void;
+}): Unsubscribe {
+  const database = getGalleryDatabase();
+  return onValue(
+    ref(database, GALLERY_CLASSES_PATH),
+    (snapshot) => onData(classesFromSnapshot(snapshot)),
+    (error) => onError(toError(error, "학급 목록을 불러오지 못했습니다.")),
+  );
+}
+
+async function requireActiveClass(profile: VisitorProfile): Promise<ClassRecord> {
+  if (profile.guest || !profile.classId) {
+    throw new Error("게스트는 클라우드 저장을 사용할 수 없습니다.");
+  }
+  const GALLERY_CLASS_PATH = `${GALLERY_CLASSES_PATH}/${profile.classId}`;
+  const database = getGalleryDatabase();
+  const snapshot = await get(ref(database, GALLERY_CLASS_PATH));
+  if (!snapshot.exists()) throw new Error("선택한 학급이 더 이상 존재하지 않습니다.");
+  const value = snapshot.val() as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("선택한 학급 정보가 올바르지 않습니다.");
+  }
+  const candidate = value as Record<string, unknown>;
+  return {
+    id: profile.classId,
+    name: validateClassName(candidate.name),
+    createdAt: validateCreatedAt(candidate.createdAt),
+  };
+}
+
 export async function publishGalleryEntry({
-  name,
+  profile,
   imageDataUrl,
 }: PublishGalleryEntryInput): Promise<GalleryEntry> {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) {
+    throw new Error("게스트는 온라인 갤러리에 저장할 수 없습니다.");
+  }
+  const activeClass = await requireActiveClass(activeProfile);
   const record: GalleryRecord = {
-    name: validateName(name),
+    name: validateName(activeProfile.name),
+    classId: activeProfile.classId,
+    className: activeClass.name,
     imageDataUrl: validatePngDataUrl(imageDataUrl),
     createdAt: Date.now(),
   };
@@ -264,5 +377,110 @@ export async function deleteGalleryEntry(id: string): Promise<void> {
       // Keep the safe fallback when an upstream response is not JSON.
     }
     throw new Error(message);
+  }
+}
+
+async function apiError(response: Response, fallback: string): Promise<Error> {
+  let message = fallback;
+  try {
+    const payload = (await response.json()) as unknown;
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const serverMessage = (payload as Record<string, unknown>).error;
+      if (typeof serverMessage === "string" && serverMessage) message = serverMessage;
+    }
+  } catch {
+    // Keep the safe fallback for non-JSON failures.
+  }
+  return new Error(message);
+}
+
+export async function createClassRecord(name: string): Promise<ClassRecord> {
+  const validatedName = validateClassName(name);
+  const response = await fetch(GALLERY_CLASSES_API_PATH, {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ name: validatedName }),
+  });
+  if (!response.ok) throw await apiError(response, "학급을 만들지 못했습니다.");
+
+  const payload = (await response.json()) as unknown;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("학급 생성 응답이 올바르지 않습니다.");
+  }
+  const candidate = (payload as Record<string, unknown>).classRecord;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    throw new Error("학급 생성 응답이 올바르지 않습니다.");
+  }
+  const record = candidate as Record<string, unknown>;
+  return {
+    id: validateGalleryEntryId(record.id),
+    name: validateClassName(record.name),
+    createdAt: validateCreatedAt(record.createdAt),
+  };
+}
+
+export async function deleteClassRecord(id: string): Promise<void> {
+  const validatedId = validateGalleryEntryId(id);
+  const response = await fetch(GALLERY_CLASSES_API_PATH, {
+    method: "DELETE",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ id: validatedId }),
+  });
+  if (!response.ok) throw await apiError(response, "학급을 삭제하지 못했습니다.");
+}
+
+export async function saveLatestCharacterArtwork(
+  profile: VisitorProfile,
+  imageDataUrl: string,
+): Promise<SavedCharacterArtwork> {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) {
+    throw new Error("게스트는 클라우드 작품 저장을 사용할 수 없습니다.");
+  }
+  const activeClass = await requireActiveClass(activeProfile);
+  const record: SavedCharacterArtwork = {
+    name: validateName(activeProfile.name),
+    classId: activeProfile.classId,
+    className: activeClass.name,
+    imageDataUrl: validatePngDataUrl(imageDataUrl),
+    updatedAt: Date.now(),
+  };
+  const key = visitorArtworkKey(activeProfile);
+  const GALLERY_ARTWORK_PATH = `${GALLERY_ARTWORKS_PATH}/${key}`;
+  const database = getGalleryDatabase();
+  await set(ref(database, GALLERY_ARTWORK_PATH), record);
+  return record;
+}
+
+export async function loadLatestCharacterArtwork(
+  profile: VisitorProfile,
+): Promise<SavedCharacterArtwork | null> {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) return null;
+  const key = visitorArtworkKey(activeProfile);
+  const GALLERY_ARTWORK_PATH = `${GALLERY_ARTWORKS_PATH}/${key}`;
+  const database = getGalleryDatabase();
+  const snapshot = await get(ref(database, GALLERY_ARTWORK_PATH));
+  if (!snapshot.exists()) return null;
+  const value = snapshot.val() as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  try {
+    const record: SavedCharacterArtwork = {
+      name: validateName(candidate.name),
+      classId: validateGalleryEntryId(candidate.classId),
+      className: validateClassName(candidate.className),
+      imageDataUrl: validatePngDataUrl(candidate.imageDataUrl),
+      updatedAt: validateCreatedAt(candidate.updatedAt),
+    };
+    return record.classId === activeProfile.classId && record.name === activeProfile.name
+      ? record
+      : null;
+  } catch {
+    return null;
   }
 }

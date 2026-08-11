@@ -3,6 +3,7 @@
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -19,10 +20,22 @@ import {
 } from "lucide-react";
 import { CharacterCreator } from "./components/CharacterCreator";
 import {
+  ClassOnboarding,
+  useVisitorProfile,
+} from "./components/ClassOnboarding";
+import {
   VrmStudio,
   type VrmStudioCapture,
 } from "./components/VrmStudio";
+import {
+  loadLatestCharacterArtwork,
+  saveLatestCharacterArtwork,
+} from "./lib/firebaseGallery";
 import { PaperDollCharacterStore } from "./lib/paperDollCharacterStore";
+import {
+  visitorArtworkKey,
+  type VisitorProfile,
+} from "./lib/visitorProfile";
 
 const OnlineGallery = lazy(() =>
   import("./components/OnlineGallery").then((module) => ({
@@ -39,9 +52,18 @@ const SAVED_CHARACTER_ID = "motion-ink-latest-character-t-pose-v2";
 const ADMIN_ID = "m042";
 const ADMIN_SESSION_KEY = "virtual-creator.admin.m042";
 
+function characterStorageId(profile: VisitorProfile) {
+  return profile.guest
+    ? `${SAVED_CHARACTER_ID}:guest`
+    : `${SAVED_CHARACTER_ID}:${visitorArtworkKey(profile)}`;
+}
+
 export default function Home() {
+  const { profile, profileReady, setProfile } = useVisitorProfile();
   const [mode, setMode] = useState<WorkspaceMode>("studio");
   const [characterArtwork, setCharacterArtwork] = useState<string | null>(null);
+  const [characterArtworkOwnerKey, setCharacterArtworkOwnerKey] =
+    useState("profile-loading");
   const [latestCapture, setLatestCapture] = useState<VrmStudioCapture | null>(null);
   const [adminMode, setAdminMode] = useState(false);
   const [adminDialogOpen, setAdminDialogOpen] = useState(false);
@@ -52,46 +74,85 @@ export default function Home() {
   const adminButtonRef = useRef<HTMLButtonElement>(null);
   const adminDialogRef = useRef<HTMLElement>(null);
   const adminInputRef = useRef<HTMLInputElement>(null);
+  const characterArtworkKey = !profileReady
+    ? "profile-loading"
+    : profile
+      ? characterStorageId(profile)
+      : "profile-unset";
+  const activeCharacterArtwork =
+    characterArtworkOwnerKey === characterArtworkKey ? characterArtwork : null;
+
+  const restoreAdminTriggerFocus = useCallback(() => {
+    window.setTimeout(() => {
+      const onboardingName = document.querySelector<HTMLInputElement>(
+        '.profile-shell input[autocomplete="nickname"]',
+      );
+      if (!profile && onboardingName) onboardingName.focus();
+      else adminButtonRef.current?.focus();
+    }, 0);
+  }, [profile]);
 
   useEffect(() => {
     const store = new PaperDollCharacterStore();
     characterStoreRef.current = store;
-    let active = true;
-    const restoreGeneration = artworkGenerationRef.current;
-    let fallbackArtwork: string | null = null;
-    try {
-      fallbackArtwork = window.localStorage.getItem(SAVED_CHARACTER_KEY);
-    } catch {
-      // Private browsing modes may disable local storage. The studio still works
-      // for the current tab, so no user-facing failure is necessary here.
-    }
-
-    void store
-      .get(SAVED_CHARACTER_ID)
-      .then((character) => {
-        if (!active || artworkGenerationRef.current !== restoreGeneration) return;
-        const savedArtwork =
-          typeof character?.artwork === "string"
-            ? character.artwork
-            : fallbackArtwork;
-        if (savedArtwork) setCharacterArtwork(savedArtwork);
-      })
-      .catch(() => {
-        if (
-          active &&
-          artworkGenerationRef.current === restoreGeneration &&
-          fallbackArtwork
-        ) {
-          setCharacterArtwork(fallbackArtwork);
-        }
-      });
 
     return () => {
-      active = false;
       if (characterStoreRef.current === store) characterStoreRef.current = null;
       void store.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (!profileReady) return;
+    const restoreGeneration = artworkGenerationRef.current + 1;
+    artworkGenerationRef.current = restoreGeneration;
+
+    if (!profile) {
+      const resetTimer = window.setTimeout(() => {
+        if (artworkGenerationRef.current === restoreGeneration) {
+          setCharacterArtworkOwnerKey("profile-unset");
+          setCharacterArtwork(null);
+        }
+      }, 0);
+      return () => window.clearTimeout(resetTimer);
+    }
+
+    const storageId = characterStorageId(profile);
+    const resetTimer = window.setTimeout(() => {
+      if (artworkGenerationRef.current === restoreGeneration) {
+        setCharacterArtworkOwnerKey(storageId);
+        setCharacterArtwork(null);
+      }
+    }, 0);
+    let legacyGuestArtwork: string | null = null;
+    if (profile.guest) {
+      try {
+        legacyGuestArtwork = window.localStorage.getItem(SAVED_CHARACTER_KEY);
+      } catch {
+        // IndexedDB and the current in-memory session remain available.
+      }
+    }
+
+    const localCharacter = characterStoreRef.current
+      ?.get(storageId)
+      .catch(() => null) ?? Promise.resolve(null);
+    const cloudCharacter = profile.guest
+      ? Promise.resolve(null)
+      : loadLatestCharacterArtwork(profile).catch(() => null);
+
+    void Promise.all([localCharacter, cloudCharacter]).then(
+      ([localSaved, cloudSaved]) => {
+        if (artworkGenerationRef.current !== restoreGeneration) return;
+        const restoredArtwork =
+          cloudSaved?.imageDataUrl ??
+          (typeof localSaved?.artwork === "string" ? localSaved.artwork : null) ??
+          legacyGuestArtwork;
+        setCharacterArtworkOwnerKey(storageId);
+        setCharacterArtwork(restoredArtwork);
+      },
+    );
+    return () => window.clearTimeout(resetTimer);
+  }, [profile, profileReady]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -117,7 +178,7 @@ export default function Home() {
         setAdminDialogOpen(false);
         setAdminIdDraft("");
         setAdminError(null);
-        window.setTimeout(() => adminButtonRef.current?.focus(), 0);
+        restoreAdminTriggerFocus();
         return;
       }
       if (event.key !== "Tab") return;
@@ -140,7 +201,7 @@ export default function Home() {
       window.clearTimeout(focusTimer);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [adminDialogOpen, adminMode]);
+  }, [adminDialogOpen, adminMode, restoreAdminTriggerFocus]);
 
   const openAdminDialog = () => {
     setAdminIdDraft("");
@@ -152,7 +213,7 @@ export default function Home() {
     setAdminDialogOpen(false);
     setAdminIdDraft("");
     setAdminError(null);
-    window.setTimeout(() => adminButtonRef.current?.focus(), 0);
+    restoreAdminTriggerFocus();
   };
 
   const enterAdminMode = (event: FormEvent<HTMLFormElement>) => {
@@ -182,22 +243,33 @@ export default function Home() {
     closeAdminDialog();
   };
 
-  const handleSendToStudio = (dataUrl: string) => {
-    artworkGenerationRef.current += 1;
+  const handleSendToStudio = async (dataUrl: string) => {
+    if (!profile) throw new Error("먼저 이름과 학급 프로필을 설정해 주세요.");
+    const saveGeneration = artworkGenerationRef.current + 1;
+    artworkGenerationRef.current = saveGeneration;
+    const storageId = characterStorageId(profile);
+    setCharacterArtworkOwnerKey(storageId);
     setCharacterArtwork(dataUrl);
-    try {
-      window.localStorage.setItem(SAVED_CHARACTER_KEY, dataUrl);
-    } catch {
-      // Keep the in-memory character even when the browser storage quota is full.
-    }
-    void characterStoreRef.current
+    const localSave = characterStoreRef.current
       ?.save({
-        id: SAVED_CHARACTER_ID,
-        name: "내가 그린 캐릭터",
+        id: storageId,
+        name: `${profile.className} · ${profile.name}`,
         artwork: dataUrl,
         playback: { presetId: "idle", playbackRate: 1, loop: true },
       })
       .catch(() => undefined);
+
+    if (profile.guest) {
+      try {
+        window.localStorage.setItem(SAVED_CHARACTER_KEY, dataUrl);
+      } catch {
+        // The current session still keeps the artwork when storage is unavailable.
+      }
+      await localSave;
+    } else {
+      await Promise.all([localSave, saveLatestCharacterArtwork(profile, dataUrl)]);
+    }
+    if (artworkGenerationRef.current !== saveGeneration) return;
     setMode("studio");
   };
 
@@ -263,13 +335,26 @@ export default function Home() {
       </header>
 
       <section className="workspace" id="top">
+        <ClassOnboarding
+          className="profile-shell"
+          profile={profile}
+          profileReady={profileReady}
+          blocking={!profile && profileReady}
+          isAdmin={adminMode}
+          onProfileChange={setProfile}
+          onAdminRequest={openAdminDialog}
+        />
         {mode === "studio" ? (
           <VrmStudio
-            artwork={characterArtwork}
+            artwork={activeCharacterArtwork}
             onCaptureReady={setLatestCapture}
           />
         ) : mode === "creator" ? (
-          <CharacterCreator onSendToStudio={handleSendToStudio} />
+          <CharacterCreator
+            initialArtwork={activeCharacterArtwork}
+            initialArtworkKey={characterArtworkKey}
+            onSendToStudio={handleSendToStudio}
+          />
         ) : (
           <Suspense
             fallback={
@@ -282,6 +367,7 @@ export default function Home() {
               pendingCapture={latestCapture}
               onUploadComplete={() => setLatestCapture(null)}
               isAdmin={adminMode}
+              profile={profile}
             />
           </Suspense>
         )}
@@ -311,7 +397,7 @@ export default function Home() {
             <h2 id="admin-dialog-title">m042 관리자</h2>
             {adminMode ? (
               <>
-                <p>관리자 모드가 켜져 있습니다. 갤러리에서 사진을 선택해 삭제할 수 있습니다.</p>
+                <p>관리자 모드가 켜져 있습니다. 학급을 만들거나 삭제하고 갤러리 사진을 관리할 수 있습니다.</p>
                 <button
                   className="admin-logout-button"
                   type="button"

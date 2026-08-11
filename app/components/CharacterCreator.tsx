@@ -33,7 +33,9 @@ type Point = {
 };
 
 export type CharacterCreatorProps = {
-  onSendToStudio?: (dataUrl: string) => void;
+  initialArtwork?: string | null;
+  initialArtworkKey?: string;
+  onSendToStudio?: (dataUrl: string) => void | Promise<void>;
 };
 
 const PALETTE = [
@@ -101,18 +103,16 @@ function createSilhouettePath() {
 }
 
 function drawWorkspace(context: CanvasRenderingContext2D) {
-  const gradient = context.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  gradient.addColorStop(0, "#F8F7F3");
-  gradient.addColorStop(1, "#EFEEE9");
-  context.fillStyle = gradient;
+  const checkerSize = 24;
+  context.fillStyle = "#F8F7F3";
   context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-  context.fillStyle = "rgba(78, 83, 92, 0.10)";
-  for (let y = 20; y < CANVAS_HEIGHT; y += 24) {
-    for (let x = 20; x < CANVAS_WIDTH; x += 24) {
-      context.beginPath();
-      context.arc(x, y, 1.1, 0, Math.PI * 2);
-      context.fill();
+  context.fillStyle = "rgba(78, 83, 92, 0.055)";
+  for (let y = 0; y < CANVAS_HEIGHT; y += checkerSize) {
+    for (let x = 0; x < CANVAS_WIDTH; x += checkerSize) {
+      if ((x / checkerSize + y / checkerSize) % 2 === 0) {
+        context.fillRect(x, y, checkerSize, checkerSize);
+      }
     }
   }
 
@@ -180,20 +180,41 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
   if (side === "front") {
     context.strokeStyle = "rgba(53, 58, 66, 0.34)";
     context.lineWidth = 1.5;
+
+    // Facial landmarks are display-only drawing anchors. Keeping the jaw,
+    // brows, eyes, nose, and mouth separate mirrors the regions animated by
+    // the paper-doll face mesh without baking any guide pixels into the PNG.
     context.beginPath();
-    context.ellipse(300, 111, 58, 41, 0, 0.1 * Math.PI, 0.9 * Math.PI);
+    context.moveTo(248, 78);
+    context.bezierCurveTo(238, 110, 242, 156, 263, 176);
+    context.quadraticCurveTo(300, 201, 337, 176);
+    context.bezierCurveTo(358, 156, 362, 110, 352, 78);
     context.stroke();
 
     context.beginPath();
-    context.moveTo(260, 111);
-    context.quadraticCurveTo(270, 104, 281, 111);
-    context.moveTo(319, 111);
-    context.quadraticCurveTo(330, 104, 340, 111);
+    context.moveTo(255, 91);
+    context.quadraticCurveTo(270, 82, 285, 91);
+    context.moveTo(315, 91);
+    context.quadraticCurveTo(330, 82, 345, 91);
     context.stroke();
 
     context.beginPath();
-    context.moveTo(287, 146);
-    context.quadraticCurveTo(300, 153, 313, 146);
+    context.ellipse(270, 111, 14, 7, 0, 0, Math.PI * 2);
+    context.ellipse(330, 111, 14, 7, 0, 0, Math.PI * 2);
+    context.stroke();
+
+    context.beginPath();
+    context.moveTo(300, 113);
+    context.quadraticCurveTo(296, 128, 294, 136);
+    context.quadraticCurveTo(300, 141, 306, 136);
+    context.stroke();
+
+    context.beginPath();
+    context.moveTo(276, 151);
+    context.quadraticCurveTo(300, 139, 324, 151);
+    context.quadraticCurveTo(300, 166, 276, 151);
+    context.moveTo(284, 151);
+    context.quadraticCurveTo(300, 156, 316, 151);
     context.stroke();
   } else {
     context.strokeStyle = "rgba(53, 58, 66, 0.34)";
@@ -265,6 +286,8 @@ function drawStroke(
 }
 
 export function CharacterCreator({
+  initialArtwork,
+  initialArtworkKey,
   onSendToStudio,
 }: CharacterCreatorProps) {
   const displayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -283,6 +306,9 @@ export function CharacterCreator({
   const activePointerRef = useRef<number | null>(null);
   const lastPointRef = useRef<Point | null>(null);
   const clearTimerRef = useRef<number | null>(null);
+  const artworkImportGenerationRef = useRef(0);
+  const importedArtworkKeyRef = useRef<string | null>(null);
+  const importedArtworkRef = useRef<string | null | undefined>(undefined);
 
   const [side, setSide] = useState<CharacterSide>("front");
   const [tool, setTool] = useState<DrawingTool>("pencil");
@@ -293,6 +319,7 @@ export function CharacterCreator({
     back: { undo: false, redo: false },
   });
   const [clearArmed, setClearArmed] = useState(false);
+  const [sendingToStudio, setSendingToStudio] = useState(false);
   const [status, setStatus] = useState(
     "앞면부터 자유롭게 그려 보세요. 몸 밖의 소매·치마·머리카락도 함께 움직여요.",
   );
@@ -307,12 +334,6 @@ export function CharacterCreator({
 
     context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     drawWorkspace(context);
-
-    context.save();
-    context.clip(createSilhouettePath());
-    context.fillStyle = "#FFFCF5";
-    context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    context.restore();
     context.drawImage(drawingLayer, 0, 0);
 
     drawGuide(context, whichSide);
@@ -340,6 +361,79 @@ export function CharacterCreator({
     paintVisibleCanvas(side);
   }, [paintVisibleCanvas, side]);
 
+  useEffect(() => {
+    const importKey =
+      initialArtworkKey?.trim() ||
+      (initialArtwork ? `artwork:${initialArtwork}` : "empty-front-artwork");
+    if (
+      importedArtworkKeyRef.current === importKey &&
+      importedArtworkRef.current === initialArtwork
+    ) {
+      return;
+    }
+
+    const generation = artworkImportGenerationRef.current + 1;
+    artworkImportGenerationRef.current = generation;
+    let resetTimer: number | null = null;
+    const image = initialArtwork ? new Image() : null;
+
+    const applyArtwork = (loadedImage: HTMLImageElement | null, failed = false) => {
+      if (artworkImportGenerationRef.current !== generation) return;
+      const frontLayer = drawingLayersRef.current.front;
+      const backLayer = drawingLayersRef.current.back;
+      const frontContext = frontLayer?.getContext("2d");
+      const backContext = backLayer?.getContext("2d");
+      if (!frontLayer || !backLayer || !frontContext || !backContext) return;
+
+      frontContext.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      backContext.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const blankFront = frontContext.getImageData(
+        0,
+        0,
+        CANVAS_WIDTH,
+        CANVAS_HEIGHT,
+      );
+      if (loadedImage) {
+        frontContext.drawImage(loadedImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      }
+
+      undoHistoryRef.current = {
+        front: loadedImage ? [blankFront] : [],
+        back: [],
+      };
+      redoHistoryRef.current = { front: [], back: [] };
+      importedArtworkKeyRef.current = importKey;
+      importedArtworkRef.current = initialArtwork;
+      setHistoryAvailability({
+        front: { undo: Boolean(loadedImage), redo: false },
+        back: { undo: false, redo: false },
+      });
+      paintVisibleCanvas(side);
+      if (failed) {
+        setStatus("저장된 캐릭터를 불러오지 못해 투명 캔버스로 시작했어요.");
+      } else if (loadedImage) {
+        setStatus("저장된 T-포즈 캐릭터를 불러왔어요. 그대로 이어 그릴 수 있어요.");
+      }
+    };
+
+    if (image && initialArtwork) {
+      image.decoding = "async";
+      image.onload = () => applyArtwork(image);
+      image.onerror = () => applyArtwork(null, true);
+      image.src = initialArtwork;
+    } else {
+      resetTimer = window.setTimeout(() => applyArtwork(null), 0);
+    }
+
+    return () => {
+      if (resetTimer !== null) window.clearTimeout(resetTimer);
+      if (image) {
+        image.onload = null;
+        image.onerror = null;
+      }
+    };
+  }, [initialArtwork, initialArtworkKey, paintVisibleCanvas, side]);
+
   const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const canvas = displayCanvasRef.current;
     if (!canvas) return { x: 0, y: 0, pressure: 0.5 };
@@ -358,6 +452,9 @@ export function CharacterCreator({
   };
 
   const saveUndoSnapshot = (whichSide: CharacterSide) => {
+    // A user's first stroke wins over a still-loading saved image so an older
+    // profile can never overwrite fresh work after an asynchronous decode.
+    artworkImportGenerationRef.current += 1;
     const layer = drawingLayersRef.current[whichSide];
     const context = layer?.getContext("2d");
     if (!layer || !context) return;
@@ -526,11 +623,6 @@ export function CharacterCreator({
     const context = exportCanvas.getContext("2d");
     if (!context) return null;
 
-    context.save();
-    context.clip(createSilhouettePath());
-    context.fillStyle = "#FFFCF5";
-    context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    context.restore();
     context.drawImage(drawingLayer, 0, 0);
 
     return exportCanvas.toDataURL("image/png");
@@ -551,15 +643,22 @@ export function CharacterCreator({
     );
   };
 
-  const sendToStudio = () => {
+  const sendToStudio = async () => {
     const dataUrl = createExportDataUrl("front");
-    if (!dataUrl) return;
-    onSendToStudio?.(dataUrl);
-    setStatus(
-      onSendToStudio
-        ? "앞면 캐릭터를 저장하고 애니메이션 스튜디오로 보냈어요."
-        : "캐릭터 PNG가 준비됐어요. 스튜디오 연결 후 바로 보낼 수 있어요.",
-    );
+    if (!dataUrl || sendingToStudio) return;
+    setSendingToStudio(true);
+    try {
+      await onSendToStudio?.(dataUrl);
+      setStatus(
+        onSendToStudio
+          ? "투명 캐릭터를 저장하고 애니메이션 스튜디오로 보냈어요."
+          : "투명 캐릭터 PNG가 준비됐어요. 스튜디오 연결 후 바로 보낼 수 있어요.",
+      );
+    } catch {
+      setStatus("캐릭터를 저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.");
+    } finally {
+      setSendingToStudio(false);
+    }
   };
 
   const canUndo = historyAvailability[side].undo;
@@ -572,9 +671,9 @@ export function CharacterCreator({
         <div>
           <h2 id="character-creator-title">내 손으로 만드는 캐릭터</h2>
           <p>
-            스켈레톤 가이드 위에 몸과 옷을 자유롭게 그려 보세요. 실루엣 밖의
-            소매·치마·머리카락도 가까운 관절을 따라 움직이고, 눈과 입은 카메라
-            표정을 따라갑니다.
+            투명 캔버스의 스켈레톤 위에 몸과 옷을 자유롭게 그려 보세요. 실루엣
+            밖의 소매·치마·머리카락도 가까운 관절을 따라 움직이고, 얼굴의 각
+            부위는 카메라 표정을 따라갑니다.
           </p>
         </div>
       </header>
@@ -736,8 +835,9 @@ export function CharacterCreator({
           <div className={styles.tipBox}>
             <span aria-hidden="true">✦</span>
             <p>
-              팔은 수평 T-포즈 가이드를 따라 그리세요. 얼굴의 눈·입 가이드 위에
-              그리면 트래킹할 때 깜박임, 미소, 입 벌림이 반영돼요. 파란 스켈레톤과 회색 실루엣은 결과물에 저장되지 않습니다.
+              팔은 수평 T-포즈를 따라 그리세요. 눈·눈썹·코·입·턱 가이드에 맞추면
+              깜박임, 눈썹, 미소, 입 벌림과 턱 움직임이 각각 반영돼요. 모든
+              가이드와 체크무늬는 결과물에 저장되지 않습니다.
             </p>
           </div>
         </aside>
@@ -749,7 +849,7 @@ export function CharacterCreator({
               T-포즈 · {side === "front" ? "앞면 편집 중" : "뒷면 편집 중"}
             </span>
             <span className={styles.guideNotice}>
-              T-포즈 관절·표정 가이드는 저장되지 않아요
+              투명 원본 · T-포즈 관절·표정 가이드는 저장되지 않아요
             </span>
           </div>
 
@@ -773,9 +873,8 @@ export function CharacterCreator({
           </div>
 
           <p id="character-canvas-help" className={styles.canvasHelp}>
-            팔을 수평으로 펼친 T-포즈 실루엣 위에 그리세요. 몸 밖의 픽셀도
-            가장 가까운 머리·몸통·팔·다리에 자동으로 붙고, 관절 주변은 선을
-            끊지 않아도 부드럽게 변형됩니다.
+            체크무늬는 투명 영역입니다. T-포즈 안팎 어디든 그릴 수 있으며 몸
+            밖의 픽셀도 가장 가까운 머리·몸통·팔·다리에 자동으로 붙습니다.
           </p>
 
           <div className={styles.status} aria-live="polite">
@@ -787,9 +886,15 @@ export function CharacterCreator({
               <Download size={19} aria-hidden="true" />
               현재 면 PNG 저장
             </button>
-            <button type="button" className={styles.sendButton} onClick={sendToStudio}>
+            <button
+              type="button"
+              className={styles.sendButton}
+              onClick={() => void sendToStudio()}
+              disabled={sendingToStudio}
+              aria-busy={sendingToStudio}
+            >
               <Send size={19} aria-hidden="true" />
-              스튜디오에서 움직이기
+              {sendingToStudio ? "저장 중…" : "저장하고 스튜디오로"}
             </button>
           </div>
         </div>
