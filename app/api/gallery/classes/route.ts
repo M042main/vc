@@ -8,10 +8,39 @@ const GALLERY_CLASSES_PATH =
 const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
 const MAX_CLASS_NAME_LENGTH = 40;
 
+type ApiErrorCode =
+  | "firebase_invalid_response"
+  | "firebase_network_error"
+  | "firebase_not_found"
+  | "firebase_permission_denied"
+  | "firebase_rate_limited"
+  | "firebase_request_failed"
+  | "firebase_unavailable";
+
 export const dynamic = "force-dynamic";
 
-function errorResponse(error: string, status: number) {
-  return Response.json({ error }, { status });
+function errorResponse(
+  error: string,
+  status: number,
+  options?: {
+    code?: ApiErrorCode;
+    retryable?: boolean;
+    upstreamStatus?: number;
+  },
+) {
+  return Response.json(
+    {
+      error,
+      ...(options?.code ? { code: options.code } : {}),
+      ...(options?.retryable !== undefined
+        ? { retryable: options.retryable }
+        : {}),
+      ...(options?.upstreamStatus !== undefined
+        ? { upstreamStatus: options.upstreamStatus }
+        : {}),
+    },
+    { status, headers: { "Cache-Control": "no-store" } },
+  );
 }
 function isAdmin(request: Request) {
   return request.headers.get(AUTHENTICATED_USER_EMAIL_HEADER) === ADMIN_EMAIL;
@@ -46,6 +75,64 @@ async function requestPayload(request: Request): Promise<Record<string, unknown>
   }
 }
 
+function firebaseFailureResponse(
+  response: Response,
+  action: "create" | "delete",
+) {
+  const upstreamStatus = response.status;
+  const actionLabel = action === "create" ? "학급을 만들" : "학급을 삭제하";
+
+  if (upstreamStatus === 401 || upstreamStatus === 403) {
+    return errorResponse(
+      "Firebase Realtime Database 쓰기 권한이 거부되었습니다. 데이터베이스 규칙을 확인해 주세요.",
+      502,
+      {
+        code: "firebase_permission_denied",
+        retryable: false,
+        upstreamStatus,
+      },
+    );
+  }
+  if (upstreamStatus === 404) {
+    return errorResponse(
+      "Firebase 데이터베이스 주소 또는 전용 학급 경로를 찾지 못했습니다.",
+      502,
+      {
+        code: "firebase_not_found",
+        retryable: false,
+        upstreamStatus,
+      },
+    );
+  }
+  if (upstreamStatus === 408 || upstreamStatus === 429) {
+    return errorResponse(
+      "Firebase 요청이 지연되거나 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+      502,
+      {
+        code: "firebase_rate_limited",
+        retryable: true,
+        upstreamStatus,
+      },
+    );
+  }
+  if (upstreamStatus >= 500) {
+    return errorResponse(
+      "Firebase 학급 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해 주세요.",
+      502,
+      {
+        code: "firebase_unavailable",
+        retryable: true,
+        upstreamStatus,
+      },
+    );
+  }
+  return errorResponse(`Firebase에서 ${actionLabel}지 못했습니다.`, 502, {
+    code: "firebase_request_failed",
+    retryable: false,
+    upstreamStatus,
+  });
+}
+
 export async function POST(request: Request) {
   if (!isAdmin(request)) return errorResponse("학급 관리 권한이 없습니다.", 403);
   const payload = await requestPayload(request);
@@ -53,30 +140,56 @@ export async function POST(request: Request) {
   if (!name) return errorResponse("학급 이름이 올바르지 않습니다.", 400);
 
   const createdAt = Date.now();
+  let firebaseResponse: Response;
   try {
-    const firebaseResponse = await fetch(
+    firebaseResponse = await fetch(
       new URL(`${GALLERY_CLASSES_PATH}.json`, FIREBASE_DATABASE_ORIGIN),
       {
         method: "POST",
-        cache: "no-store",
-        redirect: "error",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        // Cloudflare subrequests may receive a regional Firebase redirect.
+        // Following it is safe here because no Firebase credential is forwarded.
+        redirect: "follow",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json; charset=utf-8",
+        },
         body: JSON.stringify({ name, createdAt }),
       },
     );
-    if (!firebaseResponse.ok) {
-      return errorResponse("Firebase에 학급을 만들지 못했습니다.", 502);
-    }
-    const result = (await firebaseResponse.json()) as unknown;
-    const id =
-      result && typeof result === "object" && !Array.isArray(result)
-        ? validatedClassId((result as Record<string, unknown>).name)
-        : null;
-    if (!id) return errorResponse("Firebase 학급 생성 응답이 올바르지 않습니다.", 502);
-    return Response.json({ classRecord: { id, name, createdAt } }, { status: 201 });
   } catch {
-    return errorResponse("Firebase 학급 서비스에 연결하지 못했습니다.", 502);
+    return errorResponse(
+      "Firebase 학급 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      502,
+      { code: "firebase_network_error", retryable: true },
+    );
   }
+  if (!firebaseResponse.ok) return firebaseFailureResponse(firebaseResponse, "create");
+
+  let result: unknown;
+  try {
+    result = await firebaseResponse.json();
+  } catch {
+    return errorResponse("Firebase 학급 생성 응답을 읽지 못했습니다.", 502, {
+      code: "firebase_invalid_response",
+      retryable: true,
+      upstreamStatus: firebaseResponse.status,
+    });
+  }
+  const id =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? validatedClassId((result as Record<string, unknown>).name)
+      : null;
+  if (!id) {
+    return errorResponse("Firebase 학급 생성 응답이 올바르지 않습니다.", 502, {
+      code: "firebase_invalid_response",
+      retryable: false,
+      upstreamStatus: firebaseResponse.status,
+    });
+  }
+  return Response.json(
+    { classRecord: { id, name, createdAt } },
+    { status: 201, headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function DELETE(request: Request) {
@@ -89,18 +202,23 @@ export async function DELETE(request: Request) {
     `${GALLERY_CLASSES_PATH}/${id}.json`,
     FIREBASE_DATABASE_ORIGIN,
   );
+  let firebaseResponse: Response;
   try {
-    const firebaseResponse = await fetch(firebaseClassUrl, {
+    firebaseResponse = await fetch(firebaseClassUrl, {
       method: "DELETE",
-      cache: "no-store",
-      redirect: "error",
+      redirect: "follow",
       headers: { Accept: "application/json" },
     });
-    if (!firebaseResponse.ok) {
-      return errorResponse("Firebase에서 학급을 삭제하지 못했습니다.", 502);
-    }
-    return Response.json({ deleted: true, id });
   } catch {
-    return errorResponse("Firebase 학급 서비스에 연결하지 못했습니다.", 502);
+    return errorResponse(
+      "Firebase 학급 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      502,
+      { code: "firebase_network_error", retryable: true },
+    );
   }
+  if (!firebaseResponse.ok) return firebaseFailureResponse(firebaseResponse, "delete");
+  return Response.json(
+    { deleted: true, id },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

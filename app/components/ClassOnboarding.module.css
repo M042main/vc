@@ -99,6 +99,22 @@
   border-top: 1px solid rgba(23, 23, 19, 0.12);
 }
 
+.choiceHeading {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+}
+
+.choiceHeading strong {
+  font-size: 14px;
+}
+
+.choiceHeading span {
+  color: #6d6a62;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .profileForm > label,
 .adminArea form label {
   display: grid;
@@ -118,36 +134,8 @@
   color: #171713;
 }
 
-.profileForm fieldset {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin: 0;
-  padding: 8px 12px;
-  border: 1px solid rgba(23, 23, 19, 0.16);
-  border-radius: 11px;
-}
-
-.profileForm fieldset legend {
-  padding: 0 5px;
-  font-size: 10px;
-  font-weight: 850;
-}
-
-.profileForm fieldset label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.profileForm fieldset input {
-  width: 18px;
-  min-height: 18px;
-}
-
 .primaryButton {
+  grid-column: 1 / -1;
   border: 1px solid #171713;
   border-radius: 12px;
   background: #171713;
@@ -156,22 +144,39 @@
   font-weight: 900;
 }
 
-.adminRequestButton {
-  justify-self: start;
-  padding: 0 14px;
-  border: 1px solid rgba(23, 23, 19, 0.28);
+.guestExperience {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px dashed rgba(23, 23, 19, 0.3);
+  border-radius: 14px;
+  background: #f4f1e9;
+}
+
+.guestExperience > div {
+  display: grid;
+  gap: 4px;
+}
+
+.guestExperience strong {
+  font-size: 12px;
+}
+
+.guestButton {
+  padding: 0 16px;
+  border: 1px solid #171713;
   border-radius: 12px;
-  background: #fff;
+  background: #dfff45;
   color: #171713;
-  font-size: 11px;
-  font-weight: 850;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .guestNotice {
   margin: 0;
-  padding: 10px 12px;
-  border-radius: 11px;
-  background: #f1eee7;
   color: #65625b;
   font-size: 10px;
   line-height: 1.5;
@@ -282,6 +287,14 @@
 
   .profileForm {
     grid-template-columns: 1fr;
+  }
+
+  .guestExperience {
+    grid-template-columns: 1fr;
+  }
+
+  .guestButton {
+    width: 100%;
   }
 
   .summary {

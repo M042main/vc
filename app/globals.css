@@ -44,7 +44,8 @@ a {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 3px solid rgba(116, 92, 255, 0.45);
   outline-offset: 3px;
 }
@@ -179,9 +180,13 @@ input:focus-visible {
 }
 
 .admin-access-button {
+  position: fixed;
+  z-index: 95;
+  top: max(16px, env(safe-area-inset-top, 0px));
+  right: max(18px, env(safe-area-inset-right, 0px));
   display: inline-flex;
   align-items: center;
-  justify-self: end;
+  justify-content: center;
   gap: 8px;
   min-height: 44px;
   padding: 0 14px;
@@ -192,6 +197,8 @@ input:focus-visible {
   font-size: 12px;
   font-weight: 750;
   cursor: pointer;
+  box-shadow: 0 8px 24px rgba(23, 23, 19, 0.12);
+  backdrop-filter: blur(14px);
 }
 
 .admin-access-button:hover {
@@ -405,6 +412,8 @@ input:focus-visible {
   }
 
   .admin-access-button {
+    top: max(12px, env(safe-area-inset-top, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
     width: 44px;
     padding: 0;
     justify-content: center;

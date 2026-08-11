@@ -84,6 +84,34 @@ export type PublishGalleryEntryInput = {
   imageDataUrl: string;
 };
 
+export class GalleryServiceError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly status: number | null;
+
+  constructor(
+    message: string,
+    options: {
+      code: string;
+      retryable?: boolean;
+      status?: number | null;
+      cause?: unknown;
+    },
+  ) {
+    super(message, { cause: options.cause });
+    this.name = "GalleryServiceError";
+    this.code = options.code;
+    this.retryable = options.retryable ?? false;
+    this.status = options.status ?? null;
+  }
+}
+
+export function isRetryableGalleryServiceError(
+  error: unknown,
+): error is GalleryServiceError {
+  return error instanceof GalleryServiceError && error.retryable;
+}
+
 function getGalleryApp(): FirebaseApp {
   const existingApp = getApps().find((app) => app.name === FIREBASE_APP_NAME);
   if (existingApp) return getApp(FIREBASE_APP_NAME);
@@ -97,6 +125,27 @@ function getGalleryDatabase(): Database {
 function toError(error: unknown, fallbackMessage: string): Error {
   if (error instanceof Error) return error;
   return new Error(fallbackMessage, { cause: error });
+}
+
+function classReadError(error: unknown): GalleryServiceError {
+  const rawCode =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code: unknown }).code).toLowerCase()
+      : "";
+  const permissionDenied = rawCode.includes("permission");
+  return new GalleryServiceError(
+    permissionDenied
+      ? "Firebase에서 학급 목록 읽기 권한이 거부되었습니다. 데이터베이스 규칙을 확인해 주세요."
+      : "학급 목록 서비스에 연결하지 못했습니다. 네트워크 연결을 확인하고 다시 시도해 주세요.",
+    {
+      code: permissionDenied
+        ? "firebase_permission_denied"
+        : "firebase_class_read_failed",
+      retryable: !permissionDenied,
+      status: null,
+      cause: error,
+    },
+  );
 }
 
 function validateName(value: unknown): string {
@@ -290,7 +339,7 @@ export function subscribeClassRecords({
   return onValue(
     ref(database, GALLERY_CLASSES_PATH),
     (snapshot) => onData(classesFromSnapshot(snapshot)),
-    (error) => onError(toError(error, "학급 목록을 불러오지 못했습니다.")),
+    (error) => onError(classReadError(error)),
   );
 }
 
@@ -300,7 +349,12 @@ async function requireActiveClass(profile: VisitorProfile): Promise<ClassRecord>
   }
   const GALLERY_CLASS_PATH = `${GALLERY_CLASSES_PATH}/${profile.classId}`;
   const database = getGalleryDatabase();
-  const snapshot = await get(ref(database, GALLERY_CLASS_PATH));
+  let snapshot: DataSnapshot;
+  try {
+    snapshot = await get(ref(database, GALLERY_CLASS_PATH));
+  } catch (error) {
+    throw classReadError(error);
+  }
   if (!snapshot.exists()) throw new Error("선택한 학급이 더 이상 존재하지 않습니다.");
   const value = snapshot.val() as unknown;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -348,70 +402,124 @@ export async function deleteGalleryEntry(id: string): Promise<void> {
     response = await fetch(GALLERY_DELETE_API_PATH, {
       method: "POST",
       credentials: "same-origin",
-      cache: "no-store",
       headers: {
         Accept: "application/json",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=utf-8",
       },
       body: JSON.stringify({ id: validatedId }),
     });
   } catch (error) {
-    throw new Error("관리자 삭제 요청을 전송하지 못했습니다.", {
-      cause: error,
-    });
+    throw new GalleryServiceError(
+      "관리자 삭제 요청을 전송하지 못했습니다. 네트워크 연결을 확인하고 다시 시도해 주세요.",
+      {
+        code: "gallery_api_unreachable",
+        retryable: true,
+        status: null,
+        cause: error,
+      },
+    );
   }
 
   if (!response.ok) {
-    let message = "관리자 권한으로 캐릭터를 삭제하지 못했습니다.";
-    try {
-      const payload = (await response.json()) as unknown;
-      if (
-        payload &&
-        typeof payload === "object" &&
-        !Array.isArray(payload) &&
-        typeof (payload as Record<string, unknown>).error === "string"
-      ) {
-        message = (payload as Record<string, string>).error;
-      }
-    } catch {
-      // Keep the safe fallback when an upstream response is not JSON.
-    }
-    throw new Error(message);
+    throw await apiError(
+      response,
+      "관리자 권한으로 캐릭터를 삭제하지 못했습니다.",
+    );
   }
 }
 
-async function apiError(response: Response, fallback: string): Promise<Error> {
+async function apiError(
+  response: Response,
+  fallback: string,
+): Promise<GalleryServiceError> {
   let message = fallback;
+  let code = "gallery_api_error";
+  let retryable = response.status >= 500;
   try {
     const payload = (await response.json()) as unknown;
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      const serverMessage = (payload as Record<string, unknown>).error;
-      if (typeof serverMessage === "string" && serverMessage) message = serverMessage;
+      const candidate = payload as Record<string, unknown>;
+      if (typeof candidate.error === "string" && candidate.error) {
+        message = candidate.error;
+      }
+      if (typeof candidate.code === "string" && candidate.code) {
+        code = candidate.code;
+      }
+      if (typeof candidate.retryable === "boolean") {
+        retryable = candidate.retryable;
+      }
     }
   } catch {
     // Keep the safe fallback for non-JSON failures.
   }
-  return new Error(message);
+  return new GalleryServiceError(message, {
+    code,
+    retryable,
+    status: response.status,
+  });
+}
+
+async function classManagementRequest(
+  method: "POST" | "DELETE",
+  payload: Record<string, string>,
+): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(GALLERY_CLASSES_API_PATH, {
+      method,
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new GalleryServiceError(
+      "학급 관리 서비스에 연결하지 못했습니다. 네트워크 연결을 확인하고 다시 시도해 주세요.",
+      {
+        code: "class_api_unreachable",
+        retryable: true,
+        status: null,
+        cause: error,
+      },
+    );
+  }
+  if (!response.ok) {
+    throw await apiError(response, "학급 관리 요청을 완료하지 못했습니다.");
+  }
+  return response;
 }
 
 export async function createClassRecord(name: string): Promise<ClassRecord> {
   const validatedName = validateClassName(name);
-  const response = await fetch(GALLERY_CLASSES_API_PATH, {
-    method: "POST",
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ name: validatedName }),
+  const response = await classManagementRequest("POST", {
+    name: validatedName,
   });
-  if (!response.ok) throw await apiError(response, "학급을 만들지 못했습니다.");
 
-  const payload = (await response.json()) as unknown;
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new GalleryServiceError("학급 생성 응답을 읽지 못했습니다.", {
+      code: "class_api_invalid_response",
+      retryable: true,
+      status: response.status,
+      cause: error,
+    });
+  }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error("학급 생성 응답이 올바르지 않습니다.");
+    throw new GalleryServiceError("학급 생성 응답이 올바르지 않습니다.", {
+      code: "class_api_invalid_response",
+      status: response.status,
+    });
   }
   const candidate = (payload as Record<string, unknown>).classRecord;
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    throw new Error("학급 생성 응답이 올바르지 않습니다.");
+    throw new GalleryServiceError("학급 생성 응답이 올바르지 않습니다.", {
+      code: "class_api_invalid_response",
+      status: response.status,
+    });
   }
   const record = candidate as Record<string, unknown>;
   return {
@@ -423,14 +531,7 @@ export async function createClassRecord(name: string): Promise<ClassRecord> {
 
 export async function deleteClassRecord(id: string): Promise<void> {
   const validatedId = validateGalleryEntryId(id);
-  const response = await fetch(GALLERY_CLASSES_API_PATH, {
-    method: "DELETE",
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ id: validatedId }),
-  });
-  if (!response.ok) throw await apiError(response, "학급을 삭제하지 못했습니다.");
+  await classManagementRequest("DELETE", { id: validatedId });
 }
 
 export async function saveLatestCharacterArtwork(

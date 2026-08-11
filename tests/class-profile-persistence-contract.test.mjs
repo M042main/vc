@@ -40,8 +40,10 @@ test("keeps class create and delete behind exact Sites-email authorization", asy
     classesRoute,
     /`\$\{GALLERY_CLASSES_PATH\}\/\$\{id\}\.json`[\s\S]{0,420}method:\s*["']DELETE["']/,
   );
-  assert.match(firebase, /createClassRecord[\s\S]{0,900}fetch\s*\(\s*GALLERY_CLASSES_API_PATH/);
-  assert.match(firebase, /deleteClassRecord[\s\S]{0,700}fetch\s*\(\s*GALLERY_CLASSES_API_PATH/);
+  assert.match(firebase, /classManagementRequest[\s\S]{0,900}fetch\s*\(\s*GALLERY_CLASSES_API_PATH/);
+  assert.match(firebase, /createClassRecord[\s\S]{0,500}classManagementRequest\s*\(\s*["']POST["']/);
+  assert.match(firebase, /deleteClassRecord[\s\S]{0,300}classManagementRequest\s*\(\s*["']DELETE["']/);
+  assert.match(firebase, /export\s+class\s+GalleryServiceError[\s\S]{0,500}retryable/);
   assert.doesNotMatch(firebase, /remove\s*\(/);
 });
 
@@ -95,8 +97,17 @@ test("provides a blocking, accessible first-run gate and inline admin class mana
   assert.match(onboarding, /nameInputRef\.current\?\.focus\s*\(\)/);
   assert.match(onboarding, /event\.key\s*===\s*["']Escape["'][\s\S]{0,100}preventDefault/);
   assert.match(onboarding, /event\.key\s*!==\s*["']Tab["']/);
-  assert.match(onboarding, /onAdminRequest\?:\s*\(\)\s*=>\s*void/);
-  assert.match(onboarding, /관리자 설정/);
+  assert.match(onboarding, /const\s*\[classesLoadedSuccessfully,\s*setClassesLoadedSuccessfully\][\s\S]{0,80}useState\(false\)/);
+  assert.match(onboarding, /onData:\s*\(nextClasses\)[\s\S]{0,220}setClassesLoadedSuccessfully\(true\)/);
+  assert.doesNotMatch(onboarding, /onError:\s*\(error\)[\s\S]{0,220}setClassesLoadedSuccessfully\(true\)/);
+  assert.match(onboarding, /if\s*\([\s\S]{0,80}!classesLoadedSuccessfully[\s\S]{0,180}!profile\.classId[\s\S]{0,80}\)\s*return/);
+  assert.match(onboarding, /blockingModalControl\?:\s*ReactNode/);
+  assert.match(onboarding, /aria-modal=\{isBlocking\s*\?\s*true[\s\S]{0,100}\{isBlocking\s*\?\s*blockingModalControl\s*:\s*null\}/);
+  assert.doesNotMatch(onboarding, /onAdminRequest|adminRequestButton|관리자 설정/);
+  assert.doesNotMatch(onboarding, /type=["']radio["']|name=["']profile-mode["']|profileMode/);
+  assert.match(onboarding, /onSubmit=\{submitClassProfile\}/);
+  assert.match(onboarding, /학급으로 시작하기/);
+  assert.match(onboarding, /className=\{styles\.guestExperience\}[\s\S]{0,700}type=["']button["'][\s\S]{0,200}aria-describedby=["']guest-experience-note["'][\s\S]{0,200}onClick=\{\(\)\s*=>\s*saveProfile\(true\)\}[\s\S]{0,200}게스트로 체험하기/);
   assert.match(onboarding, /!isBlocking\s*\|\|\s*!isAdmin[\s\S]{0,180}newClassInputRef\.current\?\.focus\s*\(\)/);
   assert.match(onboarding, /\{isAdmin\s*\?\s*\([\s\S]{0,500}학급 관리/);
 });
@@ -104,7 +115,8 @@ test("provides a blocking, accessible first-run gate and inline admin class mana
 test("wires the active profile through onboarding, artwork restore, creator save, and gallery", async () => {
   const { page } = await sources();
   assert.match(page, /useVisitorProfile\s*\(\s*\)/);
-  assert.match(page, /blocking=\{!profile\s*&&\s*profileReady\}/);
+  assert.match(page, /const\s+profileGateBlocking\s*=\s*!profile\s*&&\s*profileReady/);
+  assert.match(page, /blocking=\{profileGateBlocking\}/);
   assert.match(page, /onProfileChange=\{setProfile\}/);
   assert.match(page, /loadLatestCharacterArtwork\(profile\)/);
   assert.match(page, /saveLatestCharacterArtwork\(profile,\s*dataUrl\)/);

@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import {
   createClassRecord,
@@ -54,8 +55,8 @@ export interface ClassOnboardingProps {
   blocking?: boolean;
   isAdmin?: boolean;
   className?: string;
+  blockingModalControl?: ReactNode;
   onProfileChange: (profile: VisitorProfile | null) => void;
-  onAdminRequest?: () => void;
 }
 
 function messageFrom(error: unknown, fallback: string) {
@@ -68,15 +69,16 @@ export function ClassOnboarding({
   blocking = false,
   isAdmin = false,
   className,
+  blockingModalControl,
   onProfileChange,
-  onAdminRequest,
 }: ClassOnboardingProps) {
   const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [classesReady, setClassesReady] = useState(false);
+  const [classesLoadedSuccessfully, setClassesLoadedSuccessfully] =
+    useState(false);
   const [classesError, setClassesError] = useState("");
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [profileMode, setProfileMode] = useState<"class" | "guest">("class");
   const [classIdDraft, setClassIdDraft] = useState("");
   const [profileError, setProfileError] = useState("");
   const [status, setStatus] = useState("");
@@ -98,6 +100,7 @@ export function ClassOnboarding({
           if (!active) return;
           setClasses(nextClasses);
           setClassesReady(true);
+          setClassesLoadedSuccessfully(true);
           setClassesError("");
         },
         onError: (error) => {
@@ -121,7 +124,12 @@ export function ClassOnboarding({
   }, [editing, profile, profileReady]);
 
   useEffect(() => {
-    if (!classesReady || !profile || profile.guest || !profile.classId) return;
+    if (
+      !classesLoadedSuccessfully ||
+      !profile ||
+      profile.guest ||
+      !profile.classId
+    ) return;
     const activeClass = classes.find((item) => item.id === profile.classId);
     if (activeClass) {
       if (activeClass.name === profile.className) return;
@@ -139,13 +147,12 @@ export function ClassOnboarding({
       setStatus("선택했던 학급이 없어져 프로필을 다시 설정해 주세요.");
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [classes, classesReady, onProfileChange, profile]);
+  }, [classes, classesLoadedSuccessfully, onProfileChange, profile]);
 
   useEffect(() => {
     if (!editing) return;
     const timer = window.setTimeout(() => {
       setNameDraft(profile?.name ?? "");
-      setProfileMode(profile?.guest ? "guest" : "class");
       setClassIdDraft(profile?.classId ?? classes[0]?.id ?? "");
       setProfileError("");
     }, 0);
@@ -201,14 +208,13 @@ export function ClassOnboarding({
     [classIdDraft, classes],
   );
 
-  const submitProfile = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const saveProfile = (guest: boolean) => {
     try {
       const nextProfile = createVisitorProfile({
         name: nameDraft,
-        guest: profileMode === "guest",
-        classId: selectedClass?.id,
-        className: selectedClass?.name,
+        guest,
+        classId: guest ? undefined : selectedClass?.id,
+        className: guest ? undefined : selectedClass?.name,
       });
       const stored = storeVisitorProfile(nextProfile);
       onProfileChange(stored);
@@ -221,6 +227,11 @@ export function ClassOnboarding({
     } catch (error) {
       setProfileError(messageFrom(error, "프로필을 저장하지 못했습니다."));
     }
+  };
+
+  const submitClassProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    saveProfile(false);
   };
 
   const createClass = async (event: FormEvent<HTMLFormElement>) => {
@@ -265,6 +276,7 @@ export function ClassOnboarding({
       role={isBlocking ? "dialog" : undefined}
       aria-modal={isBlocking ? true : undefined}
     >
+      {isBlocking ? blockingModalControl : null}
       <div className={styles.summary}>
         <span className={styles.profileIcon} aria-hidden="true">
           {profile?.guest ? <UserRound size={18} /> : <School size={18} />}
@@ -289,42 +301,25 @@ export function ClassOnboarding({
       </div>
 
       {editing ? (
-        <form className={styles.profileForm} onSubmit={submitProfile}>
-          <label>
-            이름
-            <input
-              ref={nameInputRef}
-              value={nameDraft}
-              onChange={(event) => setNameDraft(event.target.value)}
-              maxLength={24}
-              autoComplete="nickname"
-              placeholder="예: 박근석"
-            />
-          </label>
-          <fieldset>
-            <legend>참여 방식</legend>
+        <>
+          <form className={styles.profileForm} onSubmit={submitClassProfile}>
+            <div className={styles.choiceHeading}>
+              <strong>학급으로 참여하기</strong>
+              <span>이름과 학급을 선택하면 작품과 갤러리를 이어서 사용할 수 있어요.</span>
+            </div>
             <label>
+              이름
               <input
-                type="radio"
-                name="profile-mode"
-                checked={profileMode === "class"}
-                onChange={() => setProfileMode("class")}
+                ref={nameInputRef}
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                maxLength={24}
+                autoComplete="nickname"
+                placeholder="예: 박근석"
               />
-              학급으로 참여
             </label>
             <label>
-              <input
-                type="radio"
-                name="profile-mode"
-                checked={profileMode === "guest"}
-                onChange={() => setProfileMode("guest")}
-              />
-              게스트 체험
-            </label>
-          </fieldset>
-          {profileMode === "class" ? (
-            <label>
-              학급
+              학급 선택
               <select
                 value={classIdDraft}
                 onChange={(event) => setClassIdDraft(event.target.value)}
@@ -338,27 +333,34 @@ export function ClassOnboarding({
                 ))}
               </select>
             </label>
-          ) : (
-            <p className={styles.guestNotice}>
+            {profileError ? <span className={styles.error} role="alert">{profileError}</span> : null}
+            <button
+              className={styles.primaryButton}
+              type="submit"
+              disabled={!classesReady || !selectedClass}
+            >
+              학급으로 시작하기
+            </button>
+          </form>
+
+          <div className={styles.guestExperience}>
+            <div>
+              <strong>학급 없이 먼저 둘러볼까요?</strong>
+              <p id="guest-experience-note" className={styles.guestNotice}>
               게스트는 트래킹과 다운로드를 체험할 수 있지만 갤러리·작품 클라우드
               저장은 사용할 수 없습니다.
-            </p>
-          )}
-          {profileError ? <span className={styles.error} role="alert">{profileError}</span> : null}
-          <button className={styles.primaryButton} type="submit">
-            프로필 저장
-          </button>
-        </form>
-      ) : null}
-
-      {isBlocking && !isAdmin && onAdminRequest ? (
-        <button
-          type="button"
-          className={styles.adminRequestButton}
-          onClick={onAdminRequest}
-        >
-          관리자 설정
-        </button>
+              </p>
+            </div>
+            <button
+              className={styles.guestButton}
+              type="button"
+              aria-describedby="guest-experience-note"
+              onClick={() => saveProfile(true)}
+            >
+              게스트로 체험하기
+            </button>
+          </div>
+        </>
       ) : null}
 
       {isAdmin ? (

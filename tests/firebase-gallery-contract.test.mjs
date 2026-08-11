@@ -164,9 +164,13 @@ test("surfaces client, payload, authorization, and upstream delete failures", as
 
   assert.match(firebase, /if\s*\(\s*!response\.ok\s*\)/);
   assert.match(firebase, /await\s+response\.json\s*\(\)/);
-  assert.match(firebase, /throw\s+new Error\s*\(\s*message\s*\)/);
+  assert.match(firebase, /new\s+GalleryServiceError\s*\(\s*message/);
   assert.match(route, /request\.json\s*\(\)[\s\S]{0,160}400/);
-  assert.match(route, /!firebaseResponse\.ok[\s\S]{0,160}502/);
+  assert.match(
+    route,
+    /!firebaseResponse\.ok[\s\S]{0,100}firebaseFailureResponse\s*\(\s*firebaseResponse\s*\)/,
+  );
+  assert.match(route, /firebaseFailureResponse[\s\S]{0,1500}502/);
   assert.match(route, /catch\s*\{[\s\S]{0,160}Firebase 삭제 서비스에 연결하지 못했습니다[\s\S]{0,80}502/);
   assert.match(ui, /setDeleteError\s*\(\s*message\s*\)/);
   assert.match(ui, /deleteError[\s\S]{0,180}role=["']alert["']/);

@@ -84,13 +84,9 @@ export default function Home() {
 
   const restoreAdminTriggerFocus = useCallback(() => {
     window.setTimeout(() => {
-      const onboardingName = document.querySelector<HTMLInputElement>(
-        '.profile-shell input[autocomplete="nickname"]',
-      );
-      if (!profile && onboardingName) onboardingName.focus();
-      else adminButtonRef.current?.focus();
+      adminButtonRef.current?.focus();
     }, 0);
-  }, [profile]);
+  }, []);
 
   useEffect(() => {
     const store = new PaperDollCharacterStore();
@@ -273,6 +269,22 @@ export default function Home() {
     setMode("studio");
   };
 
+  const profileGateBlocking = !profile && profileReady;
+  const adminAccessButton = (
+    <button
+      ref={adminButtonRef}
+      className="admin-access-button"
+      type="button"
+      data-active={adminMode}
+      onClick={openAdminDialog}
+      aria-haspopup="dialog"
+      aria-label={adminMode ? "m042 관리자 설정 열기" : "관리자 m042 접근"}
+    >
+      <Settings size={18} aria-hidden="true" />
+      <span>{adminMode ? "m042 관리자" : "관리자"}</span>
+    </button>
+  );
+
   return (
     <main className="site-shell">
       <header className="topbar">
@@ -321,28 +333,19 @@ export default function Home() {
           </button>
         </nav>
 
-        <button
-          ref={adminButtonRef}
-          className="admin-access-button"
-          type="button"
-          data-active={adminMode}
-          onClick={openAdminDialog}
-          aria-label={adminMode ? "m042 관리자 설정 열기" : "관리자 m042 접근"}
-        >
-          <Settings size={18} aria-hidden="true" />
-          <span>{adminMode ? "m042 관리자" : "관리자"}</span>
-        </button>
       </header>
+
+      {profileGateBlocking ? null : adminAccessButton}
 
       <section className="workspace" id="top">
         <ClassOnboarding
           className="profile-shell"
           profile={profile}
           profileReady={profileReady}
-          blocking={!profile && profileReady}
+          blocking={profileGateBlocking}
           isAdmin={adminMode}
+          blockingModalControl={adminAccessButton}
           onProfileChange={setProfile}
-          onAdminRequest={openAdminDialog}
         />
         {mode === "studio" ? (
           <VrmStudio
