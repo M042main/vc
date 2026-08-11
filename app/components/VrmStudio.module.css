@@ -339,22 +339,6 @@
   transform: none;
 }
 
-.privacyNote {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: auto;
-  padding-top: 18px;
-  color: #77746b;
-  font-size: 9px;
-  line-height: 1.5;
-}
-
-.privacyNote svg {
-  flex: 0 0 auto;
-  margin-top: 1px;
-}
-
 .stage {
   position: relative;
   min-width: 0;
@@ -872,6 +856,24 @@
   pointer-events: none;
 }
 
+.applyCustomColorButton {
+  grid-column: 1 / -1;
+  min-height: 44px;
+  border: 1px solid #171713;
+  border-radius: 11px;
+  background: #171713;
+  color: #fffdf8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.applyCustomColorButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .backgroundImagePanel {
   display: grid;
   min-width: 0;
@@ -1212,10 +1214,6 @@
 
   .captureButton {
     grid-column: 1 / -1;
-  }
-
-  .privacyNote {
-    margin-top: 14px;
   }
 }
 

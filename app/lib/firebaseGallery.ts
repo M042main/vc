@@ -1,9 +1,11 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import {
+  equalTo,
   get,
   getDatabase,
   limitToLast,
   onValue,
+  orderByChild,
   push,
   query,
   ref,
@@ -41,6 +43,7 @@ const GALLERY_CLASSES_PATH = `${GALLERY_DATABASE_PATH}/classes`;
 const GALLERY_ARTWORKS_PATH = `${GALLERY_DATABASE_PATH}/artworks`;
 
 const MAX_GALLERY_ENTRIES = 30;
+const MAX_AI_SOURCE_ENTRIES = 12;
 const MAX_GALLERY_NAME_LENGTH = 60;
 const MAX_PNG_DATA_URL_SIZE = 6 * 1024 * 1024;
 const MAX_GALLERY_RECORD_BYTES = MAX_PNG_DATA_URL_SIZE + 4 * 1024;
@@ -464,6 +467,46 @@ export function subscribeGalleryEntries({
       }
     },
     (error) => onError(toError(error, "온라인 갤러리를 불러오지 못했습니다.")),
+  );
+}
+
+export function subscribeGalleryEntriesForProfile(
+  profile: VisitorProfile,
+  { onData, onError }: GallerySubscription,
+): Unsubscribe {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) {
+    throw new Error("게스트는 개인 갤러리 사진을 불러올 수 없습니다.");
+  }
+
+  const database = getGalleryDatabase();
+  const entriesQuery = query(
+    ref(database, GALLERY_ENTRIES_PATH),
+    orderByChild("name"),
+    equalTo(activeProfile.name),
+    limitToLast(MAX_AI_SOURCE_ENTRIES),
+  );
+
+  return onValue(
+    entriesQuery,
+    (snapshot) => {
+      const { entries, errors } = entriesFromSnapshot(snapshot);
+      onData(
+        entries.filter(
+          (entry) => entry.classId === activeProfile.classId,
+        ),
+      );
+      if (errors.length > 0) {
+        onError(
+          new AggregateError(
+            errors,
+            `유효하지 않은 개인 갤러리 항목 ${errors.length}개를 제외했습니다.`,
+          ),
+        );
+      }
+    },
+    (error) =>
+      onError(toError(error, "내 갤러리 사진을 불러오지 못했습니다.")),
   );
 }
 

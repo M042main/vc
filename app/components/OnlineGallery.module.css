@@ -24,7 +24,8 @@
 }
 
 .gallery button,
-.gallery input {
+.gallery input,
+.gallery select {
   font: inherit;
 }
 
@@ -34,7 +35,8 @@
 }
 
 .gallery button:focus-visible,
-.gallery input:focus-visible {
+.gallery input:focus-visible,
+.gallery select:focus-visible {
   outline: 3px solid #477200;
   outline-offset: 3px;
 }
@@ -87,33 +89,6 @@
   box-shadow: 0 0 0 5px rgba(128, 187, 0, 0.14);
 }
 
-.liveCount {
-  display: grid;
-  min-width: 118px;
-  padding: 14px 16px;
-  border: 1px solid #171713;
-  border-radius: 16px;
-  background: #171713;
-  box-shadow: 4px 4px 0 #dfff45;
-  color: #fffef8;
-  text-align: right;
-}
-
-.liveCount strong {
-  font-size: 27px;
-  font-weight: 950;
-  letter-spacing: -0.05em;
-  line-height: 1;
-}
-
-.liveCount span {
-  margin-top: 6px;
-  color: #dfff45;
-  font-size: 8px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-}
-
 .confirmNameButton {
   display: inline-flex;
   align-items: center;
@@ -163,14 +138,17 @@
 }
 
 .galleryFilter {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
-  margin-top: 12px;
-  padding: 9px 11px;
+  align-self: end;
+  gap: 7px 10px;
+  width: min(290px, 100%);
+  padding: 10px 11px;
   border: 1px solid rgba(23, 23, 19, 0.13);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.66);
+  box-shadow: 4px 4px 0 rgba(223, 255, 69, 0.72);
 }
 
 .galleryFilter label,
@@ -180,6 +158,8 @@
 }
 
 .galleryFilter select {
+  grid-column: 1 / -1;
+  width: 100%;
   min-height: 38px;
   padding: 0 32px 0 10px;
   border: 1px solid rgba(23, 23, 19, 0.22);
@@ -191,8 +171,8 @@
 }
 
 .galleryFilter span {
-  margin-left: auto;
   color: #706d65;
+  text-align: right;
 }
 
 .actionStatus {
@@ -647,19 +627,9 @@
     font-size: clamp(25px, 9vw, 34px);
   }
 
-  .liveCount {
-    justify-self: start;
-    min-width: 104px;
-    text-align: left;
-  }
-
   .galleryFilter {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .galleryFilter span {
-    margin-left: 0;
+    justify-self: stretch;
+    width: 100%;
   }
 
   .grid {
@@ -695,7 +665,6 @@
 
 @media (forced-colors: active) {
   .eyebrow > span,
-  .liveCount,
   .downloadButton,
   .likeButton,
   .dialogIcon,

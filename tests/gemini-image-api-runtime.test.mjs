@@ -5,6 +5,10 @@ import ts from "typescript";
 
 const routeUrl = new URL("../app/api/ai/generate/route.ts", import.meta.url);
 const TEST_API_KEY = "test-only-gemini-key";
+const BROWSER_HEADERS = {
+  Origin: "https://site.test",
+  "Sec-Fetch-Site": "same-origin",
+};
 
 function pngDataUrl(width = 64, height = 64) {
   const bytes = Buffer.alloc(24);
@@ -45,11 +49,16 @@ async function loadRoute(tag) {
   return import(`data:text/javascript;base64,${encoded}#${tag}-${Date.now()}`);
 }
 
-function generationRequest(payload, headers = {}) {
+function generationRequest(payload, headers = {}, signal) {
   return new Request("https://site.test/api/ai/generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...BROWSER_HEADERS,
+      ...headers,
+    },
     body: JSON.stringify(payload),
+    signal,
   });
 }
 
@@ -75,6 +84,14 @@ async function withFetch(mock, run) {
   }
 }
 
+async function waitUntil(predicate, message) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.fail(message);
+}
+
 test("Gemini key stays server-only and the route is Edge/Worker compatible", async () => {
   const source = await readFile(routeUrl, "utf8");
 
@@ -85,6 +102,18 @@ test("Gemini key stays server-only and the route is Edge/Worker compatible", asy
   assert.match(source, /sec-fetch-site/);
   assert.match(source, /cf-connecting-ip/);
   assert.match(source, /const rateLimitBuckets = new Map/);
+  assert.match(source, /AUTHENTICATED_RATE_LIMIT\s*=\s*12/);
+  assert.match(source, /MAX_CONCURRENT_UPSTREAM_REQUESTS\s*=\s*3/);
+  assert.match(
+    source,
+    /while \(rateLimitBuckets\.size >= MAX_RATE_LIMIT_BUCKETS\)[\s\S]{0,220}rateLimitBuckets\.delete\(oldestKey\)/,
+  );
+  assert.match(
+    source,
+    /const retryAfter = reserveRateLimit\(request\)[\s\S]{0,900}const payload = await readRequestPayload\(request\)/,
+  );
+  assert.match(source, /request\.signal\.addEventListener\("abort", abortFromRequest/);
+  assert.match(source, /request\.signal\.removeEventListener\("abort", abortFromRequest\)/);
   assert.doesNotMatch(source, /AIza[0-9A-Za-z_-]{20,}/);
   assert.doesNotMatch(source, /Buffer|node:/);
 });
@@ -94,6 +123,24 @@ test("cross-site browser requests are rejected and warm-isolate bursts are bound
   let calls = 0;
 
   await withApiKey(TEST_API_KEY, async () => {
+    const missingBrowserMetadata = await withFetch(async () => {
+      calls += 1;
+      return imageResponse();
+    }, () =>
+      route.POST(
+        new Request("https://site.test/api/ai/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: "캐릭터",
+            imageDataUrl: pngDataUrl(),
+          }),
+        }),
+      ),
+    );
+    assert.equal(missingBrowserMetadata.status, 403);
+    assert.equal((await missingBrowserMetadata.json()).code, "request_origin_denied");
+
     const crossSite = await withFetch(async () => {
       calls += 1;
       return imageResponse();
@@ -116,7 +163,7 @@ test("cross-site browser requests are rejected and warm-isolate bursts are bound
       calls += 1;
       return imageResponse();
     }, async () => {
-      for (let index = 0; index < 10; index += 1) {
+      for (let index = 0; index < 12; index += 1) {
         const response = await route.POST(
           generationRequest(
             { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
@@ -130,14 +177,15 @@ test("cross-site browser requests are rejected and warm-isolate bursts are bound
         assert.equal(response.status, 200);
       }
       const limited = await route.POST(
-        generationRequest(
-          { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
-          {
-            Origin: "https://site.test",
-            "Sec-Fetch-Site": "same-origin",
+        new Request("https://site.test/api/ai/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...BROWSER_HEADERS,
             "oai-authenticated-user-id": "test-user",
           },
-        ),
+          body: "{this would be invalid JSON without the earlier reservation}",
+        }),
       );
       assert.equal(limited.status, 429);
       assert.equal((await limited.json()).code, "ai_rate_limited");
@@ -145,7 +193,109 @@ test("cross-site browser requests are rejected and warm-isolate bursts are bound
     });
   });
 
-  assert.equal(calls, 10);
+  assert.equal(calls, 12);
+});
+
+test("allows the three UI variants but rejects a fourth concurrent upstream request", async () => {
+  const route = await loadRoute("upstream-concurrency");
+  const pendingResolvers = [];
+  let holdResponses = true;
+  let calls = 0;
+
+  await withApiKey(TEST_API_KEY, () =>
+    withFetch(async (_input, init) => {
+      calls += 1;
+      assert.ok(init.signal instanceof AbortSignal);
+      if (!holdResponses) return imageResponse();
+      return new Promise((resolve) => pendingResolvers.push(resolve));
+    }, async () => {
+      const responsePromises = Array.from({ length: 4 }, () =>
+        route.POST(
+          generationRequest(
+            { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
+            { "oai-authenticated-user-id": "concurrent-user" },
+          ),
+        ),
+      );
+
+      await waitUntil(
+        () => pendingResolvers.length === 3,
+        "three upstream requests should reserve all available slots",
+      );
+      const earlyResponse = await Promise.race(responsePromises);
+      assert.equal(earlyResponse.status, 429);
+      assert.equal((await earlyResponse.json()).code, "ai_rate_limited");
+
+      pendingResolvers.splice(0).forEach((resolve) => resolve(imageResponse()));
+      const responses = await Promise.all(responsePromises);
+      assert.deepEqual(
+        responses.map((response) => response.status).sort((left, right) => left - right),
+        [200, 200, 200, 429],
+      );
+      assert.equal(calls, 3);
+
+      holdResponses = false;
+      const afterRelease = await route.POST(
+        generationRequest(
+          { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
+          { "oai-authenticated-user-id": "concurrent-user" },
+        ),
+      );
+      assert.equal(afterRelease.status, 200);
+      assert.equal(calls, 4, "completed responses must release their slot");
+    }),
+  );
+});
+
+test("propagates client aborts upstream and releases every cancelled slot", async () => {
+  const route = await loadRoute("client-abort");
+  const observedSignals = [];
+  let completeImmediately = false;
+  let calls = 0;
+
+  await withApiKey(TEST_API_KEY, () =>
+    withFetch(async (_input, init) => {
+      calls += 1;
+      if (completeImmediately) return imageResponse();
+      return new Promise((_resolve, reject) => {
+        observedSignals.push(init.signal);
+        const rejectAbort = () =>
+          reject(init.signal.reason ?? new DOMException("Aborted", "AbortError"));
+        if (init.signal.aborted) rejectAbort();
+        else init.signal.addEventListener("abort", rejectAbort, { once: true });
+      });
+    }, async () => {
+      for (let index = 0; index < 3; index += 1) {
+        const clientController = new AbortController();
+        const responsePromise = route.POST(
+          generationRequest(
+            { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
+            { "oai-authenticated-user-id": "cancel-user" },
+            clientController.signal,
+          ),
+        );
+        await waitUntil(
+          () => observedSignals.length === index + 1,
+          "the upstream fetch should receive a linked signal",
+        );
+        clientController.abort();
+        const response = await responsePromise;
+        assert.equal(response.status, 499);
+        assert.equal((await response.json()).code, "ai_request_cancelled");
+        assert.equal(observedSignals[index].aborted, true);
+      }
+
+      completeImmediately = true;
+      const afterCancellation = await route.POST(
+        generationRequest(
+          { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
+          { "oai-authenticated-user-id": "cancel-user" },
+        ),
+      );
+      assert.equal(afterCancellation.status, 200);
+      assert.equal(calls, 4, "cancelled requests must release all three slots");
+    }),
+  );
 });
 
 test("valid image+prompt uses the official Gemini 2.5 Flash Image REST shape", async () => {
@@ -242,7 +392,7 @@ test("content type, malformed JSON, prompt, MIME, byte size, and resolution are 
     const malformed = await route.POST(
       new Request("https://site.test/api/ai/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...BROWSER_HEADERS },
         body: "{not-json",
       }),
     );

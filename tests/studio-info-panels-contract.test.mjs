@@ -30,3 +30,17 @@ test("removes technical tracking and export info panels without removing save ac
   assert.match(studio, /paperDoll\.capturePng\(1600, 2000\)/);
   assert.match(studio, /new\s+MediaRecorder\s*\(/);
 });
+
+test("removes the visible device-storage privacy note and its dedicated styles", async () => {
+  const [studio, css] = await Promise.all([
+    readFile(studioUrl, "utf8"),
+    readFile(studioCssUrl, "utf8"),
+  ]);
+
+  assert.doesNotMatch(studio, /카메라 영상은 서버로 전송하지 않습니다/);
+  assert.doesNotMatch(studio, /VRM과 사진 배경은 다음 방문에 복원/);
+  assert.doesNotMatch(studio, /styles\.privacyNote/);
+  assert.doesNotMatch(css, /\.privacyNote\b/);
+  assert.match(studio, /"카메라 시작"/);
+  assert.match(studio, /aria-label=["']VRM 파일 선택["']/);
+});

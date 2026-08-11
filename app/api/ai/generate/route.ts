@@ -12,9 +12,10 @@ const MIN_IMAGE_SIDE = 64;
 const MAX_IMAGE_SIDE = 8_192;
 const MAX_IMAGE_PIXELS = 25_000_000;
 const RATE_LIMIT_WINDOW_MS = 10 * 60_000;
-const AUTHENTICATED_RATE_LIMIT = 10;
+const AUTHENTICATED_RATE_LIMIT = 12;
 const IP_RATE_LIMIT = 60;
 const MAX_RATE_LIMIT_BUCKETS = 2_000;
+const MAX_CONCURRENT_UPSTREAM_REQUESTS = 3;
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -28,6 +29,7 @@ type ApiErrorCode =
   | "ai_not_configured"
   | "ai_rate_limited"
   | "ai_request_failed"
+  | "ai_request_cancelled"
   | "ai_timeout"
   | "ai_unavailable"
   | "invalid_image"
@@ -46,6 +48,7 @@ type ValidatedImage = {
 type RateLimitBucket = { count: number; resetAt: number };
 
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
+const concurrentUpstreamRequests = new Map<string, number>();
 
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
@@ -80,10 +83,12 @@ function errorResponse(
 
 function isSameOriginBrowserRequest(request: Request) {
   const site = request.headers.get("sec-fetch-site")?.toLowerCase();
+  const origin = request.headers.get("origin");
+  const referer = request.headers.get("referer");
+  if (!site && !origin && !referer) return false;
   if (site && site !== "same-origin" && site !== "none") return false;
 
   const requestOrigin = new URL(request.url).origin;
-  const origin = request.headers.get("origin");
   if (origin) {
     try {
       return new URL(origin).origin === requestOrigin;
@@ -91,7 +96,6 @@ function isSameOriginBrowserRequest(request: Request) {
       return false;
     }
   }
-  const referer = request.headers.get("referer");
   if (referer) {
     try {
       return new URL(referer).origin === requestOrigin;
@@ -99,9 +103,8 @@ function isSameOriginBrowserRequest(request: Request) {
       return false;
     }
   }
-
-  // Non-browser and local test requests do not always carry Fetch Metadata.
-  // This remains a browser CSRF guard, not a replacement for platform rate limiting.
+  // Sec-Fetch-Site is a forbidden browser header, so a real same-origin fetch
+  // can still be recognized when Origin and Referer are unavailable.
   return true;
 }
 
@@ -122,32 +125,55 @@ function rateLimitIdentity(request: Request) {
   if (connectingIp && connectingIp.length <= 64) {
     return { key: `ip:${connectingIp}`, limit: IP_RATE_LIMIT };
   }
-  return null;
+  return {
+    key: `origin:${new URL(request.url).origin}`,
+    limit: IP_RATE_LIMIT,
+  };
 }
 
-function applyRateLimit(request: Request) {
+function reserveRateLimit(request: Request) {
   const identity = rateLimitIdentity(request);
-  if (!identity) return null;
   const now = Date.now();
+  const current = rateLimitBuckets.get(identity.key);
+
+  if (current && current.resetAt > now) {
+    if (current.count >= identity.limit) {
+      return Math.max(1, Math.ceil((current.resetAt - now) / 1_000));
+    }
+    current.count += 1;
+    return null;
+  }
+  if (current) rateLimitBuckets.delete(identity.key);
 
   if (rateLimitBuckets.size >= MAX_RATE_LIMIT_BUCKETS) {
     for (const [key, bucket] of rateLimitBuckets) {
       if (bucket.resetAt <= now) rateLimitBuckets.delete(key);
     }
+    while (rateLimitBuckets.size >= MAX_RATE_LIMIT_BUCKETS) {
+      const oldestKey = rateLimitBuckets.keys().next().value;
+      if (typeof oldestKey !== "string") break;
+      rateLimitBuckets.delete(oldestKey);
+    }
   }
-  const current = rateLimitBuckets.get(identity.key);
-  if (!current || current.resetAt <= now) {
-    rateLimitBuckets.set(identity.key, {
-      count: 1,
-      resetAt: now + RATE_LIMIT_WINDOW_MS,
-    });
-    return null;
-  }
-  if (current.count >= identity.limit) {
-    return Math.max(1, Math.ceil((current.resetAt - now) / 1_000));
-  }
-  current.count += 1;
+  rateLimitBuckets.set(identity.key, {
+    count: 1,
+    resetAt: now + RATE_LIMIT_WINDOW_MS,
+  });
   return null;
+}
+
+function reserveUpstreamSlot(request: Request): string | null {
+  const key = rateLimitIdentity(request).key;
+  const current = concurrentUpstreamRequests.get(key) ?? 0;
+  if (current >= MAX_CONCURRENT_UPSTREAM_REQUESTS) return null;
+  concurrentUpstreamRequests.set(key, current + 1);
+  return key;
+}
+
+function releaseUpstreamSlot(key: string) {
+  const current = concurrentUpstreamRequests.get(key) ?? 0;
+  if (current <= 1) concurrentUpstreamRequests.delete(key);
+  else concurrentUpstreamRequests.set(key, current - 1);
 }
 
 function encodedByteLength(value: string) {
@@ -512,6 +538,19 @@ export async function POST(request: Request) {
     });
   }
 
+  const retryAfter = reserveRateLimit(request);
+  if (retryAfter !== null) {
+    return errorResponse(
+      "AI 이미지 생성 횟수가 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+      429,
+      {
+        code: "ai_rate_limited",
+        retryable: true,
+        headers: { "Retry-After": String(retryAfter) },
+      },
+    );
+  }
+
   const payload = await readRequestPayload(request);
   if (payload === "too_large") {
     return errorResponse("요청 이미지가 너무 큽니다.", 413, {
@@ -543,108 +582,128 @@ export async function POST(request: Request) {
     );
   }
 
-  const retryAfter = applyRateLimit(request);
-  if (retryAfter !== null) {
+  const upstreamSlotKey = reserveUpstreamSlot(request);
+  if (!upstreamSlotKey) {
     return errorResponse(
-      "AI 이미지 생성 횟수가 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+      "이미 세 개의 AI 이미지를 생성하고 있습니다. 완료된 뒤 다시 시도해 주세요.",
       429,
       {
         code: "ai_rate_limited",
         retryable: true,
-        headers: { "Retry-After": String(retryAfter) },
+        headers: { "Retry-After": "1" },
       },
     );
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let upstreamResponse: Response;
+  let timedOut = false;
+  const abortFromRequest = () => controller.abort(request.signal.reason);
+  if (request.signal.aborted) abortFromRequest();
+  else request.signal.addEventListener("abort", abortFromRequest, { once: true });
+  const timeout = setTimeout(() => {
+    if (controller.signal.aborted) return;
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+  const abortedResponse = () =>
+    timedOut
+      ? errorResponse("AI 이미지 생성 시간이 초과되었습니다.", 504, {
+          code: "ai_timeout",
+          retryable: true,
+        })
+      : errorResponse("AI 이미지 생성 요청이 취소되었습니다.", 499, {
+          code: "ai_request_cancelled",
+          retryable: true,
+        });
+
   try {
-    upstreamResponse = await fetch(GEMINI_ENDPOINT, {
-      method: "POST",
-      redirect: "error",
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json; charset=utf-8",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: image.mimeType,
-                  data: image.data,
+    let upstreamResponse: Response;
+    try {
+      upstreamResponse = await fetch(GEMINI_ENDPOINT, {
+        method: "POST",
+        redirect: "error",
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json; charset=utf-8",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: image.mimeType,
+                    data: image.data,
+                  },
                 },
-              },
-            ],
-          },
-        ],
-        generationConfig: { responseModalities: ["IMAGE"] },
-      }),
-    });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      return errorResponse("AI 이미지 생성 시간이 초과되었습니다.", 504, {
-        code: "ai_timeout",
+              ],
+            },
+          ],
+          generationConfig: { responseModalities: ["IMAGE"] },
+        }),
+      });
+    } catch (error) {
+      if (controller.signal.aborted) return abortedResponse();
+      void error;
+      return errorResponse("AI 이미지 생성 서비스에 연결하지 못했습니다.", 502, {
+        code: "ai_network_error",
         retryable: true,
       });
     }
-    void error;
-    return errorResponse("AI 이미지 생성 서비스에 연결하지 못했습니다.", 502, {
-      code: "ai_network_error",
-      retryable: true,
-    });
+
+    if (!upstreamResponse.ok) {
+      await readResponseTextWithLimit(upstreamResponse, 64 * 1024);
+      if (controller.signal.aborted) return abortedResponse();
+      return upstreamFailureResponse(upstreamResponse.status);
+    }
+
+    const upstreamText = await readResponseTextWithLimit(
+      upstreamResponse,
+      MAX_UPSTREAM_RESPONSE_BYTES,
+    );
+    if (upstreamText === null) {
+      if (controller.signal.aborted) return abortedResponse();
+      return errorResponse("AI 이미지 응답이 너무 크거나 손상되었습니다.", 502, {
+        code: "ai_invalid_response",
+        retryable: true,
+      });
+    }
+    let upstreamPayload: unknown;
+    try {
+      upstreamPayload = JSON.parse(upstreamText);
+    } catch {
+      return errorResponse("AI 이미지 응답을 읽지 못했습니다.", 502, {
+        code: "ai_invalid_response",
+        retryable: true,
+      });
+    }
+
+    const result = extractGeneratedImage(upstreamPayload);
+    if (!result) {
+      if (wasContentBlocked(upstreamPayload)) {
+        return errorResponse(
+          "안전 정책으로 이 이미지를 생성할 수 없습니다. 다른 사진이나 설명을 사용해 주세요.",
+          422,
+          { code: "ai_content_blocked", retryable: false },
+        );
+      }
+      return errorResponse("AI가 사용할 수 있는 이미지를 반환하지 않았습니다.", 502, {
+        code: "ai_invalid_response",
+        retryable: true,
+      });
+    }
+
+    return Response.json(
+      { result: { ...result, model: GEMINI_MODEL } },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } finally {
     clearTimeout(timeout);
+    request.signal.removeEventListener("abort", abortFromRequest);
+    releaseUpstreamSlot(upstreamSlotKey);
   }
-
-  if (!upstreamResponse.ok) {
-    await readResponseTextWithLimit(upstreamResponse, 64 * 1024);
-    return upstreamFailureResponse(upstreamResponse.status);
-  }
-
-  const upstreamText = await readResponseTextWithLimit(
-    upstreamResponse,
-    MAX_UPSTREAM_RESPONSE_BYTES,
-  );
-  if (upstreamText === null) {
-    return errorResponse("AI 이미지 응답이 너무 크거나 손상되었습니다.", 502, {
-      code: "ai_invalid_response",
-      retryable: true,
-    });
-  }
-  let upstreamPayload: unknown;
-  try {
-    upstreamPayload = JSON.parse(upstreamText);
-  } catch {
-    return errorResponse("AI 이미지 응답을 읽지 못했습니다.", 502, {
-      code: "ai_invalid_response",
-      retryable: true,
-    });
-  }
-
-  const result = extractGeneratedImage(upstreamPayload);
-  if (!result) {
-    if (wasContentBlocked(upstreamPayload)) {
-      return errorResponse(
-        "안전 정책으로 이 이미지를 생성할 수 없습니다. 다른 사진이나 설명을 사용해 주세요.",
-        422,
-        { code: "ai_content_blocked", retryable: false },
-      );
-    }
-    return errorResponse("AI가 사용할 수 있는 이미지를 반환하지 않았습니다.", 502, {
-      code: "ai_invalid_response",
-      retryable: true,
-    });
-  }
-
-  return Response.json(
-    { result: { ...result, model: GEMINI_MODEL } },
-    { headers: { "Cache-Control": "no-store" } },
-  );
 }

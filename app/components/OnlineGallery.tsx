@@ -281,10 +281,6 @@ export function OnlineGallery({
     return () => window.clearTimeout(timer);
   }, [nameAction]);
 
-  const formattedCount = useMemo(
-    () => new Intl.NumberFormat("ko-KR").format(entries.length),
-    [entries.length],
-  );
   const classOptions = classes;
   const activeClassIds = useMemo(
     () => new Set(classes.map((classRecord) => classRecord.id)),
@@ -557,9 +553,20 @@ export function OnlineGallery({
           </span>
           <h2 id={headingId}>함께 만든 캐릭터를 둘러보세요</h2>
         </div>
-        <div className={styles.liveCount} aria-label={`갤러리 캐릭터 ${formattedCount}개`}>
-          <strong>{formattedCount}</strong>
-          <span>CHARACTERS</span>
+        <div className={styles.galleryFilter}>
+          <label htmlFor={`${headingId}-class-filter`}>학급별 보기</label>
+          <select
+            id={`${headingId}-class-filter`}
+            value={effectiveClassFilter}
+            onChange={(event) => setClassFilter(event.target.value)}
+          >
+            <option value="all">전체 학급</option>
+            {classOptions.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}</option>
+            ))}
+            <option value="unclassified">미분류 · 이전 갤러리</option>
+          </select>
+          <span aria-live="polite">{visibleEntries.length}개 표시</span>
         </div>
       </header>
 
@@ -569,22 +576,6 @@ export function OnlineGallery({
           갤러리 업로드와 좋아요는 학급 프로필로 참여할 때 사용할 수 있어요.
         </p>
       ) : null}
-
-      <div className={styles.galleryFilter}>
-        <label htmlFor={`${headingId}-class-filter`}>학급별 보기</label>
-        <select
-          id={`${headingId}-class-filter`}
-          value={effectiveClassFilter}
-          onChange={(event) => setClassFilter(event.target.value)}
-        >
-          <option value="all">전체 학급</option>
-          {classOptions.map((item) => (
-            <option key={item.id} value={item.id}>{item.name}</option>
-          ))}
-          <option value="unclassified">미분류 · 이전 갤러리</option>
-        </select>
-        <span>{visibleEntries.length}개 표시</span>
-      </div>
 
       <p className={styles.actionStatus} role="status" aria-live="polite">
         {actionMessage}

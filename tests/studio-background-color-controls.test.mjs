@@ -36,11 +36,22 @@ test("offers black, gray, chroma-key, and one custom color control", async () =>
 
   assert.match(studio, /type=["']color["']/);
   assert.match(studio, /aria-label=["']자유 배경색 선택["']/);
-  assert.match(studio, /selectCustomStageColor\(event\.target\.value\)/);
-  assert.match(studio, /setCustomStageColor\(color\)[\s\S]{0,100}selectStageColor\(color\)/);
+  assert.match(studio, /updateCustomStageColorDraft\(event\.target\.value\)/);
+  assert.match(studio, /setCustomStageColorDraft\(color\)/);
+  assert.match(
+    studio,
+    /const\s+applyCustomStageColor[\s\S]{0,180}selectStageColor\(customStageColorDraft\)/,
+  );
+  assert.match(studio, /onClick=\{applyCustomStageColor\}/);
+  assert.match(studio, /aria-label=\{`자유 배경색 \$\{customStageColorDraft\} 적용`\}/);
+  assert.doesNotMatch(
+    studio,
+    /onChange=\{\(event\)\s*=>[\s\S]{0,120}selectStageColor\(event\.target\.value\)/,
+  );
   assert.match(studio, /className=\{styles\.customColorControl\}/);
   assert.match(css, /\.swatches\s*\{[\s\S]{0,180}grid-template-columns:\s*repeat\(4,/);
   assert.match(css, /\.customColorControl\s*\{[\s\S]{0,240}height:\s*44px/);
+  assert.match(css, /\.applyCustomColorButton\s*\{[\s\S]{0,180}min-height:\s*44px/);
 });
 
 test("keeps custom colors persistent while migrating the removed presets", async () => {
@@ -48,7 +59,7 @@ test("keeps custom colors persistent while migrating the removed presets", async
 
   assert.match(studio, /HEX_STAGE_COLOR\.test\(restoredColor\)/);
   assert.match(studio, /setStageColor\(restoredColor\)/);
-  assert.match(studio, /setCustomStageColor\(restoredColor\)/);
+  assert.match(studio, /setCustomStageColorDraft\(restoredColor\)/);
   assert.match(studio, /LEGACY_STAGE_COLORS\s*=\s*new Set\(\[[\s\S]*?#332d58[\s\S]*?#254a48/);
 });
 
@@ -61,4 +72,28 @@ test("does not render the gallery CSS-module profile panel name", async () => {
   assert.doesNotMatch(gallery, /styles\.namePanel/);
   assert.doesNotMatch(css, /\.namePanel\b/);
   assert.doesNotMatch(gallery, /<span>활성 프로필<\/span>/);
+});
+
+test("replaces the gallery live-count badge with the existing class filter", async () => {
+  const [gallery, css] = await Promise.all([
+    readFile(galleryUrl, "utf8"),
+    readFile(galleryCssUrl, "utf8"),
+  ]);
+
+  assert.doesNotMatch(gallery, /styles\.liveCount|formattedCount|CHARACTERS/);
+  assert.doesNotMatch(css, /\.liveCount\b/);
+  assert.equal(
+    [...gallery.matchAll(/className=\{styles\.galleryFilter\}/g)].length,
+    1,
+    "the class filter should render once",
+  );
+  assert.match(
+    gallery,
+    /<header className=\{styles\.header\}>[\s\S]{0,1800}<div className=\{styles\.galleryFilter\}>[\s\S]{0,500}<select[\s\S]{0,300}value=\{effectiveClassFilter\}[\s\S]{0,300}onChange=\{\(event\) => setClassFilter\(event\.target\.value\)\}[\s\S]{0,700}<\/header>/,
+  );
+  assert.match(css, /\.galleryFilter\s*\{[\s\S]{0,180}display:\s*grid;/);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*590px\)[\s\S]{0,700}\.galleryFilter\s*\{[\s\S]{0,120}width:\s*100%;/,
+  );
 });

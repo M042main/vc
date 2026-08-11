@@ -250,6 +250,7 @@ export default function Home() {
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [stageCharacterId, setStageCharacterId] = useState<string | null>(null);
   const [characterLibraryBusy, setCharacterLibraryBusy] = useState(false);
+  const [aiImageBusy, setAiImageBusy] = useState(false);
   const [latestCapture, setLatestCapture] = useState<VrmStudioCapture | null>(null);
   const [adminMode, setAdminMode] = useState(false);
   const [adminDialogOpen, setAdminDialogOpen] = useState(false);
@@ -279,6 +280,7 @@ export default function Home() {
   const characterEditorKey = `${characterArtworkKey}:${activeCharacterId ?? "new"}`;
   const activeCharacterArtwork =
     characterArtworkOwnerKey === characterArtworkKey ? characterArtwork : null;
+  const pageBusy = characterLibraryBusy || aiImageBusy;
 
   const restoreAdminTriggerFocus = useCallback(() => {
     window.setTimeout(() => {
@@ -530,7 +532,7 @@ export default function Home() {
   };
 
   const handleProfileChange = (nextProfile: VisitorProfile | null) => {
-    if (libraryMutationRef.current.busy) return;
+    if (aiImageBusy || libraryMutationRef.current.busy) return;
     const mutationToken = beginLibraryMutation(
       libraryMutationRef,
       nextProfile,
@@ -744,6 +746,7 @@ export default function Home() {
       data-active={adminMode}
       data-gate-control={gateControl}
       onClick={openAdminDialog}
+      disabled={pageBusy}
       aria-haspopup="dialog"
       aria-label={adminMode ? "m042 관리자 설정 열기" : "관리자 m042 접근"}
     >
@@ -769,6 +772,7 @@ export default function Home() {
             className={mode === "studio" ? "is-active" : ""}
             onClick={() => setMode("studio")}
             type="button"
+            disabled={pageBusy}
           >
             <Camera size={17} aria-hidden="true" />
             트래킹 스튜디오
@@ -777,6 +781,7 @@ export default function Home() {
             className={mode === "creator" ? "is-active" : ""}
             onClick={() => setMode("creator")}
             type="button"
+            disabled={pageBusy}
           >
             <Paintbrush size={17} aria-hidden="true" />
             캐릭터 만들기
@@ -785,6 +790,7 @@ export default function Home() {
             className={mode === "gallery" ? "is-active" : ""}
             onClick={() => setMode("gallery")}
             type="button"
+            disabled={pageBusy}
             aria-label={
               latestCapture
                 ? "온라인 갤러리, 업로드할 새 캡처 있음"
@@ -801,6 +807,7 @@ export default function Home() {
             className={mode === "ai" ? "is-active" : ""}
             onClick={() => setMode("ai")}
             type="button"
+            disabled={pageBusy}
           >
             <Sparkles size={17} aria-hidden="true" />
             AI 이미지 생성
@@ -811,7 +818,7 @@ export default function Home() {
           {profile ? (
             <VisitorProfileActions
               profile={profile}
-              disabled={characterLibraryBusy}
+              disabled={pageBusy}
               onProfileChange={handleProfileChange}
             />
           ) : null}
@@ -879,7 +886,11 @@ export default function Home() {
               </div>
             }
           >
-            <AiImageGenerator />
+            <AiImageGenerator
+              key={characterArtworkKey}
+              profile={profile}
+              onBusyChange={setAiImageBusy}
+            />
           </Suspense>
         )}
       </section>

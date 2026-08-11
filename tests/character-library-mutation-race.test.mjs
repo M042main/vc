@@ -70,7 +70,10 @@ test("restore, save, delete, and profile transitions share the lock and reject s
   );
   assert.match(restore, /\.finally\(finishRestore\)/u);
 
-  assert.match(profileChange, /if \(libraryMutationRef\.current\.busy\) return/u);
+  assert.match(
+    profileChange,
+    /if \(aiImageBusy \|\| libraryMutationRef\.current\.busy\) return/u,
+  );
   assert.match(
     profileChange,
     /beginLibraryMutation\(\s*libraryMutationRef,\s*nextProfile/u,
@@ -101,7 +104,7 @@ test("busy state disables profile and creator mutation controls in addition to h
 
   assert.match(
     page,
-    /<VisitorProfileActions[\s\S]{0,180}disabled=\{characterLibraryBusy\}/u,
+    /<VisitorProfileActions[\s\S]{0,180}disabled=\{pageBusy\}/u,
   );
   assert.match(
     page,

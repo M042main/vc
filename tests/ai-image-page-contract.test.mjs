@@ -14,7 +14,11 @@ test("adds a lazy AI image workspace directly beside the online gallery", async 
     page,
     /온라인 갤러리[\s\S]{0,900}className=\{mode === "ai" \? "is-active" : ""\}[\s\S]{0,300}AI 이미지 생성/u,
   );
-  assert.match(page, /<AiImageGenerator\s*\/>/u);
+  assert.match(
+    page,
+    /<AiImageGenerator[\s\S]{0,120}key=\{characterArtworkKey\}[\s\S]{0,120}profile=\{profile\}[\s\S]{0,160}onBusyChange=\{setAiImageBusy\}[\s\S]{0,80}\/>/u,
+  );
+  assert.match(page, /const pageBusy = characterLibraryBusy \|\| aiImageBusy/u);
 });
 
 test("never exposes a Gemini API credential through the client page", async () => {

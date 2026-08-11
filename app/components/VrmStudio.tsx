@@ -463,7 +463,7 @@ export function VrmStudio({
   const [modelName, setModelName] = useState("아직 불러온 모델이 없어요");
   const [modelSize, setModelSize] = useState("");
   const [stageColor, setStageColor] = useState<StageColor>(STAGE_COLORS[0].value);
-  const [customStageColor, setCustomStageColor] = useState(
+  const [customStageColorDraft, setCustomStageColorDraft] = useState(
     DEFAULT_CUSTOM_STAGE_COLOR,
   );
   const [stageBackgroundImage, setStageBackgroundImage] =
@@ -1142,13 +1142,17 @@ export function VrmStudio({
     void clearPersistedStageBackground();
   }, []);
 
-  const selectCustomStageColor = useCallback(
+  const updateCustomStageColorDraft = useCallback(
     (color: string) => {
       if (!HEX_STAGE_COLOR.test(color)) return;
-      setCustomStageColor(color);
-      selectStageColor(color);
+      setCustomStageColorDraft(color);
     },
-    [selectStageColor],
+    [],
+  );
+
+  const applyCustomStageColor = useCallback(
+    () => selectStageColor(customStageColorDraft),
+    [customStageColorDraft, selectStageColor],
   );
 
   const removeStageBackgroundImage = useCallback(() => {
@@ -1390,7 +1394,7 @@ export function VrmStudio({
         ) {
           setStageColor(restoredColor);
           if (!STAGE_COLORS.some(({ value }) => value === restoredColor)) {
-            setCustomStageColor(restoredColor);
+            setCustomStageColorDraft(restoredColor);
           }
         }
         setStageBackgroundFit(snapshot.settings.backgroundFit);
@@ -2169,14 +2173,6 @@ export function VrmStudio({
         ) : null}
 
         {error ? <div className={styles.errorBox}>{error}</div> : null}
-
-        <div className={styles.privacyNote}>
-          <LockKeyhole size={13} aria-hidden="true" />
-          <span>
-            카메라 영상은 서버로 전송하지 않습니다. VRM과 사진 배경은 다음
-            방문에 복원할 수 있도록 이 기기의 브라우저에만 저장됩니다.
-          </span>
-        </div>
       </aside>
 
       <div
@@ -2461,12 +2457,25 @@ export function VrmStudio({
           >
             <input
               type="color"
-              value={customStageColor}
-              onChange={(event) => selectCustomStageColor(event.target.value)}
+              value={customStageColorDraft}
+              onChange={(event) =>
+                updateCustomStageColorDraft(event.target.value)
+              }
               aria-label="자유 배경색 선택"
             />
             <span>자유색</span>
           </label>
+          <button
+            type="button"
+            className={styles.applyCustomColorButton}
+            onClick={applyCustomStageColor}
+            disabled={
+              !stageBackgroundImage && stageColor === customStageColorDraft
+            }
+            aria-label={`자유 배경색 ${customStageColorDraft} 적용`}
+          >
+            적용
+          </button>
         </div>
 
         <div
