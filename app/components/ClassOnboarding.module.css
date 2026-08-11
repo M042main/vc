@@ -469,6 +469,39 @@
   border-radius: 12px;
 }
 
+.className {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.classActions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.adminArea .aiToggle {
+  gap: 5px;
+  min-width: 78px;
+  border-color: rgba(23, 23, 19, 0.22);
+  background: #ece9e1;
+}
+
+.adminArea .aiToggle[data-enabled="true"] {
+  border-color: #171713;
+  background: #dfff45;
+}
+
+.aiToggle > span {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
 .deleteConfirm {
   display: inline-flex;
   gap: 6px;
@@ -572,10 +605,20 @@
     flex-direction: column;
   }
 
-  .adminArea li > button,
+  .classActions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .classActions > button,
   .deleteConfirm,
   .deleteConfirm button {
     width: 100%;
+  }
+
+  .deleteConfirm {
+    grid-column: 2;
   }
 }
 

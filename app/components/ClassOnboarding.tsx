@@ -6,6 +6,7 @@ import {
   Pencil,
   Plus,
   School,
+  Sparkles,
   Trash2,
   UserRound,
   X,
@@ -23,6 +24,7 @@ import {
 import {
   createClassRecord,
   deleteClassRecord,
+  setClassAiEnabled,
   subscribeClassRecords,
   type ClassRecord,
 } from "../lib/firebaseGallery";
@@ -507,6 +509,25 @@ export function ClassOnboarding({
     }
   };
 
+  const toggleClassAi = async (classRecord: ClassRecord) => {
+    if (!isAdmin || classBusy) return;
+    const nextEnabled = !classRecord.aiEnabled;
+    setClassBusy(true);
+    setStatus(
+      `${classRecord.name} 학급의 AI 이미지 생성을 ${nextEnabled ? "켜는" : "끄는"} 중입니다.`,
+    );
+    try {
+      await setClassAiEnabled(classRecord.id, nextEnabled);
+      setStatus(
+        `${classRecord.name} 학급의 AI 이미지 생성을 ${nextEnabled ? "켰습니다." : "껐습니다."}`,
+      );
+    } catch (error) {
+      setStatus(messageFrom(error, "AI 이미지 생성 설정을 변경하지 못했습니다."));
+    } finally {
+      setClassBusy(false);
+    }
+  };
+
   const panel = (
     <section
       ref={panelRef}
@@ -623,34 +644,50 @@ export function ClassOnboarding({
           <ul>
             {classes.map((item) => (
               <li key={item.id}>
-                <span>{item.name}</span>
-                {deleteCandidateId === item.id ? (
-                  <span className={styles.deleteConfirm}>
-                    <button
-                      type="button"
-                      onClick={() => void deleteClass(item)}
-                      disabled={classBusy}
-                    >
-                      삭제 확인
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteCandidateId(null)}
-                      disabled={classBusy}
-                    >
-                      취소
-                    </button>
-                  </span>
-                ) : (
+                <span className={styles.className}>{item.name}</span>
+                <span className={styles.classActions}>
                   <button
+                    className={styles.aiToggle}
                     type="button"
-                    onClick={() => setDeleteCandidateId(item.id)}
+                    role="switch"
+                    aria-checked={item.aiEnabled}
+                    aria-label={`${item.name} AI 이미지 생성 ${item.aiEnabled ? "끄기" : "켜기"}`}
+                    onClick={() => void toggleClassAi(item)}
                     disabled={classBusy}
-                    aria-label={`${item.name} 학급 삭제 선택`}
+                    data-enabled={item.aiEnabled}
                   >
-                    <Trash2 size={15} aria-hidden="true" /> 삭제
+                    <Sparkles size={14} aria-hidden="true" />
+                    AI
+                    <span>{item.aiEnabled ? "ON" : "OFF"}</span>
                   </button>
-                )}
+                  {deleteCandidateId === item.id ? (
+                    <span className={styles.deleteConfirm}>
+                      <button
+                        type="button"
+                        onClick={() => void deleteClass(item)}
+                        disabled={classBusy}
+                      >
+                        삭제 확인
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteCandidateId(null)}
+                        disabled={classBusy}
+                      >
+                        취소
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteCandidateId(item.id)}
+                      disabled={classBusy}
+                      aria-label={`${item.name} 학급 삭제 선택`}
+                    >
+                      <Trash2 size={15} aria-hidden="true" /> 삭제
+                    </button>
+                  )}
+                </span>
               </li>
             ))}
           </ul>

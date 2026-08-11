@@ -59,6 +59,11 @@ test("removes long visible creator guidance while retaining concise accessible c
 
   assert.doesNotMatch(creator, /styles\.tipBox|팔은 수평 T-포즈/u);
   assert.doesNotMatch(creator, /체크무늬는 투명 영역|저장된 T-포즈/u);
+  assert.doesNotMatch(
+    creator,
+    /T-포즈 · \{side === "front"|투명 원본 · T-포즈 관절·얼굴 가이드는 저장되지 않아요/u,
+  );
+  assert.doesNotMatch(creator, /styles\.(?:stageMeta|guideNotice)/u);
   assert.match(
     creator,
     /id="character-face-guide-help"\s+className=\{styles\.srOnly\}/u,
@@ -73,7 +78,7 @@ test("removes long visible creator guidance while retaining concise accessible c
   );
   assert.doesNotMatch(
     creatorCss,
-    /\.(?:tipBox|faceGuideHint|canvasHelp|status)\s*\{/u,
+    /\.(?:tipBox|faceGuideHint|canvasHelp|status|stageMeta|guideNotice)\s*\{/u,
   );
 });
 

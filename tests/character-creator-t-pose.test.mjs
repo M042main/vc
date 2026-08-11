@@ -80,8 +80,15 @@ test("uses one clear horizontal T-pose in the authoring guide and live rig", asy
   const silhouette = blockFrom(creator, "function createSilhouettePath", 2_700);
   assert.match(silhouette, /lineTo\(552, 214\)/);
   assert.match(silhouette, /bezierCurveTo\(22, 223, 32, 214, 48, 214\)/);
-  assert.match(creator, /T-포즈 · \{side === "front"/);
-  assert.match(creator, /T-포즈 관절·얼굴 가이드는 저장되지 않아요/);
+  assert.doesNotMatch(creator, /T-포즈 · \{side === "front"/);
+  assert.doesNotMatch(
+    creator,
+    /투명 원본 · T-포즈 관절·얼굴 가이드는 저장되지 않아요/,
+  );
+  assert.match(
+    creator,
+    /aria-label=\{`\$\{side === "front" \? "앞면" : "뒷면"\} 캐릭터 그리기 영역`\}/,
+  );
   assert.match(creator, /T-포즈 안팎 어디든 그릴 수 있으며/);
 });
 

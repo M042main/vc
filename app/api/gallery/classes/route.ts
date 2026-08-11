@@ -9,6 +9,7 @@ const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
 const MAX_CLASS_NAME_LENGTH = 40;
 
 type ApiErrorCode =
+  | "firebase_conflict"
   | "firebase_invalid_response"
   | "firebase_network_error"
   | "firebase_not_found"
@@ -77,10 +78,15 @@ async function requestPayload(request: Request): Promise<Record<string, unknown>
 
 function firebaseFailureResponse(
   response: Response,
-  action: "create" | "delete",
+  action: "create" | "update" | "delete",
 ) {
   const upstreamStatus = response.status;
-  const actionLabel = action === "create" ? "학급을 만들" : "학급을 삭제하";
+  const actionLabel =
+    action === "create"
+      ? "학급을 만들"
+      : action === "update"
+        ? "학급 설정을 변경하"
+        : "학급을 삭제하";
 
   if (upstreamStatus === 401 || upstreamStatus === 403) {
     return errorResponse(
@@ -153,7 +159,7 @@ export async function POST(request: Request) {
           Accept: "application/json",
           "Content-Type": "application/json; charset=utf-8",
         },
-        body: JSON.stringify({ name, createdAt }),
+        body: JSON.stringify({ name, createdAt, aiEnabled: true }),
       },
     );
   } catch {
@@ -187,8 +193,112 @@ export async function POST(request: Request) {
     });
   }
   return Response.json(
-    { classRecord: { id, name, createdAt } },
+    { classRecord: { id, name, createdAt, aiEnabled: true } },
     { status: 201, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+export async function PATCH(request: Request) {
+  if (!isAdmin(request)) return errorResponse("학급 관리 권한이 없습니다.", 403);
+  const payload = await requestPayload(request);
+  const id = validatedClassId(payload?.id);
+  if (!id) return errorResponse("변경할 학급 ID가 올바르지 않습니다.", 400);
+  if (typeof payload?.aiEnabled !== "boolean") {
+    return errorResponse("AI 이미지 생성 설정이 올바르지 않습니다.", 400);
+  }
+
+  const aiEnabled = payload.aiEnabled;
+  const firebaseClassUrl = new URL(
+    `${GALLERY_CLASSES_PATH}/${id}.json`,
+    FIREBASE_DATABASE_ORIGIN,
+  );
+  let existingResponse: Response;
+  try {
+    existingResponse = await fetch(firebaseClassUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        Accept: "application/json",
+        "X-Firebase-ETag": "true",
+      },
+    });
+  } catch {
+    return errorResponse(
+      "Firebase 학급 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      502,
+      { code: "firebase_network_error", retryable: true },
+    );
+  }
+  if (!existingResponse.ok) {
+    return firebaseFailureResponse(existingResponse, "update");
+  }
+  let existingClass: unknown;
+  try {
+    existingClass = await existingResponse.json();
+  } catch {
+    return errorResponse("Firebase 학급 정보를 읽지 못했습니다.", 502, {
+      code: "firebase_invalid_response",
+      retryable: true,
+      upstreamStatus: existingResponse.status,
+    });
+  }
+  const validExistingClass =
+    existingClass &&
+    typeof existingClass === "object" &&
+    !Array.isArray(existingClass) &&
+    validatedClassName((existingClass as Record<string, unknown>).name) &&
+    typeof (existingClass as Record<string, unknown>).createdAt === "number" &&
+    Number.isFinite((existingClass as Record<string, unknown>).createdAt);
+  if (!validExistingClass) {
+    return errorResponse("변경할 학급을 찾지 못했습니다.", 404, {
+      code: "firebase_not_found",
+      retryable: false,
+    });
+  }
+  const existingEtag = existingResponse.headers.get("ETag");
+  if (!existingEtag) {
+    return errorResponse("Firebase 학급 버전 정보를 읽지 못했습니다.", 502, {
+      code: "firebase_invalid_response",
+      retryable: true,
+      upstreamStatus: existingResponse.status,
+    });
+  }
+  let firebaseResponse: Response;
+  try {
+    firebaseResponse = await fetch(firebaseClassUrl, {
+      method: "PATCH",
+      redirect: "follow",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+        "If-Match": existingEtag,
+      },
+      body: JSON.stringify({ aiEnabled }),
+    });
+  } catch {
+    return errorResponse(
+      "Firebase 학급 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      502,
+      { code: "firebase_network_error", retryable: true },
+    );
+  }
+  if (firebaseResponse.status === 412) {
+    return errorResponse(
+      "학급 정보가 동시에 변경되었습니다. 목록을 확인한 뒤 다시 시도해 주세요.",
+      409,
+      {
+        code: "firebase_conflict",
+        retryable: true,
+        upstreamStatus: firebaseResponse.status,
+      },
+    );
+  }
+  if (!firebaseResponse.ok) {
+    return firebaseFailureResponse(firebaseResponse, "update");
+  }
+  return Response.json(
+    { updated: true, id, aiEnabled },
+    { headers: { "Cache-Control": "no-store" } },
   );
 }
 

@@ -5,6 +5,7 @@ import ts from "typescript";
 
 const routeUrl = new URL("../app/api/ai/generate/route.ts", import.meta.url);
 const TEST_API_KEY = "test-only-gemini-key";
+const TEST_CLASS_ID = "ABCDEFGHIJKLMNOPQRST";
 const BROWSER_HEADERS = {
   Origin: "https://site.test",
   "Sec-Fetch-Site": "same-origin",
@@ -57,7 +58,7 @@ function generationRequest(payload, headers = {}, signal) {
       ...BROWSER_HEADERS,
       ...headers,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ classId: TEST_CLASS_ID, ...payload }),
     signal,
   });
 }
@@ -74,9 +75,26 @@ async function withApiKey(value, run) {
   }
 }
 
-async function withFetch(mock, run) {
+async function withFetch(mock, run, classRecord = { aiEnabled: true }) {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = mock;
+  globalThis.fetch = async (input, init) => {
+    if (
+      String(input).includes(
+        `/motion_ink_gallery_a7f3c9/classes/${TEST_CLASS_ID}.json`,
+      )
+    ) {
+      return Response.json(
+        classRecord === null
+          ? null
+          : {
+              name: "1학년 1반",
+              createdAt: 1_800_000_000_000,
+              ...classRecord,
+            },
+      );
+    }
+    return mock(input, init);
+  };
   try {
     return await run();
   } finally {
@@ -96,6 +114,9 @@ test("Gemini key stays server-only and the route is Edge/Worker compatible", asy
   const source = await readFile(routeUrl, "utf8");
 
   assert.match(source, /process\.env\.GEMINI_API_KEY/);
+  assert.match(source, /GALLERY_CLASSES_PATH[\s\S]{0,180}motion_ink_gallery_a7f3c9\/classes/u);
+  assert.match(source, /validatedClassId\(payload\.classId\)/u);
+  assert.match(source, /classAiAccess === "disabled"[\s\S]{0,180}ai_disabled_for_class/u);
   assert.match(source, /export const runtime = "edge"/);
   assert.match(source, /new AbortController\(\)/);
   assert.match(source, /REQUEST_TIMEOUT_MS\s*=\s*60_000/);
@@ -196,7 +217,7 @@ test("cross-site browser requests are rejected and warm-isolate bursts are bound
   assert.equal(calls, 12);
 });
 
-test("allows the three UI variants but rejects a fourth concurrent upstream request", async () => {
+test("allows three concurrent upstream requests but rejects a fourth", async () => {
   const route = await loadRoute("upstream-concurrency");
   const pendingResolvers = [];
   let holdResponses = true;
@@ -355,6 +376,86 @@ test("valid image+prompt uses the official Gemini 2.5 Flash Image REST shape", a
   assert.equal(payload.result.width, 1024);
   assert.equal(payload.result.height, 1024);
   assert.match(payload.result.imageDataUrl, /^data:image\/png;base64,/);
+});
+
+test("rejects disabled or missing classes before contacting Gemini", async () => {
+  const route = await loadRoute("class-ai-access");
+  let geminiCalls = 0;
+  const makeRequest = () =>
+    route.POST(
+      generationRequest({ prompt: "교실에서 손을 흔들기", imageDataUrl: pngDataUrl() }),
+    );
+
+  await withApiKey(TEST_API_KEY, async () => {
+    const disabled = await withFetch(
+      async () => {
+        geminiCalls += 1;
+        return imageResponse();
+      },
+      makeRequest,
+      { aiEnabled: false },
+    );
+    assert.equal(disabled.status, 403);
+    assert.equal((await disabled.json()).code, "ai_disabled_for_class");
+
+    const missing = await withFetch(
+      async () => {
+        geminiCalls += 1;
+        return imageResponse();
+      },
+      makeRequest,
+      null,
+    );
+    assert.equal(missing.status, 503);
+    assert.equal((await missing.json()).code, "ai_unavailable");
+
+    const malformed = await withFetch(
+      async () => {
+        geminiCalls += 1;
+        return imageResponse();
+      },
+      makeRequest,
+      { aiEnabled: "false" },
+    );
+    assert.equal(malformed.status, 403);
+    assert.equal((await malformed.json()).code, "ai_disabled_for_class");
+
+    const incomplete = await withFetch(
+      async () => {
+        geminiCalls += 1;
+        return imageResponse();
+      },
+      makeRequest,
+      { name: "", aiEnabled: true },
+    );
+    assert.equal(incomplete.status, 503);
+    assert.equal((await incomplete.json()).code, "ai_unavailable");
+
+    const invalid = await route.POST(
+      generationRequest(
+        { classId: "not-a-class", prompt: "교실", imageDataUrl: pngDataUrl() },
+      ),
+    );
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).code, "invalid_class");
+  });
+  assert.equal(geminiCalls, 0);
+});
+
+test("keeps legacy complete classes without an AI flag enabled", async () => {
+  const route = await loadRoute("legacy-class-ai-access");
+  const response = await withApiKey(TEST_API_KEY, () =>
+    withFetch(
+      async () => imageResponse(),
+      () =>
+        route.POST(
+          generationRequest({ prompt: "교실에서 웃기", imageDataUrl: pngDataUrl() }),
+        ),
+      {},
+    ),
+  );
+
+  assert.equal(response.status, 200);
 });
 
 test("missing server configuration fails before parsing or contacting Gemini", async () => {

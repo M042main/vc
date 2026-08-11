@@ -336,36 +336,6 @@
   min-width: 0;
 }
 
-.stageMeta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
-  color: #4c535e;
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.stageMeta > span:first-child {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.stageMeta i {
-  width: 7px;
-  height: 7px;
-  background: #57b777;
-  border-radius: 50%;
-  box-shadow: 0 0 0 4px rgba(87, 183, 119, 0.13);
-}
-
-.guideNotice {
-  color: #8a8e94;
-  font-weight: 600;
-}
-
 .canvasFrame {
   position: relative;
   display: flex;
@@ -562,12 +532,6 @@
   .sideBadge {
     top: 18px;
     left: 18px;
-  }
-
-  .stageMeta {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
   }
 
   .panelActions {

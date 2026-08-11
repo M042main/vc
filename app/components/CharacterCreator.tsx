@@ -976,16 +976,6 @@ export function CharacterCreator({
         </aside>
 
         <div className={styles.stageColumn}>
-          <div className={styles.stageMeta}>
-            <span>
-              <i aria-hidden="true" />
-              T-포즈 · {side === "front" ? "앞면 편집 중" : "뒷면 편집 중"}
-            </span>
-            <span className={styles.guideNotice}>
-              투명 원본 · T-포즈 관절·얼굴 가이드는 저장되지 않아요
-            </span>
-          </div>
-
           {side === "front" ? (
             <p id="character-face-guide-help" className={styles.srOnly}>
               얼굴 가이드에는 좌우 눈과 눈썹, 코, 입술, 입꼬리, 턱 기준점이

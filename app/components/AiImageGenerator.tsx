@@ -2,11 +2,13 @@
 
 import {
   Download,
+  History,
   Images,
   LoaderCircle,
   RefreshCw,
   Save,
   Sparkles,
+  X,
 } from "lucide-react";
 import {
   useCallback,
@@ -22,11 +24,16 @@ import {
   subscribeGalleryEntriesForProfile,
   type GalleryEntry,
 } from "../lib/firebaseGallery";
+import {
+  listAiGenerationHistory,
+  removeAiGenerationHistory,
+  saveAiGenerationHistory,
+  type AiGenerationHistoryItem,
+} from "../lib/aiGenerationHistory";
 import type { VisitorProfile } from "../lib/visitorProfile";
 import styles from "./AiImageGenerator.module.css";
 
 const MAX_PROMPT_LENGTH = 600;
-const MAX_RESULTS = 3;
 const MAX_GALLERY_IMAGE_DATA_URL_LENGTH = Math.floor(5.5 * 1024 * 1024);
 const MAX_GALLERY_IMAGE_EDGE = 2_048;
 const ACCEPTED_GENERATED_IMAGE_TYPES = new Set([
@@ -35,29 +42,6 @@ const ACCEPTED_GENERATED_IMAGE_TYPES = new Set([
   "image/webp",
 ]);
 
-// Variations are intentionally internal: one user request produces a useful
-// comparison without adding a style-selection surface to the interface.
-const GENERATION_VARIANTS = [
-  {
-    id: "illustration",
-    label: "일러스트",
-    instruction:
-      "섬세한 디지털 일러스트 캐릭터로 표현하고, 인물의 얼굴 특징과 개성을 분명하게 유지하세요.",
-  },
-  {
-    id: "three-dimensional",
-    label: "3D",
-    instruction:
-      "완성도 높은 친근한 3D 캐릭터로 표현하고, 자연스러운 조명과 입체감을 더하세요.",
-  },
-  {
-    id: "sticker",
-    label: "스티커",
-    instruction:
-      "표정이 잘 보이는 선명한 캐릭터 스티커 스타일로 표현하고, 깔끔한 실루엣을 만드세요.",
-  },
-] as const;
-
 interface AiGenerateResponse {
   imageDataUrl: string;
   mimeType: string;
@@ -65,7 +49,7 @@ interface AiGenerateResponse {
 
 interface GeneratedResult extends AiGenerateResponse {
   id: string;
-  label: string;
+  createdAt: number;
   prompt: string;
   sourceEntryId: string;
   sourceName: string;
@@ -75,6 +59,7 @@ export interface AiImageGeneratorProps {
   profile: VisitorProfile | null;
   className?: string;
   onBusyChange?: (busy: boolean) => void;
+  aiEnabled?: boolean;
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -123,23 +108,24 @@ async function responseError(response: Response) {
     : "AI 이미지를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }
 
-async function generateVariant({
+async function generateImage({
   imageDataUrl,
   prompt,
-  variantInstruction,
+  classId,
   signal,
 }: {
   imageDataUrl: string;
   prompt: string;
-  variantInstruction: string;
+  classId: string;
   signal: AbortSignal;
 }) {
   const response = await fetch("/api/ai/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      prompt: `${prompt}\n\n표현 방식: ${variantInstruction}`,
+      prompt,
       imageDataUrl,
+      classId,
     }),
     signal,
   });
@@ -225,8 +211,8 @@ async function prepareGalleryPngDataUrl(imageDataUrl: string) {
   throw new Error("이미지 용량을 갤러리 저장 크기로 줄이지 못했습니다.");
 }
 
-function safeDownloadName(label: string) {
-  const safe = label
+function safeDownloadName(prompt: string) {
+  const safe = prompt
     .normalize("NFKC")
     .replace(/[\\/:*?"<>|]/gu, "-")
     .replace(/\s+/gu, "-")
@@ -238,14 +224,19 @@ export function AiImageGenerator({
   profile,
   className,
   onBusyChange,
+  aiEnabled = true,
 }: AiImageGeneratorProps) {
   const headingId = useId();
   const promptHelpId = useId();
   const apiNoticeId = useId();
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const historyDialogRef = useRef<HTMLElement>(null);
+  const historyCloseRef = useRef<HTMLButtonElement>(null);
   const requestRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const subscriptionRef = useRef(0);
+  const historyLoadRef = useRef(0);
   const profileKeyRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const savingRef = useRef(new Set<string>());
@@ -259,6 +250,10 @@ export function AiImageGenerator({
   const [subscriptionVersion, setSubscriptionVersion] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [results, setResults] = useState<GeneratedResult[]>([]);
+  const [historyItems, setHistoryItems] = useState<AiGenerationHistoryItem[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generationMessage, setGenerationMessage] = useState("");
@@ -297,6 +292,7 @@ export function AiImageGenerator({
         mountedRef.current = false;
         requestRef.current?.abort();
         subscriptionRef.current += 1;
+        historyLoadRef.current += 1;
         downloadingInFlight.clear();
         downloadUrls.forEach((url) => URL.revokeObjectURL(url));
         downloadUrls.clear();
@@ -317,6 +313,45 @@ export function AiImageGenerator({
     setSaveErrors({});
     setGenerationError(null);
     setGenerationMessage("");
+    setHistoryOpen(false);
+  }, [profileKey]);
+
+  useEffect(() => {
+    if (aiEnabled) return;
+    requestRef.current?.abort();
+    requestRef.current = null;
+    generationRef.current += 1;
+    setIsGenerating(false);
+    setGenerationMessage("");
+  }, [aiEnabled]);
+
+  useEffect(() => {
+    const loadToken = historyLoadRef.current + 1;
+    historyLoadRef.current = loadToken;
+    setHistoryItems([]);
+    setHistoryError(null);
+
+    if (!profileKey) {
+      setHistoryLoading(false);
+      return;
+    }
+
+    setHistoryLoading(true);
+    void listAiGenerationHistory(profileKey)
+      .then((items) => {
+        if (historyLoadRef.current !== loadToken) return;
+        setHistoryItems(items);
+        setHistoryLoading(false);
+      })
+      .catch((error) => {
+        if (historyLoadRef.current !== loadToken) return;
+        setHistoryLoading(false);
+        setHistoryError(errorMessage(error, "이 기기의 생성 기록을 불러오지 못했습니다."));
+      });
+
+    return () => {
+      if (historyLoadRef.current === loadToken) historyLoadRef.current += 1;
+    };
   }, [profileKey]);
 
   useEffect(() => {
@@ -382,7 +417,11 @@ export function AiImageGenerator({
 
   const generate = useCallback(async () => {
     const normalizedPrompt = prompt.trim();
-    if (!profileKey || !eligibleProfile || !selectedEntry) {
+    if (!aiEnabled) {
+      setGenerationError("관리자가 이 학급의 AI 이미지 생성을 비활성화했습니다.");
+      return;
+    }
+    if (!profileKey || !eligibleProfile || !profile?.classId || !selectedEntry) {
       setGenerationError("로그인한 프로필의 갤러리 사진을 먼저 선택해 주세요.");
       return;
     }
@@ -399,19 +438,15 @@ export function AiImageGenerator({
     onBusyChange?.(true);
     setIsGenerating(true);
     setGenerationError(null);
-    setGenerationMessage("세 가지 표현을 생성하고 있습니다.");
+    setGenerationMessage("입력한 상황과 자세로 이미지를 생성하고 있습니다.");
 
     try {
-      const settled = await Promise.allSettled(
-        GENERATION_VARIANTS.map((variant) =>
-          generateVariant({
-            imageDataUrl: selectedEntry.imageDataUrl,
-            prompt: normalizedPrompt,
-            variantInstruction: variant.instruction,
-            signal: controller.signal,
-          }),
-        ),
-      );
+      const generatedImage = await generateImage({
+        imageDataUrl: selectedEntry.imageDataUrl,
+        prompt: normalizedPrompt,
+        classId: profile.classId,
+        signal: controller.signal,
+      });
       if (
         generationRef.current !== generationToken ||
         profileKeyRef.current !== profileKey ||
@@ -420,40 +455,55 @@ export function AiImageGenerator({
         return;
       }
 
-      const successfulResults = settled.flatMap((outcome, index) => {
-        if (outcome.status !== "fulfilled") return [];
-        const variant = GENERATION_VARIANTS[index];
-        return [
-          {
-            ...outcome.value,
-            id: `${generationToken}-${variant.id}`,
-            label: variant.label,
-            prompt: normalizedPrompt,
-            sourceEntryId: selectedEntry.id,
-            sourceName: selectedEntry.name,
-          } satisfies GeneratedResult,
-        ];
-      });
+      const createdAt = Date.now();
+      const result = {
+        ...generatedImage,
+        id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `ai-${createdAt}-${generationToken}`,
+        createdAt,
+        prompt: normalizedPrompt,
+        sourceEntryId: selectedEntry.id,
+        sourceName: selectedEntry.name,
+      } satisfies GeneratedResult;
 
-      if (successfulResults.length === 0) {
-        const firstFailure = settled.find(
-          (outcome): outcome is PromiseRejectedResult =>
-            outcome.status === "rejected",
-        );
-        throw new Error(
-          errorMessage(
-            firstFailure?.reason,
-            "세 가지 AI 이미지를 모두 생성하지 못했습니다.",
-          ),
-        );
+      setResults([result]);
+      setSavedIds(new Set());
+      setSaveErrors({});
+      setGenerationMessage("이미지가 완성됐습니다.");
+
+      const historyItem: AiGenerationHistoryItem = {
+        ...result,
+        profileKey,
+      };
+      try {
+        await saveAiGenerationHistory(historyItem);
+        if (
+          generationRef.current === generationToken &&
+          profileKeyRef.current === profileKey &&
+          !controller.signal.aborted
+        ) {
+          setHistoryItems((current) => [
+            historyItem,
+            ...current.filter((item) => item.id !== historyItem.id),
+          ].slice(0, 8));
+          setHistoryError(null);
+        }
+      } catch (historySaveError) {
+        if (
+          generationRef.current === generationToken &&
+          profileKeyRef.current === profileKey &&
+          !controller.signal.aborted
+        ) {
+          setHistoryError(
+            errorMessage(
+              historySaveError,
+              "이미지는 완성됐지만 이 기기의 기록에 보관하지 못했습니다.",
+            ),
+          );
+        }
       }
-
-      setResults(successfulResults.slice(0, MAX_RESULTS));
-      setGenerationMessage(
-        successfulResults.length === GENERATION_VARIANTS.length
-          ? "서로 다른 세 가지 캐릭터가 완성됐습니다."
-          : `${GENERATION_VARIANTS.length}개 중 ${successfulResults.length}개 결과가 완성됐습니다.`,
-      );
       window.setTimeout(() => resultHeadingRef.current?.focus(), 0);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -472,7 +522,7 @@ export function AiImageGenerator({
         if (mountedRef.current) setIsGenerating(false);
       }
     }
-  }, [eligibleProfile, onBusyChange, profileKey, prompt, selectedEntry]);
+  }, [aiEnabled, eligibleProfile, onBusyChange, profile, profileKey, prompt, selectedEntry]);
 
   const submit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -517,6 +567,22 @@ export function AiImageGenerator({
         await publishGalleryEntry({ profile, imageDataUrl: pngDataUrl });
         if (!mountedRef.current || profileKeyRef.current !== saveProfileKey) return;
         setSavedIds((current) => new Set(current).add(result.id));
+        setHistoryItems((current) => current.filter((item) => item.id !== result.id));
+        try {
+          await removeAiGenerationHistory(result.id, saveProfileKey);
+          if (mountedRef.current && profileKeyRef.current === saveProfileKey) {
+            setHistoryError(null);
+          }
+        } catch (historyRemoveError) {
+          if (mountedRef.current && profileKeyRef.current === saveProfileKey) {
+            setHistoryError(
+              errorMessage(
+                historyRemoveError,
+                "갤러리에는 저장됐지만 이 기기의 기록을 정리하지 못했습니다.",
+              ),
+            );
+          }
+        }
       } catch (error) {
         if (mountedRef.current && profileKeyRef.current === saveProfileKey) {
           setSaveErrors((current) => ({
@@ -559,7 +625,7 @@ export function AiImageGenerator({
       downloadUrlsRef.current.add(objectUrl);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
-      anchor.download = safeDownloadName(result.label);
+      anchor.download = safeDownloadName(result.prompt);
       anchor.style.display = "none";
       document.body.appendChild(anchor);
       anchor.click();
@@ -585,15 +651,78 @@ export function AiImageGenerator({
     }
   }, []);
 
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    window.setTimeout(() => historyButtonRef.current?.focus(), 0);
+  }, []);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    historyCloseRef.current?.focus();
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeHistory();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const dialog = historyDialogRef.current;
+      const focusable = dialog
+        ? Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((element) => element.getClientRects().length > 0)
+        : [];
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === first || !dialog?.contains(activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleDialogKeyDown);
+    return () => window.removeEventListener("keydown", handleDialogKeyDown);
+  }, [closeHistory, historyOpen]);
+
+  const showHistoryItem = useCallback((item: AiGenerationHistoryItem) => {
+    setResults([
+      {
+        id: item.id,
+        createdAt: item.createdAt,
+        imageDataUrl: item.imageDataUrl,
+        mimeType: item.mimeType,
+        prompt: item.prompt,
+        sourceEntryId: item.sourceEntryId,
+        sourceName: item.sourceName,
+      },
+    ]);
+    setPrompt(item.prompt);
+    setSelectedEntryId(item.sourceEntryId);
+    setSavedIds(new Set());
+    setSaveErrors({});
+    setGenerationError(null);
+    setGenerationMessage("이 기기에 보관한 이전 생성 결과입니다.");
+    setHistoryOpen(false);
+    window.setTimeout(() => resultHeadingRef.current?.focus(), 0);
+  }, []);
+
   return (
     <section
       className={[styles.generator, className].filter(Boolean).join(" ")}
       aria-labelledby={headingId}
     >
       <header className={styles.header}>
-        <span className={styles.eyebrow}>GEMINI 2.5 FLASH IMAGE</span>
-        <h2 id={headingId}>내 갤러리 사진으로 AI 캐릭터 만들기</h2>
-        <p>한 번 생성하면 서로 다른 세 가지 표현을 함께 비교할 수 있습니다.</p>
+        <h2 id={headingId}>AI로 내 캐릭터 꾸미기</h2>
       </header>
 
       {!eligibleProfile ? (
@@ -608,7 +737,12 @@ export function AiImageGenerator({
       ) : (
         <div className={styles.layout}>
           <form className={styles.controls} onSubmit={submit}>
-            <fieldset disabled={isGenerating || savingIds.size > 0}>
+            {!aiEnabled ? (
+              <div className={styles.disabledNotice} role="status">
+                이 학급은 관리자가 AI 이미지 생성을 꺼 두었습니다.
+              </div>
+            ) : null}
+            <fieldset disabled={!aiEnabled || isGenerating || savingIds.size > 0}>
               <legend>내 갤러리 사진</legend>
               {galleryLoading ? (
                 <div className={styles.sourceState} role="status">
@@ -633,7 +767,10 @@ export function AiImageGenerator({
                   <span>트래킹 스튜디오에서 전신 PNG를 저장해 주세요.</span>
                 </div>
               ) : (
-                <div className={styles.sourceGrid}>
+                <div
+                  className={styles.sourceGrid}
+                  aria-label="내 갤러리 사진 가로 목록"
+                >
                   {galleryEntries.map((entry, index) => (
                     <button
                       key={entry.id}
@@ -661,9 +798,9 @@ export function AiImageGenerator({
               )}
             </fieldset>
 
-            <fieldset disabled={isGenerating || savingIds.size > 0}>
+            <fieldset disabled={!aiEnabled || isGenerating || savingIds.size > 0}>
               <label className={styles.promptLabel} htmlFor={`${headingId}-prompt`}>
-                만들고 싶은 캐릭터를 설명하세요
+                캐릭터의 상황과 자세를 입력하세요
               </label>
               <textarea
                 id={`${headingId}-prompt`}
@@ -674,12 +811,12 @@ export function AiImageGenerator({
                 }}
                 maxLength={MAX_PROMPT_LENGTH}
                 rows={6}
-                placeholder="예: 우주 탐험가 옷을 입고 자신 있게 웃는 전신 캐릭터"
+                placeholder="예: 우주선 안에서 오른손을 흔들며 자신 있게 웃는 전신 캐릭터"
                 aria-describedby={promptHelpId}
                 aria-invalid={Boolean(generationError && !prompt.trim())}
               />
               <div id={promptHelpId} className={styles.promptHelp}>
-                <span>얼굴 특징, 옷, 포즈, 분위기를 구체적으로 적어 보세요.</span>
+                <span>상황, 자세, 표정, 옷과 배경을 구체적으로 적어 보세요.</span>
                 <span aria-label={`${prompt.length}자 입력, 최대 ${MAX_PROMPT_LENGTH}자`}>
                   {prompt.length}/{MAX_PROMPT_LENGTH}
                 </span>
@@ -692,7 +829,7 @@ export function AiImageGenerator({
             <button
               type="submit"
               className={styles.generateButton}
-              disabled={!selectedEntry || !prompt.trim() || isGenerating || savingIds.size > 0}
+              disabled={!aiEnabled || !selectedEntry || !prompt.trim() || isGenerating || savingIds.size > 0}
               aria-describedby={apiNoticeId}
             >
               {isGenerating ? (
@@ -700,7 +837,7 @@ export function AiImageGenerator({
               ) : (
                 <Sparkles size={19} aria-hidden="true" />
               )}
-              {isGenerating ? "세 가지 캐릭터 만드는 중" : "AI 캐릭터 3개 만들기"}
+              {isGenerating ? "AI 이미지 만드는 중" : "AI 이미지 만들기"}
             </button>
             {generationError ? (
               <div className={styles.generationError} role="alert">
@@ -718,7 +855,17 @@ export function AiImageGenerator({
                   생성 결과
                 </h3>
               </div>
-              <strong>{results.length}</strong>
+              <button
+                ref={historyButtonRef}
+                type="button"
+                className={styles.historyButton}
+                onClick={() => setHistoryOpen(true)}
+                aria-haspopup="dialog"
+                aria-label={`이 기기의 미저장 생성 기록 ${historyItems.length}개 보기`}
+              >
+                <History size={16} aria-hidden="true" />
+                기록
+              </button>
             </div>
             <p className={styles.liveMessage} role="status" aria-live="polite">
               {generationMessage}
@@ -734,8 +881,8 @@ export function AiImageGenerator({
                 <strong>{isGenerating ? "캐릭터를 만들고 있어요" : "아직 생성 결과가 없습니다"}</strong>
                 <span>
                   {isGenerating
-                    ? "완성된 결과부터 이곳에 표시됩니다."
-                    : "사진과 설명을 선택해 서로 다른 세 가지 결과를 만들어 보세요."}
+                    ? "완성되면 이곳에 표시됩니다."
+                    : "사진을 선택하고 원하는 상황이나 자세를 설명해 이미지를 만들어 보세요."}
                 </span>
               </div>
             ) : (
@@ -756,9 +903,9 @@ export function AiImageGenerator({
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={result.imageDataUrl}
-                          alt={`${result.label} 방식으로 생성한 AI 캐릭터`}
+                          alt={`AI로 생성한 캐릭터: ${result.prompt}`}
                         />
-                        <h4 id={resultTitleId}>{result.label}</h4>
+                        <h4 id={resultTitleId}>AI 생성</h4>
                       </div>
                       <div className={styles.resultActions}>
                         <button
@@ -766,7 +913,7 @@ export function AiImageGenerator({
                           className={styles.saveButton}
                           onClick={() => void saveResult(result)}
                           disabled={saving || saved || busy}
-                          aria-label={`${result.label} 결과 ${saving ? "갤러리에 저장 중" : saved ? "갤러리에 저장됨" : "갤러리에 저장"}`}
+                          aria-label={`AI 생성 결과 ${saving ? "갤러리에 저장 중" : saved ? "갤러리에 저장됨" : "갤러리에 저장"}`}
                         >
                           {saving ? (
                             <LoaderCircle className={styles.spinner} size={16} aria-hidden="true" />
@@ -780,8 +927,8 @@ export function AiImageGenerator({
                           className={styles.downloadButton}
                           onClick={() => void downloadResult(result)}
                           disabled={downloading}
-                          aria-label={`${result.label} 결과 PNG 다운로드`}
-                          title={`${result.label} 결과 PNG 다운로드`}
+                          aria-label="AI 생성 결과 PNG 다운로드"
+                          title="AI 생성 결과 PNG 다운로드"
                         >
                           {downloading ? (
                             <LoaderCircle className={styles.spinner} size={16} aria-hidden="true" />
@@ -803,6 +950,71 @@ export function AiImageGenerator({
           </section>
         </div>
       )}
+
+      {historyOpen ? (
+        <div className={styles.historyBackdrop}>
+          <section
+            ref={historyDialogRef}
+            className={styles.historyDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${headingId}-history-title`}
+          >
+            <header className={styles.historyHeader}>
+              <div>
+                <span>DEVICE ONLY</span>
+                <h3 id={`${headingId}-history-title`}>생성 기록</h3>
+              </div>
+              <button
+                ref={historyCloseRef}
+                type="button"
+                className={styles.historyClose}
+                onClick={closeHistory}
+                aria-label="생성 기록 닫기"
+              >
+                <X size={19} aria-hidden="true" />
+              </button>
+            </header>
+            <p className={styles.historyDescription}>
+              아직 갤러리에 저장하지 않은 결과만 이 기기에 보관됩니다.
+            </p>
+            {historyError ? (
+              <p className={styles.historyError} role="alert">
+                {historyError}
+              </p>
+            ) : null}
+            {historyLoading ? (
+              <div className={styles.historyEmpty} role="status">
+                <LoaderCircle className={styles.spinner} size={24} aria-hidden="true" />
+                기록을 불러오는 중입니다.
+              </div>
+            ) : historyItems.length === 0 ? (
+              <div className={styles.historyEmpty}>
+                <History size={25} aria-hidden="true" />
+                <strong>아직 미저장 기록이 없습니다</strong>
+              </div>
+            ) : (
+              <div className={styles.historyGrid}>
+                {historyItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={styles.historyCard}
+                    onClick={() => showHistoryItem(item)}
+                    aria-label={`${formatSavedAt(item.createdAt)} 생성 결과 보기. 프롬프트: ${item.prompt}`}
+                  >
+                    {/* Device-local Data URLs cannot use an image optimization loader. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.imageDataUrl} alt="" />
+                    <span>{formatSavedAt(item.createdAt)}</span>
+                    <strong>{item.prompt}</strong>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

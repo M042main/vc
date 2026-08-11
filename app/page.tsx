@@ -35,6 +35,7 @@ import {
   loadSavedCharacterSlots,
   publishGalleryEntry,
   saveCharacterSlot,
+  subscribeClassRecords,
 } from "./lib/firebaseGallery";
 import { PaperDollCharacterStore } from "./lib/paperDollCharacterStore";
 import {
@@ -251,6 +252,10 @@ export default function Home() {
   const [stageCharacterId, setStageCharacterId] = useState<string | null>(null);
   const [characterLibraryBusy, setCharacterLibraryBusy] = useState(false);
   const [aiImageBusy, setAiImageBusy] = useState(false);
+  const [aiClassAccess, setAiClassAccess] = useState({
+    classId: "",
+    enabled: false,
+  });
   const [latestCapture, setLatestCapture] = useState<VrmStudioCapture | null>(null);
   const [adminMode, setAdminMode] = useState(false);
   const [adminDialogOpen, setAdminDialogOpen] = useState(false);
@@ -281,6 +286,10 @@ export default function Home() {
   const activeCharacterArtwork =
     characterArtworkOwnerKey === characterArtworkKey ? characterArtwork : null;
   const pageBusy = characterLibraryBusy || aiImageBusy;
+  const aiClassId = profile && !profile.guest ? profile.classId : null;
+  const aiEnabled = Boolean(
+    aiClassId && aiClassAccess.classId === aiClassId && aiClassAccess.enabled,
+  );
 
   const restoreAdminTriggerFocus = useCallback(() => {
     window.setTimeout(() => {
@@ -297,6 +306,29 @@ export default function Home() {
       void store.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (!aiClassId) return;
+    let active = true;
+    const unsubscribe = subscribeClassRecords({
+      onData: (records) => {
+        if (!active) return;
+        const activeClass = records.find((record) => record.id === aiClassId);
+        setAiClassAccess({
+          classId: aiClassId,
+          enabled: activeClass?.aiEnabled ?? false,
+        });
+      },
+      onError: () => {
+        if (!active) return;
+        setAiClassAccess({ classId: aiClassId, enabled: false });
+      },
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [aiClassId]);
 
   useEffect(() => {
     if (!profileReady) return;
@@ -889,6 +921,7 @@ export default function Home() {
             <AiImageGenerator
               key={characterArtworkKey}
               profile={profile}
+              aiEnabled={aiEnabled}
               onBusyChange={setAiImageBusy}
             />
           </Suspense>

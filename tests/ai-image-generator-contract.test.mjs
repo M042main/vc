@@ -12,15 +12,17 @@ const cssUrl = new URL(
 );
 const pageUrl = new URL("../app/page.tsx", import.meta.url);
 const firebaseUrl = new URL("../app/lib/firebaseGallery.ts", import.meta.url);
+const historyUrl = new URL("../app/lib/aiGenerationHistory.ts", import.meta.url);
 
 async function sources() {
-  const [component, css, page, firebase] = await Promise.all([
+  const [component, css, page, firebase, history] = await Promise.all([
     readFile(componentUrl, "utf8"),
     readFile(cssUrl, "utf8"),
     readFile(pageUrl, "utf8"),
     readFile(firebaseUrl, "utf8"),
+    readFile(historyUrl, "utf8"),
   ]);
-  return { component, css, page, firebase };
+  return { component, css, page, firebase, history };
 }
 
 test("selects only the active profile's realtime Firebase gallery photos", async () => {
@@ -64,17 +66,16 @@ test("keeps the generic gallery subscription unchanged for legacy entries", asyn
   );
 });
 
-test("runs exactly three internal variants with partial-success handling", async () => {
+test("makes exactly one image request from one source photo and the user's prompt", async () => {
   const { component } = await sources();
-  assert.match(component, /const GENERATION_VARIANTS = \[/u);
-  assert.equal((component.match(/id: "(?:illustration|three-dimensional|sticker)"/gu) ?? []).length, 3);
-  assert.match(component, /Promise\.allSettled\([\s\S]{0,220}GENERATION_VARIANTS\.map/u);
-  assert.match(component, /successfulResults\.length === 0/u);
-  assert.match(component, /setResults\(successfulResults\.slice\(0, MAX_RESULTS\)\)/u);
-  assert.match(component, /const MAX_RESULTS = 3/u);
+  assert.doesNotMatch(component, /GENERATION_VARIANTS|Promise\.allSettled|MAX_RESULTS/u);
+  assert.equal((component.match(/await generateImage\(\{/gu) ?? []).length, 1);
+  assert.match(component, /imageDataUrl: selectedEntry\.imageDataUrl,[\s\S]{0,120}prompt: normalizedPrompt/u);
+  assert.match(component, /classId: profile\.classId/u);
+  assert.match(component, /setResults\(\[result\]\)/u);
   assert.match(
     component,
-    /\$\{GENERATION_VARIANTS\.length\}개 중 \$\{successfulResults\.length\}개 결과/u,
+    /body: JSON\.stringify\(\{[\s\S]{0,120}prompt,[\s\S]{0,120}imageDataUrl,[\s\S]{0,120}classId,/u,
   );
   assert.match(component, /generationRef\.current !== generationToken/u);
   assert.match(component, /profileKeyRef\.current !== profileKey/u);
@@ -86,7 +87,7 @@ test("keeps the Gemini key server-side and follows the generation route contract
   assert.match(component, /method:\s*"POST"/u);
   assert.match(
     component,
-    /JSON\.stringify\(\{[\s\S]{0,180}prompt:[\s\S]{0,180}imageDataUrl,/u,
+    /JSON\.stringify\(\{[\s\S]{0,180}prompt,[\s\S]{0,180}imageDataUrl,/u,
   );
   assert.match(component, /generatedImageFromPayload\(value\)/u);
   assert.doesNotMatch(
@@ -95,7 +96,7 @@ test("keeps the Gemini key server-side and follows the generation route contract
   );
 });
 
-test("removes local upload, style choices, and the three requested generated classes", async () => {
+test("uses the requested title and removes model, comparison, upload, and style UI", async () => {
   const { component, css } = await sources();
   assert.doesNotMatch(component, /type="file"|accept="image\/|FileReader.*참고 사진/u);
   assert.doesNotMatch(component, /PROMPT_PRESETS|aria-pressed=\{activePreset|캐릭터 스타일/u);
@@ -103,12 +104,15 @@ test("removes local upload, style choices, and the three requested generated cla
     assert.doesNotMatch(component, new RegExp(`styles\\.${removedClass}`, "u"));
     assert.doesNotMatch(css, new RegExp(`\\.${removedClass}\\b`, "u"));
   }
+  assert.match(component, />AI로 내 캐릭터 꾸미기</u);
+  assert.doesNotMatch(component, /GEMINI 2\.5 FLASH IMAGE|한 번 생성하면 서로 다른 세 가지/u);
+  assert.doesNotMatch(component, /AI 캐릭터 3개 만들기|세 가지 캐릭터 만드는 중/u);
   assert.match(component, /aria-describedby=\{apiNoticeId\}/u);
   assert.match(component, /Google Gemini API로 전송됩니다/u);
 });
 
-test("saves each result once as a bounded PNG and guards profile transitions", async () => {
-  const { component } = await sources();
+test("saves the single result once, then removes its device-local history", async () => {
+  const { component, history } = await sources();
   assert.match(component, /publishGalleryEntry\(\{ profile, imageDataUrl: pngDataUrl \}\)/u);
   assert.match(component, /MAX_GALLERY_IMAGE_DATA_URL_LENGTH\s*=\s*Math\.floor\(5\.5 \* 1024 \* 1024\)/u);
   assert.match(component, /for \(let attempt = 0; attempt < 7; attempt \+= 1\)/u);
@@ -120,6 +124,28 @@ test("saves each result once as a bounded PNG and guards profile transitions", a
   assert.match(component, /mountedRef\.current = true/u);
   assert.match(component, /onBusyChange\?\.\(true\)/u);
   assert.match(component, /갤러리에 저장됨/u);
+  assert.match(component, /await removeAiGenerationHistory\(result\.id, saveProfileKey\)/u);
+  assert.match(component, /setHistoryItems\(\(current\) => current\.filter/u);
+  assert.match(component, /saveAiGenerationHistory\(historyItem\)/u);
+  assert.match(history, /const MAX_ITEMS_PER_PROFILE = 8/u);
+  assert.match(history, /const MAX_ITEMS_TOTAL = 32/u);
+  assert.match(history, /const MAX_IMAGE_DATA_URL_LENGTH = 14 \* 1024 \* 1024/u);
+  assert.match(history, /const MAX_TOTAL_IMAGE_DATA_URL_LENGTH = 48 \* 1024 \* 1024/u);
+  assert.match(history, /while \([\s\S]{0,260}retained\.pop\(\)/u);
+  assert.match(history, /deleteIds\.add\(oldest\.id\)/u);
+});
+
+test("defaults to enabled but blocks disabled classes in both UI and handler", async () => {
+  const { component, page } = await sources();
+  assert.match(component, /aiEnabled\?: boolean/u);
+  assert.match(component, /aiEnabled = true/u);
+  assert.match(component, /if \(!aiEnabled\) \{[\s\S]{0,160}관리자가 이 학급의 AI 이미지 생성을 비활성화했습니다/u);
+  assert.match(component, /disabled=\{!aiEnabled \|\| !selectedEntry/u);
+  assert.match(component, /이 학급은 관리자가 AI 이미지 생성을 꺼 두었습니다/u);
+  assert.match(page, /subscribeClassRecords\(\{[\s\S]{0,420}record\.id === aiClassId/u);
+  assert.match(page, /aiClassAccess\.classId === aiClassId/u);
+  assert.match(page, /setAiClassAccess\(\{ classId: aiClassId, enabled: false \}\)/u);
+  assert.match(page, /<AiImageGenerator[\s\S]{0,180}aiEnabled=\{aiEnabled\}/u);
 });
 
 test("wires an independent AI busy lock into profile and mode controls", async () => {
@@ -147,7 +173,7 @@ test("clears stale generated results when the source gallery photo changes", asy
   );
 });
 
-test("provides accessible responsive result and source grids", async () => {
+test("provides an accessible device-history dialog and one-line source carousel", async () => {
   const { component, css } = await sources();
   assert.match(component, /role="status"\s+aria-live="polite"/u);
   assert.match(component, /className=\{styles\.generationError\}\s+role="alert"/u);
@@ -156,8 +182,19 @@ test("provides accessible responsive result and source grids", async () => {
   assert.match(component, /galleryEntries\.map\(\(entry, index\)/u);
   assert.match(component, /\$\{index \+ 1\}번째 사진/u);
   assert.match(component, /aria-labelledby=\{resultTitleId\}/u);
-  assert.match(component, /<h4 id=\{resultTitleId\}>\{result\.label\}<\/h4>/u);
-  assert.match(component, /aria-label=\{`\$\{result\.label\} 결과 \$\{/u);
+  assert.match(component, /<h4 id=\{resultTitleId\}>AI 생성<\/h4>/u);
+  assert.match(component, /aria-haspopup="dialog"/u);
+  assert.match(component, /role="dialog"[\s\S]{0,100}aria-modal="true"/u);
+  assert.match(component, /아직 갤러리에 저장하지 않은 결과만 이 기기에 보관됩니다/u);
+  assert.match(component, /showHistoryItem\(item\)/u);
+  assert.match(component, /생성 기록 닫기/u);
+  assert.match(component, /historyDialogRef\.current/u);
+  assert.match(component, /event\.key !== "Tab"/u);
+  assert.match(component, /last\.focus\(\)/u);
+  assert.match(component, /first\.focus\(\)/u);
+  assert.match(css, /\.sourceGrid\s*\{[\s\S]{0,220}display:\s*flex[\s\S]{0,220}overflow-x:\s*auto/u);
+  assert.match(css, /scroll-snap-type:\s*x mandatory/u);
+  assert.match(css, /\.sourceButton\s*\{[\s\S]{0,180}flex:\s*0 0/u);
   assert.match(css, /min-height:\s*44px/u);
   assert.match(css, /@media\s*\(max-width:\s*1050px\)/u);
   assert.match(css, /@media\s*\(max-width:\s*520px\)/u);

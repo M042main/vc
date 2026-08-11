@@ -1,6 +1,13 @@
 const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_ENDPOINT =
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const FIREBASE_DATABASE_ORIGIN =
+  "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app";
+// 이 부분은 우리 반 공용 데이터베이스에서 내 방을 만드는 주소입니다
+const GALLERY_CLASSES_PATH =
+  "/000000/박근석_t7/motion_ink_gallery_a7f3c9/classes";
+const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
+const CLASS_SETTINGS_TIMEOUT_MS = 8_000;
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const MAX_REQUEST_BYTES = 12 * 1024 * 1024;
@@ -24,6 +31,7 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 
 type ApiErrorCode =
   | "ai_content_blocked"
+  | "ai_disabled_for_class"
   | "ai_invalid_response"
   | "ai_network_error"
   | "ai_not_configured"
@@ -32,6 +40,7 @@ type ApiErrorCode =
   | "ai_timeout"
   | "ai_unavailable"
   | "invalid_image"
+  | "invalid_class"
   | "invalid_json"
   | "invalid_prompt"
   | "request_too_large"
@@ -538,6 +547,51 @@ function logUpstreamFetchFailure(error: unknown, apiKey: string) {
   });
 }
 
+function validatedClassId(value: unknown): string | null {
+  return typeof value === "string" && FIREBASE_PUSH_KEY_PATTERN.test(value)
+    ? value
+    : null;
+}
+
+type ClassAiAccess = "enabled" | "disabled" | "missing" | "unavailable";
+
+async function readClassAiAccess(classId: string): Promise<ClassAiAccess> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CLASS_SETTINGS_TIMEOUT_MS);
+  try {
+    const response = await fetch(
+      new URL(`${GALLERY_CLASSES_PATH}/${classId}.json`, FIREBASE_DATABASE_ORIGIN),
+      {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
+      },
+    );
+    if (!response.ok) return "unavailable";
+    const payload = (await response.json()) as unknown;
+    if (!isRecord(payload)) return "missing";
+    if (
+      typeof payload.name !== "string" ||
+      payload.name.trim().length === 0 ||
+      typeof payload.createdAt !== "number" ||
+      !Number.isFinite(payload.createdAt)
+    ) {
+      return "missing";
+    }
+    if (!Object.prototype.hasOwnProperty.call(payload, "aiEnabled")) {
+      return "enabled";
+    }
+    return typeof payload.aiEnabled === "boolean" && payload.aiEnabled
+      ? "enabled"
+      : "disabled";
+  } catch {
+    return "unavailable";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function POST(request: Request) {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
     return errorResponse("JSON 형식으로 요청해 주세요.", 415, {
@@ -602,6 +656,27 @@ export async function POST(request: Request) {
       400,
       { code: "invalid_image", retryable: false },
     );
+  }
+
+  const classId = validatedClassId(payload.classId);
+  if (!classId) {
+    return errorResponse("학급 정보를 확인할 수 없습니다. 다시 로그인해 주세요.", 400, {
+      code: "invalid_class",
+      retryable: false,
+    });
+  }
+  const classAiAccess = await readClassAiAccess(classId);
+  if (classAiAccess === "disabled") {
+    return errorResponse("관리자가 이 학급의 AI 이미지 생성을 꺼 두었습니다.", 403, {
+      code: "ai_disabled_for_class",
+      retryable: false,
+    });
+  }
+  if (classAiAccess !== "enabled") {
+    return errorResponse("학급의 AI 사용 설정을 확인하지 못했습니다.", 503, {
+      code: "ai_unavailable",
+      retryable: true,
+    });
   }
 
   const upstreamSlotKey = reserveUpstreamSlot(request);

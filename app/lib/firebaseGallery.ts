@@ -82,6 +82,7 @@ export type ClassRecord = {
   id: string;
   name: string;
   createdAt: number;
+  aiEnabled: boolean;
 };
 
 export type SavedCharacterArtwork = {
@@ -432,6 +433,8 @@ function classesFromSnapshot(snapshot: DataSnapshot): ClassRecord[] {
         id: child.key,
         name: validateClassName(candidate.name),
         createdAt: validateCreatedAt(candidate.createdAt),
+        // Classes created before this setting existed keep AI access enabled.
+        aiEnabled: candidate.aiEnabled !== false,
       });
     } catch {
       // Invalid shared records are omitted without hiding the usable class list.
@@ -547,6 +550,7 @@ async function requireActiveClass(profile: VisitorProfile): Promise<ClassRecord>
     id: profile.classId,
     name: validateClassName(candidate.name),
     createdAt: validateCreatedAt(candidate.createdAt),
+    aiEnabled: candidate.aiEnabled !== false,
   };
 }
 
@@ -695,8 +699,8 @@ async function apiError(
 }
 
 async function classManagementRequest(
-  method: "POST" | "DELETE",
-  payload: Record<string, string>,
+  method: "POST" | "PATCH" | "DELETE",
+  payload: Record<string, unknown>,
 ): Promise<Response> {
   let response: Response;
   try {
@@ -761,7 +765,19 @@ export async function createClassRecord(name: string): Promise<ClassRecord> {
     id: validateGalleryEntryId(record.id),
     name: validateClassName(record.name),
     createdAt: validateCreatedAt(record.createdAt),
+    aiEnabled: record.aiEnabled !== false,
   };
+}
+
+export async function setClassAiEnabled(
+  id: string,
+  aiEnabled: boolean,
+): Promise<void> {
+  const validatedId = validateGalleryEntryId(id);
+  if (typeof aiEnabled !== "boolean") {
+    throw new Error("AI 이미지 생성 설정이 올바르지 않습니다.");
+  }
+  await classManagementRequest("PATCH", { id: validatedId, aiEnabled });
 }
 
 export async function deleteClassRecord(id: string): Promise<void> {
