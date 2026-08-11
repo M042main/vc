@@ -5,6 +5,7 @@ import {
   History,
   Images,
   LoaderCircle,
+  Maximize2,
   RefreshCw,
   Save,
   Sparkles,
@@ -233,6 +234,9 @@ export function AiImageGenerator({
   const historyButtonRef = useRef<HTMLButtonElement>(null);
   const historyDialogRef = useRef<HTMLElement>(null);
   const historyCloseRef = useRef<HTMLButtonElement>(null);
+  const previewDialogRef = useRef<HTMLElement>(null);
+  const previewCloseRef = useRef<HTMLButtonElement>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const subscriptionRef = useRef(0);
@@ -250,6 +254,9 @@ export function AiImageGenerator({
   const [subscriptionVersion, setSubscriptionVersion] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [results, setResults] = useState<GeneratedResult[]>([]);
+  const [previewResult, setPreviewResult] = useState<GeneratedResult | null>(
+    null,
+  );
   const [historyItems, setHistoryItems] = useState<AiGenerationHistoryItem[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -314,6 +321,8 @@ export function AiImageGenerator({
     setGenerationError(null);
     setGenerationMessage("");
     setHistoryOpen(false);
+    setPreviewResult(null);
+    previewTriggerRef.current = null;
   }, [profileKey]);
 
   useEffect(() => {
@@ -651,13 +660,95 @@ export function AiImageGenerator({
     }
   }, []);
 
+  const openPreview = useCallback(
+    (result: GeneratedResult, trigger: HTMLButtonElement) => {
+      setHistoryOpen(false);
+      previewTriggerRef.current = trigger;
+      setPreviewResult(result);
+    },
+    [],
+  );
+
+  const closePreview = useCallback(() => {
+    const trigger = previewTriggerRef.current;
+    previewTriggerRef.current = null;
+    setPreviewResult(null);
+    window.setTimeout(() => trigger?.focus(), 0);
+  }, []);
+
+  useEffect(() => {
+    if (!previewResult) return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    previewCloseRef.current?.focus();
+
+    const handlePreviewKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePreview();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const dialog = previewDialogRef.current;
+      const focusable = dialog
+        ? Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter(
+            (element) =>
+              element.tabIndex >= 0 && element.getClientRects().length > 0,
+          )
+        : [];
+
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+      if (
+        event.shiftKey &&
+        (activeElement === first || !dialog?.contains(activeElement))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (activeElement === last || !dialog?.contains(activeElement))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handlePreviewKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handlePreviewKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [closePreview, previewResult]);
+
   const closeHistory = useCallback(() => {
     setHistoryOpen(false);
     window.setTimeout(() => historyButtonRef.current?.focus(), 0);
   }, []);
 
+  const openHistory = useCallback(() => {
+    previewTriggerRef.current = null;
+    setPreviewResult(null);
+    setHistoryOpen(true);
+  }, []);
+
   useEffect(() => {
     if (!historyOpen) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     historyCloseRef.current?.focus();
     const handleDialogKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -691,7 +782,10 @@ export function AiImageGenerator({
       }
     };
     window.addEventListener("keydown", handleDialogKeyDown);
-    return () => window.removeEventListener("keydown", handleDialogKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleDialogKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
   }, [closeHistory, historyOpen]);
 
   const showHistoryItem = useCallback((item: AiGenerationHistoryItem) => {
@@ -859,7 +953,7 @@ export function AiImageGenerator({
                 ref={historyButtonRef}
                 type="button"
                 className={styles.historyButton}
-                onClick={() => setHistoryOpen(true)}
+                onClick={openHistory}
                 aria-haspopup="dialog"
                 aria-label={`이 기기의 미저장 생성 기록 ${historyItems.length}개 보기`}
               >
@@ -899,12 +993,26 @@ export function AiImageGenerator({
                       aria-labelledby={resultTitleId}
                     >
                       <div className={styles.resultImage}>
-                        {/* Generated Data URLs cannot use an image optimization loader. */}
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={result.imageDataUrl}
-                          alt={`AI로 생성한 캐릭터: ${result.prompt}`}
-                        />
+                        <button
+                          type="button"
+                          className={styles.resultImageButton}
+                          onClick={(event) =>
+                            openPreview(result, event.currentTarget)
+                          }
+                          aria-haspopup="dialog"
+                          aria-label={`AI 생성 결과 전체보기: ${result.prompt}`}
+                        >
+                          {/* Generated Data URLs cannot use an image optimization loader. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={result.imageDataUrl}
+                            alt={`AI로 생성한 캐릭터: ${result.prompt}`}
+                          />
+                          <span className={styles.fullViewHint} aria-hidden="true">
+                            <Maximize2 size={15} />
+                            전체보기
+                          </span>
+                        </button>
                         <h4 id={resultTitleId}>AI 생성</h4>
                       </div>
                       <div className={styles.resultActions}>
@@ -950,6 +1058,57 @@ export function AiImageGenerator({
           </section>
         </div>
       )}
+
+      {previewResult ? (
+        <div className={styles.previewBackdrop}>
+          <button
+            type="button"
+            className={styles.previewBackdropClose}
+            onClick={closePreview}
+            tabIndex={-1}
+            aria-label="배경을 눌러 전체보기 닫기"
+          />
+          <section
+            ref={previewDialogRef}
+            className={styles.previewDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${headingId}-preview-title`}
+            aria-describedby={`${headingId}-preview-description`}
+            tabIndex={-1}
+          >
+            <header className={styles.previewHeader}>
+              <div>
+                <span>FULL VIEW</span>
+                <h3 id={`${headingId}-preview-title`}>AI 생성 이미지 전체보기</h3>
+              </div>
+              <button
+                ref={previewCloseRef}
+                type="button"
+                className={styles.previewClose}
+                onClick={closePreview}
+                aria-label="전체보기 닫기"
+              >
+                <X size={21} aria-hidden="true" />
+              </button>
+            </header>
+            <div className={styles.previewImageFrame}>
+              {/* Generated Data URLs cannot use an image optimization loader. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewResult.imageDataUrl}
+                alt={`AI로 생성한 캐릭터 전체보기: ${previewResult.prompt}`}
+              />
+            </div>
+            <p
+              id={`${headingId}-preview-description`}
+              className={styles.previewDescription}
+            >
+              {previewResult.prompt}
+            </p>
+          </section>
+        </div>
+      ) : null}
 
       {historyOpen ? (
         <div className={styles.historyBackdrop}>

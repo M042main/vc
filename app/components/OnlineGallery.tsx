@@ -6,6 +6,7 @@ import {
   Heart,
   Images,
   LoaderCircle,
+  Maximize2,
   RefreshCw,
   Trash2,
   UserRound,
@@ -119,6 +120,7 @@ export function OnlineGallery({
   const headingId = useId();
   const nameHeadingId = useId();
   const nameDescriptionId = useId();
+  const previewHeadingId = useId();
   const [entries, setEntries] = useState<GalleryEntry[]>([]);
   const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(true);
@@ -145,9 +147,13 @@ export function OnlineGallery({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const [classFilter, setClassFilter] = useState("all");
+  const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const previewDialogRef = useRef<HTMLElement>(null);
+  const previewCloseRef = useRef<HTMLButtonElement>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const objectUrlsRef = useRef(new Set<string>());
   const revokeTimersRef = useRef(new Set<number>());
   const likeInFlightRef = useRef(new Set<string>());
@@ -310,8 +316,28 @@ export function OnlineGallery({
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   }, []);
 
+  const closePreview = useCallback(() => {
+    const trigger = previewTriggerRef.current;
+    previewTriggerRef.current = null;
+    setPreviewEntry(null);
+    window.setTimeout(() => trigger?.focus(), 0);
+  }, []);
+
+  const openPreview = useCallback(
+    (entry: GalleryEntry, trigger: HTMLButtonElement) => {
+      returnFocusRef.current = null;
+      setNameAction(null);
+      setNameError(null);
+      previewTriggerRef.current = trigger;
+      setPreviewEntry(entry);
+    },
+    [],
+  );
+
   const openNameDialog = useCallback(
     (action: NameAction, trigger?: HTMLElement | null) => {
+      previewTriggerRef.current = null;
+      setPreviewEntry(null);
       returnFocusRef.current = trigger ?? null;
       setNameDraft(viewerName);
       setNameError(null);
@@ -541,6 +567,51 @@ export function OnlineGallery({
     return () => document.removeEventListener("keydown", handleDialogKeyDown);
   }, [handleDialogKeyDown, nameAction]);
 
+  useEffect(() => {
+    if (!previewEntry) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusTimer = window.setTimeout(() => {
+      previewCloseRef.current?.focus();
+    }, 0);
+    const handlePreviewKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePreview();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = previewDialogRef.current;
+      const focusable = dialog?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (!dialog || !focusable?.length) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const focusIsOutside = !dialog.contains(document.activeElement);
+      if (event.shiftKey && (document.activeElement === first || focusIsOutside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last || focusIsOutside)
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handlePreviewKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handlePreviewKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [closePreview, previewEntry]);
+
   return (
     <section
       className={[styles.gallery, className].filter(Boolean).join(" ")}
@@ -632,7 +703,14 @@ export function OnlineGallery({
 
               return (
               <article className={styles.card} role="listitem" key={entry.id}>
-                <div className={styles.cardImage}>
+                <button
+                  type="button"
+                  className={styles.cardImage}
+                  onClick={(event) => openPreview(entry, event.currentTarget)}
+                  aria-haspopup="dialog"
+                  aria-label={`${entry.name}님의 캐릭터 전체보기`}
+                  title={`${entry.name}님의 캐릭터 전체보기`}
+                >
                   {/* Firebase entries contain PNG Data URLs created by this app. */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -641,7 +719,10 @@ export function OnlineGallery({
                     loading="lazy"
                     decoding="async"
                   />
-                </div>
+                  <span className={styles.cardImageHint} aria-hidden="true">
+                    <Maximize2 size={14} /> 전체보기
+                  </span>
+                </button>
                 <div className={styles.cardBody}>
                   <div>
                     <h3>{entry.name}</h3>
@@ -835,6 +916,64 @@ export function OnlineGallery({
               </button>
             </form>
           </div>
+        </div>
+      ) : null}
+
+      {previewEntry ? (
+        // Backdrop click is a pointer convenience; keyboard users have Escape
+        // and the labelled close button inside the focus-trapped dialog.
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+        <div
+          className={styles.previewBackdrop}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closePreview();
+          }}
+        >
+          <section
+            ref={previewDialogRef}
+            className={styles.previewDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={previewHeadingId}
+            tabIndex={-1}
+          >
+            <header className={styles.previewHeader}>
+              <div>
+                <span>전체보기</span>
+                <h3 id={previewHeadingId}>{previewEntry.name}님의 캐릭터</h3>
+              </div>
+              <button
+                ref={previewCloseRef}
+                type="button"
+                className={styles.previewClose}
+                onClick={closePreview}
+                aria-label="전체보기 닫기"
+              >
+                <X size={22} aria-hidden="true" />
+              </button>
+            </header>
+            <figure className={styles.previewFigure}>
+              <div className={styles.previewImage}>
+                {/* Firebase entries contain PNG Data URLs created by this app. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={previewEntry.imageDataUrl}
+                  alt={`${previewEntry.name}님이 올린 캐릭터 전체보기`}
+                  decoding="async"
+                />
+              </div>
+              <figcaption>
+                <span>
+                  {previewEntry.classId && activeClassIds.has(previewEntry.classId)
+                    ? previewEntry.className
+                    : "미분류 · 이전 기록"}
+                </span>
+                <time dateTime={dateTimeValue(previewEntry.createdAt)}>
+                  {formatDate(previewEntry.createdAt)}
+                </time>
+              </figcaption>
+            </figure>
+          </section>
         </div>
       ) : null}
     </section>

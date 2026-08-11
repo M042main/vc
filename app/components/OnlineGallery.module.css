@@ -224,10 +224,15 @@
 .cardImage {
   position: relative;
   display: grid;
+  width: 100%;
+  min-height: 0 !important;
+  padding: 0;
   aspect-ratio: 4 / 5;
   overflow: hidden;
   place-items: center;
+  border: 0;
   border-bottom: 1px solid rgba(23, 23, 19, 0.11);
+  border-radius: 0;
   background-color: #eae7df;
   background-image:
     linear-gradient(45deg, #faf9f6 25%, transparent 25%),
@@ -236,6 +241,13 @@
     linear-gradient(-45deg, transparent 75%, #faf9f6 75%);
   background-position: 0 0, 0 12px, 12px -12px, -12px 0;
   background-size: 24px 24px;
+  color: #171713;
+  cursor: zoom-in;
+}
+
+.cardImage:focus-visible {
+  z-index: 1;
+  outline-offset: -4px !important;
 }
 
 .cardImage::after {
@@ -258,6 +270,23 @@
   height: 100%;
   object-fit: contain;
   transition: transform 220ms ease;
+}
+
+.cardImageHint {
+  position: absolute;
+  inset: auto auto 10px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid rgba(23, 23, 19, 0.16);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 12px rgba(23, 23, 19, 0.1);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .cardBody {
@@ -433,6 +462,128 @@
   backdrop-filter: blur(7px);
 }
 
+.previewBackdrop {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  display: grid;
+  overflow: auto;
+  place-items: center;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: rgba(12, 12, 10, 0.82);
+  backdrop-filter: blur(10px);
+}
+
+.previewDialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(100%, 1120px);
+  height: min(900px, calc(100dvh - 24px));
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 24px;
+  background: #171713;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  animation: dialogIn 170ms ease-out;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 14px 12px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.previewHeader > div {
+  min-width: 0;
+}
+
+.previewHeader span {
+  display: block;
+  margin-bottom: 2px;
+  color: #dfff45;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+}
+
+.previewHeader h3 {
+  overflow: hidden;
+  margin: 0;
+  font-size: clamp(15px, 2vw, 19px);
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewClose {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.previewFigure {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.previewImage {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  place-items: center;
+  padding: clamp(8px, 2vw, 22px);
+  background-color: #dedbd3;
+  background-image:
+    linear-gradient(45deg, #f7f6f2 25%, transparent 25%),
+    linear-gradient(-45deg, #f7f6f2 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f7f6f2 75%),
+    linear-gradient(-45deg, transparent 75%, #f7f6f2 75%);
+  background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+  background-size: 28px 28px;
+}
+
+.previewImage img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.previewFigure figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 5px 16px;
+  padding: 10px 20px 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .dialog {
   position: relative;
   width: min(100%, 430px);
@@ -576,6 +727,11 @@
     background: #eeebe4;
   }
 
+  .previewClose:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.18);
+  }
+
   .card:hover {
     border-color: rgba(23, 23, 19, 0.33);
     box-shadow: 0 15px 30px rgba(36, 32, 24, 0.12);
@@ -584,6 +740,10 @@
 
   .card:hover .cardImage img {
     transform: scale(1.025);
+  }
+
+  .cardImage:hover .cardImageHint {
+    background: #dfff45;
   }
 }
 
@@ -624,6 +784,29 @@
     padding: 24px 19px max(24px, env(safe-area-inset-bottom));
     border-radius: 22px 22px 14px 14px;
     box-shadow: 0 -4px 0 #dfff45, 0 20px 60px rgba(0, 0, 0, 0.3);
+  }
+
+  .previewBackdrop {
+    place-items: end center;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
+  }
+
+  .previewDialog {
+    height: calc(100dvh - max(16px, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+    border-radius: 18px;
+  }
+
+  .previewHeader {
+    padding-left: 15px;
+  }
+
+  .previewFigure figcaption {
+    padding-right: 15px;
+    padding-left: 15px;
   }
 }
 

@@ -435,6 +435,41 @@
   object-fit: contain;
 }
 
+.resultImageButton {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0 !important;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+}
+
+.resultImageButton:focus-visible {
+  z-index: 1;
+  outline-offset: -5px !important;
+}
+
+.fullViewHint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: rgba(23, 23, 19, 0.82);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
 .resultImage h4 {
   position: absolute;
   top: 8px;
@@ -521,6 +556,122 @@
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+.previewBackdrop {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  display: grid;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  place-items: center;
+  background: rgba(10, 10, 9, 0.84);
+  backdrop-filter: blur(7px);
+}
+
+.previewDialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(1100px, 100%);
+  height: min(90dvh, 900px);
+  max-height: 100%;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 22px;
+  background: #171713;
+  box-shadow: 0 32px 110px rgba(0, 0, 0, 0.54);
+  color: #fff;
+}
+
+.previewBackdropClose {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 0 !important;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default !important;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.previewHeader span {
+  display: block;
+  margin-bottom: 2px;
+  color: #dfff45;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+}
+
+.previewHeader h3 {
+  margin: 0;
+  font-size: clamp(16px, 2.1vw, 22px);
+  font-weight: 950;
+  letter-spacing: -0.035em;
+}
+
+.previewClose {
+  display: grid;
+  width: 44px;
+  min-height: 44px !important;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.previewImageFrame {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(8px, 2vw, 18px);
+  place-items: center;
+  background-color: #292925;
+  background-image:
+    linear-gradient(45deg, #33332f 25%, transparent 25%),
+    linear-gradient(-45deg, #33332f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #33332f 75%),
+    linear-gradient(-45deg, transparent 75%, #33332f 75%);
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
+}
+
+.previewImageFrame img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.previewDescription {
+  max-height: 84px;
+  overflow: auto;
+  margin: 0;
+  padding: 11px 16px 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .historyBackdrop {
@@ -681,6 +832,7 @@
 
   .historyButton:hover,
   .historyClose:hover,
+  .previewClose:hover,
   .historyCard:hover {
     border-color: #5944be;
     transform: translateY(-1px);
@@ -698,6 +850,10 @@
 
   .sourceError button:hover {
     background: #fff1ef;
+  }
+
+  .resultImageButton:hover .fullViewHint {
+    background: #5944be;
   }
 }
 
@@ -763,6 +919,27 @@
 
   .historyBackdrop {
     padding: 10px;
+  }
+
+  .previewBackdrop {
+    padding:
+      max(7px, env(safe-area-inset-top))
+      max(7px, env(safe-area-inset-right))
+      max(7px, env(safe-area-inset-bottom))
+      max(7px, env(safe-area-inset-left));
+  }
+
+  .previewDialog {
+    height: 100%;
+    border-radius: 16px;
+  }
+
+  .previewHeader {
+    padding: 10px 11px;
+  }
+
+  .previewDescription {
+    padding: 9px 11px 11px;
   }
 
   .historyDialog {
