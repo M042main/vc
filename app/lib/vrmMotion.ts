@@ -90,6 +90,12 @@ type BoneSnapshot = {
 
 const PI = Math.PI;
 const TWO_PI = Math.PI * 2;
+// Normalized VRM arms use a T-pose: left points toward -X and right toward
+// +X. Their resting Z rotations therefore need opposite signs to point both
+// arms toward -Y. Keep these values paired whenever a preset returns to rest.
+const REST_ARM_DROP_RADIANS = 1.08;
+const REST_FOREARM_DROP_RADIANS = 0.12;
+const SHOULDER_DROP_RADIANS = 0.08;
 // Normalized VRM arms start in a T-pose: left points toward -X and right
 // toward +X. Rotating left around +Z and right around -Z therefore lowers
 // both arms toward -Y. A small X rotation then produces the walking swing.
@@ -159,13 +165,13 @@ const BASE_STANDING_ROTATIONS: Readonly<
   [VRMHumanBoneName.UpperChest]: [0, 0, 0],
   [VRMHumanBoneName.Neck]: [0, 0, 0],
   [VRMHumanBoneName.Head]: [0, 0, 0],
-  [VRMHumanBoneName.LeftShoulder]: [0, 0, -0.08],
-  [VRMHumanBoneName.LeftUpperArm]: [0, 0, -1.08],
-  [VRMHumanBoneName.LeftLowerArm]: [0.06, 0, -0.12],
+  [VRMHumanBoneName.LeftShoulder]: [0, 0, SHOULDER_DROP_RADIANS],
+  [VRMHumanBoneName.LeftUpperArm]: [0, 0, REST_ARM_DROP_RADIANS],
+  [VRMHumanBoneName.LeftLowerArm]: [0.06, 0, REST_FOREARM_DROP_RADIANS],
   [VRMHumanBoneName.LeftHand]: [0, 0, 0],
-  [VRMHumanBoneName.RightShoulder]: [0, 0, 0.08],
-  [VRMHumanBoneName.RightUpperArm]: [0, 0, 1.08],
-  [VRMHumanBoneName.RightLowerArm]: [0.06, 0, 0.12],
+  [VRMHumanBoneName.RightShoulder]: [0, 0, -SHOULDER_DROP_RADIANS],
+  [VRMHumanBoneName.RightUpperArm]: [0, 0, -REST_ARM_DROP_RADIANS],
+  [VRMHumanBoneName.RightLowerArm]: [0.06, 0, -REST_FOREARM_DROP_RADIANS],
   [VRMHumanBoneName.RightHand]: [0, 0, 0],
   [VRMHumanBoneName.LeftUpperLeg]: [0, 0, 0],
   [VRMHumanBoneName.LeftLowerLeg]: [0, 0, 0],
@@ -215,8 +221,16 @@ function sampleIdle(progress: number): VrmMotionPose {
       [VRMHumanBoneName.Chest]: [breath * 0.025, 0, sway * 0.012],
       [VRMHumanBoneName.Neck]: [0, -sway * 0.015, sway * 0.008],
       [VRMHumanBoneName.Head]: [breath * 0.012, -sway * 0.018, sway * 0.012],
-      [VRMHumanBoneName.LeftUpperArm]: [sway * 0.018, 0, -1.08],
-      [VRMHumanBoneName.RightUpperArm]: [-sway * 0.018, 0, 1.08],
+      [VRMHumanBoneName.LeftUpperArm]: [
+        sway * 0.018,
+        0,
+        REST_ARM_DROP_RADIANS,
+      ],
+      [VRMHumanBoneName.RightUpperArm]: [
+        -sway * 0.018,
+        0,
+        -REST_ARM_DROP_RADIANS,
+      ],
     },
     [0, breath * 0.008, 0],
   );
@@ -270,11 +284,11 @@ function sampleDance(progress: number): VrmMotionPose {
       [VRMHumanBoneName.UpperChest]: [0, -sway * 0.08, sway * 0.08],
       [VRMHumanBoneName.Neck]: [0, -sway * 0.1, -sway * 0.06],
       [VRMHumanBoneName.Head]: [-bounce * 0.05, -sway * 0.12, -sway * 0.12],
-      [VRMHumanBoneName.LeftUpperArm]: [counter * 0.28, 0, -0.4 - sway * 0.75],
-      [VRMHumanBoneName.LeftLowerArm]: [-0.38 + sway * 0.28, 0, -0.42],
+      [VRMHumanBoneName.LeftUpperArm]: [counter * 0.32, 0, 0.85 + sway * 0.38],
+      [VRMHumanBoneName.LeftLowerArm]: [-0.38 + sway * 0.22, 0, 0.3],
       [VRMHumanBoneName.LeftHand]: [0, sway * 0.25, counter * 0.25],
-      [VRMHumanBoneName.RightUpperArm]: [-counter * 0.28, 0, 0.4 - sway * 0.75],
-      [VRMHumanBoneName.RightLowerArm]: [-0.38 - sway * 0.28, 0, 0.42],
+      [VRMHumanBoneName.RightUpperArm]: [-counter * 0.32, 0, -0.85 + sway * 0.38],
+      [VRMHumanBoneName.RightLowerArm]: [-0.38 - sway * 0.22, 0, -0.3],
       [VRMHumanBoneName.RightHand]: [0, -sway * 0.25, -counter * 0.25],
       [VRMHumanBoneName.LeftUpperLeg]: [-sway * 0.24, 0, -0.08 - counter * 0.08],
       [VRMHumanBoneName.LeftLowerLeg]: [Math.max(0, sway) * 0.36, 0, 0],
@@ -295,9 +309,17 @@ function sampleGreeting(progress: number): VrmMotionPose {
     [VRMHumanBoneName.Spine]: [0, 0, amount * 0.03],
     [VRMHumanBoneName.Chest]: [0, -amount * 0.035, amount * 0.035],
     [VRMHumanBoneName.Head]: [0, amount * 0.08, -amount * 0.045],
-    [VRMHumanBoneName.LeftUpperArm]: [0, 0, -1.08],
-    [VRMHumanBoneName.RightUpperArm]: [amount * 0.12, -amount * 0.12, mix(1.08, -0.32, amount)],
-    [VRMHumanBoneName.RightLowerArm]: [-amount * 0.32, 0, mix(0.12, -1.2, amount) + wave * 0.3],
+    [VRMHumanBoneName.LeftUpperArm]: [0, 0, REST_ARM_DROP_RADIANS],
+    [VRMHumanBoneName.RightUpperArm]: [
+      amount * 0.1,
+      -amount * 0.08,
+      mix(-REST_ARM_DROP_RADIANS, -0.28, amount),
+    ],
+    [VRMHumanBoneName.RightLowerArm]: [
+      -amount * 0.14,
+      0,
+      mix(-REST_FOREARM_DROP_RADIANS, 1.65, amount) + wave * 0.22,
+    ],
     [VRMHumanBoneName.RightHand]: [0, wave * 0.22, wave * 0.38],
   });
 }

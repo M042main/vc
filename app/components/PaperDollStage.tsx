@@ -172,11 +172,11 @@ const NEUTRAL_EXPRESSION: DollExpression = {
 
 const REST_JOINTS: Record<JointName, Point> = {
   leftShoulder: { x: 221, y: 238 },
-  leftElbow: { x: 202, y: 350 },
-  leftWrist: { x: 182, y: 442 },
+  leftElbow: { x: 126, y: 238 },
+  leftWrist: { x: 42, y: 238 },
   rightShoulder: { x: 379, y: 238 },
-  rightElbow: { x: 398, y: 350 },
-  rightWrist: { x: 418, y: 442 },
+  rightElbow: { x: 474, y: 238 },
+  rightWrist: { x: 558, y: 238 },
   leftHip: { x: 268, y: 470 },
   leftKnee: { x: 236, y: 572 },
   leftAnkle: { x: 226, y: 704 },
@@ -240,10 +240,10 @@ const DOLL_PARTS: readonly RigPart[] = [
     start: "leftElbow",
     end: "leftWrist",
     mask: [
-      { x: 169, y: 321 },
-      { x: 232, y: 321 },
-      { x: 220, y: 467 },
-      { x: 148, y: 467 },
+      { x: 18, y: 202 },
+      { x: 145, y: 202 },
+      { x: 145, y: 274 },
+      { x: 18, y: 274 },
     ],
   },
   {
@@ -251,10 +251,10 @@ const DOLL_PARTS: readonly RigPart[] = [
     start: "rightElbow",
     end: "rightWrist",
     mask: [
-      { x: 368, y: 321 },
-      { x: 431, y: 321 },
-      { x: 452, y: 467 },
-      { x: 380, y: 467 },
+      { x: 455, y: 202 },
+      { x: 582, y: 202 },
+      { x: 582, y: 274 },
+      { x: 455, y: 274 },
     ],
   },
   {
@@ -262,10 +262,10 @@ const DOLL_PARTS: readonly RigPart[] = [
     start: "leftShoulder",
     end: "leftElbow",
     mask: [
-      { x: 185, y: 210 },
-      { x: 251, y: 210 },
-      { x: 235, y: 367 },
-      { x: 169, y: 367 },
+      { x: 112, y: 202 },
+      { x: 243, y: 202 },
+      { x: 243, y: 274 },
+      { x: 112, y: 274 },
     ],
   },
   {
@@ -273,10 +273,10 @@ const DOLL_PARTS: readonly RigPart[] = [
     start: "rightShoulder",
     end: "rightElbow",
     mask: [
-      { x: 349, y: 210 },
-      { x: 415, y: 210 },
-      { x: 431, y: 367 },
-      { x: 365, y: 367 },
+      { x: 357, y: 202 },
+      { x: 488, y: 202 },
+      { x: 488, y: 274 },
+      { x: 357, y: 274 },
     ],
   },
 ];

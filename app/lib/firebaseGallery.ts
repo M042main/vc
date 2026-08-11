@@ -36,6 +36,8 @@ const MAX_PNG_DATA_URL_SIZE = 6 * 1024 * 1024;
 const MAX_GALLERY_RECORD_BYTES = MAX_PNG_DATA_URL_SIZE + 4 * 1024;
 const PNG_DATA_URL_PREFIX = "data:image/png;base64,";
 const PNG_BASE64_SIGNATURE = "iVBORw0KGgo";
+const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
+const GALLERY_DELETE_API_PATH = "/api/gallery/delete";
 
 export type GalleryEntry = {
   id: string;
@@ -127,6 +129,13 @@ function validateCreatedAt(value: unknown): number {
   return value;
 }
 
+function validateGalleryEntryId(value: unknown): string {
+  if (typeof value !== "string" || !FIREBASE_PUSH_KEY_PATTERN.test(value)) {
+    throw new Error("삭제할 갤러리 항목 ID가 올바르지 않습니다.");
+  }
+  return value;
+}
+
 function validateRecordSize(record: GalleryRecord) {
   const byteLength = new TextEncoder().encode(JSON.stringify(record)).byteLength;
   if (byteLength > MAX_GALLERY_RECORD_BYTES) {
@@ -202,7 +211,7 @@ export function subscribeGalleryEntries({
 export async function publishGalleryEntry({
   name,
   imageDataUrl,
-}: PublishGalleryEntryInput): Promise<void> {
+}: PublishGalleryEntryInput): Promise<GalleryEntry> {
   const record: GalleryRecord = {
     name: validateName(name),
     imageDataUrl: validatePngDataUrl(imageDataUrl),
@@ -213,5 +222,47 @@ export async function publishGalleryEntry({
   const database = getGalleryDatabase();
   const entriesRef = ref(database, GALLERY_ENTRIES_PATH);
   const entryRef = push(entriesRef);
+  const id = validateGalleryEntryId(entryRef.key);
   await set(entryRef, record);
+  return { id, ...record };
+}
+
+export async function deleteGalleryEntry(id: string): Promise<void> {
+  const validatedId = validateGalleryEntryId(id);
+  let response: Response;
+
+  try {
+    response = await fetch(GALLERY_DELETE_API_PATH, {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id: validatedId }),
+    });
+  } catch (error) {
+    throw new Error("관리자 삭제 요청을 전송하지 못했습니다.", {
+      cause: error,
+    });
+  }
+
+  if (!response.ok) {
+    let message = "관리자 권한으로 캐릭터를 삭제하지 못했습니다.";
+    try {
+      const payload = (await response.json()) as unknown;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        !Array.isArray(payload) &&
+        typeof (payload as Record<string, unknown>).error === "string"
+      ) {
+        message = (payload as Record<string, string>).error;
+      }
+    } catch {
+      // Keep the safe fallback when an upstream response is not JSON.
+    }
+    throw new Error(message);
+  }
 }

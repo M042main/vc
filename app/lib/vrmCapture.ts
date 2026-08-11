@@ -400,7 +400,7 @@ export async function captureVrmFullBodyPng(
 }
 
 function downloadFilename(blob: Blob, filename: string): string {
-  const trimmed = filename.trim() || "motion-ink-character";
+  const trimmed = filename.trim() || "virtual-creator-character";
   if (/\.[a-z0-9]{2,5}$/i.test(trimmed)) return trimmed;
   if (blob.type.includes("webm")) return `${trimmed}.webm`;
   if (blob.type.includes("mp4")) return `${trimmed}.mp4`;

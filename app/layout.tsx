@@ -14,35 +14,35 @@ export async function generateMetadata(): Promise<Metadata> {
       ? "http"
       : "https");
   const baseUrl = new URL(`${protocol}://${host}`);
-  const socialImage = new URL("/og-card-v2.png", baseUrl).toString();
+  const socialImage = new URL("/og-virtual-creator.png", baseUrl).toString();
 
   return {
     metadataBase: baseUrl,
-    title: "MOTION INK — VRM 트래킹 & 캐릭터 메이커",
+    title: "Virtual Creator — VRM 트래킹 & 캐릭터 메이커",
     description:
       "VRM과 직접 그린 캐릭터를 카메라 또는 프리셋 모션으로 움직이고, PiP·크로마키 무대와 전신 PNG·WebM 저장을 활용하세요.",
-    applicationName: "MOTION INK",
+    applicationName: "Virtual Creator",
     icons: {
       icon: "/favicon.svg",
       shortcut: "/favicon.svg",
     },
     openGraph: {
-      title: "MOTION INK — 움직이고, 그리고, 저장하세요",
+      title: "Virtual Creator — 움직이고, 그리고, 저장하세요",
       description: "브라우저에서 즐기는 VRM 트래킹, PiP와 캐릭터 애니메이션 랩",
       type: "website",
       url: baseUrl,
       images: [
         {
           url: socialImage,
-          width: 1200,
-          height: 630,
-          alt: "MOTION INK VRM 트래킹, 캐릭터 PiP와 크로마키 스튜디오",
+          width: 1731,
+          height: 909,
+          alt: "Virtual Creator VRM 트래킹과 직접 그린 캐릭터 스튜디오",
         },
       ],
     },
     twitter: {
       card: "summary_large_image",
-      title: "MOTION INK — 움직이고, 그리고, 저장하세요",
+      title: "Virtual Creator — 움직이고, 그리고, 저장하세요",
       description: "브라우저에서 즐기는 VRM 트래킹, PiP와 캐릭터 애니메이션 랩",
       images: [socialImage],
     },

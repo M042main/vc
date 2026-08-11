@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   Pencil,
   RefreshCw,
+  Trash2,
   UserRound,
   X,
 } from "lucide-react";
@@ -22,6 +23,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
+  deleteGalleryEntry,
   publishGalleryEntry,
   subscribeGalleryEntries,
   type GalleryEntry,
@@ -46,6 +48,7 @@ export interface OnlineGalleryProps {
   /** @deprecated Prefer pendingCapture when the studio can provide a filename. */
   captureDataUrl?: string | null;
   className?: string;
+  isAdmin?: boolean;
   onUploadComplete?: (entry: GalleryEntry | void) => void;
 }
 
@@ -121,6 +124,7 @@ export function OnlineGallery({
   pendingCapture,
   captureDataUrl: legacyCaptureDataUrl,
   className,
+  isAdmin = false,
   onUploadComplete,
 }: OnlineGalleryProps) {
   const headingId = useId();
@@ -136,6 +140,9 @@ export function OnlineGallery({
   const [nameAction, setNameAction] = useState<NameAction | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -204,6 +211,15 @@ export function OnlineGallery({
   }, []);
 
   useEffect(() => {
+    if (isAdmin) return;
+    const timer = window.setTimeout(() => {
+      setDeleteCandidateId(null);
+      setDeleteError(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isAdmin]);
+
+  useEffect(() => {
     if (!nameAction) return;
     const timer = window.setTimeout(() => {
       nameInputRef.current?.focus();
@@ -247,7 +263,13 @@ export function OnlineGallery({
           name,
           imageDataUrl: captureDataUrl,
         });
-        setActionMessage("온라인 갤러리에 캐릭터를 올렸습니다.");
+        setEntries((currentEntries) => [
+          entry,
+          ...currentEntries.filter((currentEntry) => currentEntry.id !== entry.id),
+        ]);
+        setActionMessage(
+          `${entry.name} 이름으로 저장했습니다. 온라인 갤러리에 바로 표시됩니다.`,
+        );
         onUploadComplete?.(entry);
       } catch (error) {
         setActionMessage(
@@ -315,6 +337,48 @@ export function OnlineGallery({
       void downloadEntry(entry, viewerName);
     },
     [downloadEntry, openNameDialog, viewerName],
+  );
+
+  const requestDelete = useCallback(
+    (entry: GalleryEntry) => {
+      if (!isAdmin || deletingId) return;
+      setDeleteCandidateId(entry.id);
+      setDeleteError(null);
+    },
+    [deletingId, isAdmin],
+  );
+
+  const cancelDelete = useCallback(() => {
+    if (deletingId) return;
+    setDeleteCandidateId(null);
+    setDeleteError(null);
+  }, [deletingId]);
+
+  const confirmDelete = useCallback(
+    async (entry: GalleryEntry) => {
+      if (!isAdmin || deletingId || deleteCandidateId !== entry.id) return;
+      setDeletingId(entry.id);
+      setDeleteError(null);
+      setActionMessage(`${entry.name}님의 캐릭터를 갤러리에서 삭제하는 중입니다.`);
+      try {
+        await deleteGalleryEntry(entry.id);
+        setEntries((currentEntries) =>
+          currentEntries.filter((currentEntry) => currentEntry.id !== entry.id),
+        );
+        setDeleteCandidateId(null);
+        setActionMessage(`${entry.name}님의 캐릭터를 갤러리에서 삭제했습니다.`);
+      } catch (error) {
+        const message = errorMessage(
+          error,
+          "캐릭터를 갤러리에서 삭제하지 못했습니다.",
+        );
+        setDeleteError(message);
+        setActionMessage(message);
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [deleteCandidateId, deletingId, isAdmin],
   );
 
   const submitName = useCallback(
@@ -503,25 +567,90 @@ export function OnlineGallery({
                       {formatDate(entry.createdAt)}
                     </time>
                   </div>
-                  <button
-                    type="button"
-                    className={styles.downloadButton}
-                    onClick={(event) => requestDownload(entry, event)}
-                    disabled={downloadingId !== null}
-                    aria-label={`${entry.name}님의 캐릭터 PNG 다운로드`}
-                  >
-                    {downloadingId === entry.id ? (
-                      <LoaderCircle
-                        className={styles.spinner}
-                        size={17}
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <Download size={17} aria-hidden="true" />
-                    )}
-                    <span>{downloadingId === entry.id ? "준비 중" : "PNG 받기"}</span>
-                  </button>
+                  <div className={styles.cardActions}>
+                    <button
+                      type="button"
+                      className={styles.downloadButton}
+                      onClick={(event) => requestDownload(entry, event)}
+                      disabled={downloadingId !== null || deletingId !== null}
+                      aria-label={`${entry.name}님의 캐릭터 PNG 다운로드`}
+                    >
+                      {downloadingId === entry.id ? (
+                        <LoaderCircle
+                          className={styles.spinner}
+                          size={17}
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Download size={17} aria-hidden="true" />
+                      )}
+                      <span>{downloadingId === entry.id ? "준비 중" : "PNG 받기"}</span>
+                    </button>
+                    {/* 관리자 UI는 실수 방지용이며, 실제 삭제 권한은 동일 출처 서버 경로에서 인증 이메일로 확인합니다. */}
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        className={styles.deleteButton}
+                        onClick={() => requestDelete(entry)}
+                        disabled={deletingId !== null}
+                        aria-label={`${entry.name}님의 캐릭터 삭제 선택`}
+                        aria-expanded={deleteCandidateId === entry.id}
+                        aria-controls={
+                          deleteCandidateId === entry.id
+                            ? `delete-confirm-${entry.id}`
+                            : undefined
+                        }
+                      >
+                        <Trash2 size={16} aria-hidden="true" />
+                        <span>삭제</span>
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
+                {isAdmin && deleteCandidateId === entry.id ? (
+                  <div
+                    id={`delete-confirm-${entry.id}`}
+                    className={styles.deleteConfirm}
+                    role="group"
+                    aria-label={`${entry.name}님의 캐릭터 삭제 확인`}
+                  >
+                    <p>
+                      <strong>{entry.name}</strong>님의 캐릭터를 정말 삭제할까요?
+                    </p>
+                    <div>
+                      <button
+                        type="button"
+                        className={styles.confirmDeleteButton}
+                        onClick={() => void confirmDelete(entry)}
+                        disabled={deletingId !== null}
+                      >
+                        {deletingId === entry.id ? (
+                          <LoaderCircle
+                            className={styles.spinner}
+                            size={16}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Trash2 size={16} aria-hidden="true" />
+                        )}
+                        {deletingId === entry.id ? "삭제 중" : "삭제 확인"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.cancelDeleteButton}
+                        onClick={cancelDelete}
+                        disabled={deletingId !== null}
+                      >
+                        취소
+                      </button>
+                    </div>
+                    {deleteError ? (
+                      <span className={styles.deleteError} role="alert">
+                        {deleteError}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -570,7 +699,7 @@ export function OnlineGallery({
                 autoComplete="nickname"
                 aria-invalid={Boolean(nameError)}
                 aria-describedby={nameError ? `${nameHeadingId}-error` : undefined}
-                placeholder="예: 모션잉크"
+                placeholder="예: 박근석"
               />
               {nameError ? (
                 <span id={`${nameHeadingId}-error`} className={styles.nameError} role="alert">

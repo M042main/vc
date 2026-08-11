@@ -3,6 +3,10 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const appRoot = new URL("../app/", import.meta.url);
+const galleryDeleteRouteUrl = new URL(
+  "../app/api/gallery/delete/route.ts",
+  import.meta.url,
+);
 const REQUIRED_BASE_PATH = "/000000/박근석_t7/motion_ink_gallery_a7f3c9";
 
 async function collectSources(directory = appRoot) {
@@ -100,6 +104,74 @@ test("publishes with push plus set and tears down the realtime listener", async 
   );
 });
 
+test("routes deletion through authenticated server code to one validated child", async () => {
+  const [{ firebase }, route] = await Promise.all([
+    gallerySources(),
+    readFile(galleryDeleteRouteUrl, "utf8"),
+  ]);
+
+  assert.doesNotMatch(
+    firebase,
+    /import\s*\{[\s\S]*?\bremove\b[\s\S]*?\}\s*from\s*["']firebase\/database["']/,
+    "browser Firebase code must not import the destructive remove helper",
+  );
+  assert.doesNotMatch(
+    firebase,
+    /\bremove\s*\(/,
+    "browser Firebase code must never delete gallery data directly",
+  );
+  assert.match(firebase, /GALLERY_DELETE_API_PATH\s*=\s*["']\/api\/gallery\/delete["']/);
+  assert.match(
+    firebase,
+    /fetch\s*\(\s*GALLERY_DELETE_API_PATH\s*,\s*\{[\s\S]{0,500}method:\s*["']POST["'][\s\S]{0,500}JSON\.stringify\s*\(\s*\{\s*id:\s*validatedId\s*\}\s*\)/,
+    "the client must send only a validated ID to the same-origin POST route",
+  );
+
+  assert.match(route, /oai-authenticated-user-email/);
+  assert.match(route, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
+  assert.match(
+    route,
+    /request\.headers\.get\s*\(\s*AUTHENTICATED_USER_EMAIL_HEADER\s*\)\s*!==\s*ADMIN_EMAIL[\s\S]{0,180}403/,
+    "the route must reject every email except the exact admin email",
+  );
+  assert.match(route, /FIREBASE_PUSH_KEY_PATTERN\s*=\s*\/\^\[-_A-Za-z0-9\]\{20\}\$\/u/);
+  assert.match(route, new RegExp(REQUIRED_BASE_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(
+    route,
+    /new URL\s*\(\s*`\$\{GALLERY_ENTRIES_PATH\}\/\$\{id\}\.json`\s*,\s*FIREBASE_DATABASE_ORIGIN\s*,?\s*\)/,
+    "the outbound Firebase URL must append only the validated push key child",
+  );
+  assert.match(
+    route,
+    /fetch\s*\(\s*firebaseEntryUrl\s*,\s*\{[\s\S]{0,240}method:\s*["']DELETE["']/,
+  );
+  assert.doesNotMatch(
+    route,
+    /fetch\s*\(\s*(?:FIREBASE_DATABASE_ORIGIN|GALLERY_ENTRIES_PATH)\s*,/,
+    "the route must never target the database origin or entries collection",
+  );
+  assert.ok(
+    route.indexOf("AUTHENTICATED_USER_EMAIL_HEADER") < route.indexOf("firebaseEntryUrl"),
+    "authorization must happen before constructing or issuing the delete request",
+  );
+});
+
+test("surfaces client, payload, authorization, and upstream delete failures", async () => {
+  const [{ firebase, ui }, route] = await Promise.all([
+    gallerySources(),
+    readFile(galleryDeleteRouteUrl, "utf8"),
+  ]);
+
+  assert.match(firebase, /if\s*\(\s*!response\.ok\s*\)/);
+  assert.match(firebase, /await\s+response\.json\s*\(\)/);
+  assert.match(firebase, /throw\s+new Error\s*\(\s*message\s*\)/);
+  assert.match(route, /request\.json\s*\(\)[\s\S]{0,160}400/);
+  assert.match(route, /!firebaseResponse\.ok[\s\S]{0,160}502/);
+  assert.match(route, /catch\s*\{[\s\S]{0,160}Firebase 삭제 서비스에 연결하지 못했습니다[\s\S]{0,80}502/);
+  assert.match(ui, /setDeleteError\s*\(\s*message\s*\)/);
+  assert.match(ui, /deleteError[\s\S]{0,180}role=["']alert["']/);
+});
+
 test("accepts only bounded PNG data URLs before Firebase writes", async () => {
   const { firebase } = await gallerySources();
 
@@ -150,6 +222,36 @@ test("persists an editable download name in a cookie and exposes gallery actions
   assert.match(ui, /type=["']button["']/, "gallery actions must not submit a surrounding form");
   assert.match(ui, /alt=\{[^}]+\}|alt=["'][^"']+["']/, "gallery thumbnails need alt text");
   assert.match(ui, /aria-live=["'](?:polite|assertive)["']/, "async gallery status needs a live region");
+});
+
+test("shows two-step deletion controls only behind the administrator UI gate", async () => {
+  const { ui } = await gallerySources();
+
+  assert.match(ui, /isAdmin\?:\s*boolean/);
+  assert.match(ui, /isAdmin\s*=\s*false/);
+  assert.match(ui, /\{isAdmin\s*\?\s*\([\s\S]{0,900}삭제 선택/);
+  assert.match(ui, /deleteCandidateId\s*===\s*entry\.id/);
+  assert.match(ui, /삭제 확인/);
+  assert.match(ui, /취소/);
+  assert.match(ui, /deleteGalleryEntry\s*\(entry\.id\)/);
+  assert.match(ui, /deletingId\s*===\s*entry\.id[\s\S]{0,220}삭제 중/);
+  assert.match(ui, /deleteError[\s\S]{0,180}role=["']alert["']/);
+  assert.match(
+    ui,
+    /관리자 UI는 실수 방지용이며, 실제 삭제 권한은 동일 출처 서버 경로에서 인증 이메일로 확인합니다/,
+  );
+});
+
+test("immediately exposes a successful named upload while realtime catches up", async () => {
+  const { firebase, ui } = await gallerySources();
+
+  assert.match(firebase, /publishGalleryEntry[\s\S]{0,250}Promise<GalleryEntry>/);
+  assert.match(firebase, /return\s*\{\s*id\s*,\s*\.\.\.record\s*\}/);
+  assert.match(
+    ui,
+    /const\s+entry\s*=\s*await\s+publishGalleryEntry[\s\S]{0,500}setEntries\s*\([\s\S]{0,350}entry/,
+  );
+  assert.match(ui, /\$\{entry\.name\}\s*이름으로 저장했습니다/);
 });
 
 test("wires the full-body PNG capture into the mounted online gallery", async () => {

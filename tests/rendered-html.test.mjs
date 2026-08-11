@@ -25,24 +25,28 @@ async function render() {
   );
 }
 
-test("server-renders the Motion Ink studio", async () => {
+test("server-renders the Virtual Creator studio", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /MOTION INK/);
+  assert.match(html, /VIRTUAL CREATOR/);
   assert.match(html, /트래킹 스튜디오/);
   assert.match(html, /캐릭터 만들기/);
   assert.match(html, /온라인 갤러리/);
   assert.match(html, /VRM/);
-  assert.doesNotMatch(html, /trust-strip|서비스 특징|영상은 기기 안에서만/);
+  assert.doesNotMatch(
+    html,
+    /MOTION INK|trust-strip|서비스 특징|영상은 기기 안에서만|Kalidoface 3D와|카메라 사용에는 HTTPS|<footer/i,
+  );
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
 test("ships the two interactive creation surfaces and removes the starter", async () => {
-  const [page, studio, creator, gallery, firebaseGallery, packageJson] = await Promise.all([
+  const [page, layout, studio, creator, gallery, firebaseGallery, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/VrmStudio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/CharacterCreator.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/OnlineGallery.tsx", import.meta.url), "utf8"),
@@ -54,6 +58,12 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(page, /<CharacterCreator/);
   assert.match(page, /<OnlineGallery/);
   assert.match(page, /onCaptureReady=\{setLatestCapture\}/);
+  assert.match(page, /isAdmin=\{adminMode\}/);
+  assert.match(page, /ADMIN_ID\s*=\s*"m042"/);
+  assert.match(page, /VIRTUAL CREATOR/);
+  assert.doesNotMatch(page, /MOTION INK|<footer|Kalidoface 3D와|카메라 사용에는 HTTPS/i);
+  assert.match(layout, /Virtual Creator/);
+  assert.doesNotMatch(layout, /MOTION INK/);
   assert.match(studio, /captureVrmFullBodyPng/);
   assert.match(studio, /createHolisticTrackingWorker/);
   assert.match(creator, /onSendToStudio/);
@@ -61,7 +71,7 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(gallery, /document\.cookie/);
   assert.match(firebaseGallery, /motion_ink_gallery_a7f3c9/);
   assert.match(packageJson, /"firebase":\s*"11\.6\.1"/);
-  assert.doesNotMatch(page, /trust-strip|ShieldCheck/);
+  assert.doesNotMatch(page, /trust-strip/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await assert.rejects(

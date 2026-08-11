@@ -62,12 +62,11 @@ function createSilhouettePath() {
   path.bezierCurveTo(342, 24, 371, 58, 371, 105);
   path.bezierCurveTo(371, 150, 354, 179, 328, 191);
   path.lineTo(328, 204);
-  path.bezierCurveTo(348, 207, 365, 213, 379, 224);
-  path.bezierCurveTo(398, 240, 408, 264, 414, 294);
-  path.lineTo(439, 420);
-  path.bezierCurveTo(443, 440, 433, 454, 418, 457);
-  path.bezierCurveTo(403, 460, 392, 449, 389, 433);
-  path.lineTo(366, 325);
+  path.bezierCurveTo(348, 207, 365, 210, 382, 214);
+  path.lineTo(552, 214);
+  path.bezierCurveTo(568, 214, 578, 223, 578, 238);
+  path.bezierCurveTo(578, 252, 568, 262, 553, 262);
+  path.lineTo(382, 262);
   path.lineTo(368, 405);
   path.bezierCurveTo(369, 428, 375, 450, 382, 470);
   path.bezierCurveTo(393, 504, 394, 536, 392, 573);
@@ -87,13 +86,12 @@ function createSilhouettePath() {
   path.lineTo(208, 573);
   path.bezierCurveTo(206, 536, 207, 504, 218, 470);
   path.bezierCurveTo(225, 450, 231, 428, 232, 405);
-  path.lineTo(234, 325);
-  path.lineTo(211, 433);
-  path.bezierCurveTo(208, 449, 197, 460, 182, 457);
-  path.bezierCurveTo(167, 454, 157, 440, 161, 420);
-  path.lineTo(186, 294);
-  path.bezierCurveTo(192, 264, 202, 240, 221, 224);
-  path.bezierCurveTo(235, 213, 252, 207, 272, 204);
+  path.lineTo(218, 262);
+  path.lineTo(47, 262);
+  path.bezierCurveTo(32, 262, 22, 252, 22, 238);
+  path.bezierCurveTo(22, 223, 32, 214, 48, 214);
+  path.lineTo(218, 214);
+  path.bezierCurveTo(235, 210, 252, 207, 272, 204);
   path.lineTo(272, 191);
   path.bezierCurveTo(246, 179, 229, 150, 229, 105);
   path.bezierCurveTo(229, 58, 258, 24, 300, 24);
@@ -132,11 +130,11 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
     head: { x: 300, y: 111 },
     neck: { x: 300, y: 202 },
     leftShoulder: { x: 221, y: 238 },
-    leftElbow: { x: 202, y: 350 },
-    leftWrist: { x: 182, y: 442 },
+    leftElbow: { x: 126, y: 238 },
+    leftWrist: { x: 42, y: 238 },
     rightShoulder: { x: 379, y: 238 },
-    rightElbow: { x: 398, y: 350 },
-    rightWrist: { x: 418, y: 442 },
+    rightElbow: { x: 474, y: 238 },
+    rightWrist: { x: 558, y: 238 },
     pelvis: { x: 300, y: 470 },
     leftHip: { x: 268, y: 470 },
     leftKnee: { x: 236, y: 572 },
@@ -738,8 +736,8 @@ export function CharacterCreator({
           <div className={styles.tipBox}>
             <span aria-hidden="true">✦</span>
             <p>
-              얼굴의 눈·입 가이드 위에 그리면 트래킹할 때 깜박임, 미소, 입 벌림이
-              반영돼요. 파란 스켈레톤과 회색 실루엣은 결과물에 저장되지 않습니다.
+              팔은 수평 T-포즈 가이드를 따라 그리세요. 얼굴의 눈·입 가이드 위에
+              그리면 트래킹할 때 깜박임, 미소, 입 벌림이 반영돼요. 파란 스켈레톤과 회색 실루엣은 결과물에 저장되지 않습니다.
             </p>
           </div>
         </aside>
@@ -748,9 +746,11 @@ export function CharacterCreator({
           <div className={styles.stageMeta}>
             <span>
               <i aria-hidden="true" />
-              {side === "front" ? "앞면 편집 중" : "뒷면 편집 중"}
+              T-포즈 · {side === "front" ? "앞면 편집 중" : "뒷면 편집 중"}
             </span>
-            <span className={styles.guideNotice}>관절·표정 가이드는 저장되지 않아요</span>
+            <span className={styles.guideNotice}>
+              T-포즈 관절·표정 가이드는 저장되지 않아요
+            </span>
           </div>
 
           <div className={styles.canvasFrame}>
@@ -773,9 +773,9 @@ export function CharacterCreator({
           </div>
 
           <p id="character-canvas-help" className={styles.canvasHelp}>
-            마우스나 손가락으로 캔버스 어디든 그리세요. 몸 밖의 픽셀도 가장 가까운
-            머리·몸통·팔·다리에 자동으로 붙고, 관절 주변은 선을 끊지 않아도
-            부드럽게 변형됩니다.
+            팔을 수평으로 펼친 T-포즈 실루엣 위에 그리세요. 몸 밖의 픽셀도
+            가장 가까운 머리·몸통·팔·다리에 자동으로 붙고, 관절 주변은 선을
+            끊지 않아도 부드럽게 변형됩니다.
           </p>
 
           <div className={styles.status} aria-live="polite">

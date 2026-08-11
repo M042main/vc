@@ -237,6 +237,9 @@
 
 .editNameButton,
 .downloadButton,
+.deleteButton,
+.confirmDeleteButton,
+.cancelDeleteButton,
 .errorState button {
   display: inline-flex;
   align-items: center;
@@ -395,6 +398,11 @@
   white-space: nowrap;
 }
 
+.cardActions {
+  display: grid;
+  gap: 7px;
+}
+
 .downloadButton {
   min-width: 96px;
   border-color: #171713;
@@ -405,6 +413,71 @@
   border-color: #c8c5bc;
   background: #eeeae2;
   color: #817e76;
+}
+
+.deleteButton {
+  min-width: 96px;
+  border-color: rgba(148, 46, 38, 0.42);
+  background: #fff8f7;
+  color: #942e26;
+}
+
+.deleteButton:disabled,
+.confirmDeleteButton:disabled,
+.cancelDeleteButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.deleteConfirm {
+  display: grid;
+  gap: 9px;
+  margin: 0 12px 12px;
+  padding: 11px;
+  border: 1px solid rgba(148, 46, 38, 0.35);
+  border-radius: 13px;
+  background: #fff3f1;
+}
+
+.deleteConfirm p {
+  margin: 0;
+  color: #6f251f;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.deleteConfirm > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.confirmDeleteButton,
+.cancelDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.confirmDeleteButton {
+  border-color: #8b251e;
+  background: #942e26;
+  color: #fff;
+}
+
+.cancelDeleteButton {
+  background: #fff;
+}
+
+.deleteError {
+  color: #942e26;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.45;
 }
 
 .spinner {
@@ -544,6 +617,18 @@
 
   .downloadButton:not(:disabled):hover {
     background: #cffa00;
+    transform: translateY(-1px);
+  }
+
+  .deleteButton:not(:disabled):hover,
+  .cancelDeleteButton:not(:disabled):hover {
+    border-color: #942e26;
+    background: #ffe6e2;
+    transform: translateY(-1px);
+  }
+
+  .confirmDeleteButton:not(:disabled):hover {
+    background: #751d17;
     transform: translateY(-1px);
   }
 

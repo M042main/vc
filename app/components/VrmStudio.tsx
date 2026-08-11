@@ -200,7 +200,7 @@ function cleanFilename(value: string) {
     .replace(/\.vrm$/i, "")
     .replace(/[^a-zA-Z0-9가-힣_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 60) || "motion-ink-character";
+    .slice(0, 60) || "virtual-creator-character";
 }
 
 function pngBlobToDataUrl(blob: Blob): Promise<string> {
