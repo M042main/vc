@@ -24,7 +24,7 @@ function cssRule(source, selector) {
   return source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "u"))?.[1] ?? "";
 }
 
-test("keeps the administrator gear fixed at the top-right above the onboarding gate", async () => {
+test("places the administrator gear with header actions and keeps a gate-safe control", async () => {
   const { page, globals, onboarding, onboardingCss } = await sources();
   const topbarStart = page.indexOf('<header className="topbar">');
   const topbarEnd = page.indexOf("</header>", topbarStart);
@@ -32,19 +32,23 @@ test("keeps the administrator gear fixed at the top-right above the onboarding g
 
   const topbar = page.slice(topbarStart, topbarEnd);
   assert.match(topbar, /<nav className="mode-switch"/u);
-  assert.doesNotMatch(topbar, /className="admin-access-button"/u);
+  assert.match(topbar, /className="header-actions"/u);
+  assert.match(topbar, /renderAdminAccessButton\(\)/u);
   assert.match(
     page,
-    /const\s+adminAccessButton\s*=\s*\([\s\S]{0,240}<button[\s\S]{0,180}className="admin-access-button"[\s\S]{0,420}<Settings[^>]*aria-hidden="true"/u,
+    /const\s+renderAdminAccessButton\s*=\s*\(gateControl\s*=\s*false\)\s*=>\s*\([\s\S]{0,240}<button[\s\S]{0,180}className="admin-access-button"[\s\S]{0,420}<Settings[^>]*aria-hidden="true"/u,
   );
-  assert.match(page, /\{profileGateBlocking\s*\?\s*null\s*:\s*adminAccessButton\}/u);
-  assert.match(page, /blockingModalControl=\{adminAccessButton\}/u);
+  assert.match(page, /!profileGateBlocking\s*\?\s*renderAdminAccessButton\(\)\s*:\s*null/u);
+  assert.match(page, /blockingModalControl=\{renderAdminAccessButton\(true\)\}/u);
   assert.match(
     onboarding,
-    /aria-modal=\{isBlocking\s*\?\s*true[\s\S]{0,120}\{isBlocking\s*\?\s*blockingModalControl\s*:\s*null\}[\s\S]{0,120}className=\{styles\.summary\}/u,
+    /aria-modal=\{isBlocking\s*\?\s*true[\s\S]{0,120}\{isBlocking\s*\?\s*blockingModalControl\s*:\s*null\}/u,
   );
 
-  const adminRule = cssRule(globals, ".admin-access-button");
+  const adminRule = cssRule(
+    globals,
+    '.admin-access-button[data-gate-control="true"]',
+  );
   const gateRule = cssRule(onboardingCss, ".blockingBackdrop");
   assert.match(adminRule, /position\s*:\s*fixed/u);
   assert.match(adminRule, /top\s*:\s*max\([^;]*safe-area-inset-top/u);
@@ -53,7 +57,7 @@ test("keeps the administrator gear fixed at the top-right above the onboarding g
   const gateLayer = Number(gateRule.match(/z-index\s*:\s*(\d+)/u)?.[1] ?? NaN);
   assert.ok(
     Number.isFinite(adminLayer) && Number.isFinite(gateLayer) && adminLayer > gateLayer,
-    "the fixed administrator gear must stay usable above the blocking onboarding gate",
+    "the gate administrator gear must stay usable above the blocking onboarding gate",
   );
 });
 
@@ -72,7 +76,11 @@ test("offers guest access as a separate action instead of a class-select option"
 
 test("surfaces class-list subscription failures as an actionable live error", async () => {
   const { onboarding } = await sources();
-  const subscriptionStart = onboarding.indexOf("subscribeClassRecords({");
+  const componentStart = onboarding.indexOf("export function ClassOnboarding");
+  const subscriptionStart = onboarding.indexOf(
+    "subscribeClassRecords({",
+    componentStart,
+  );
   const subscriptionEnd = onboarding.indexOf("});", subscriptionStart);
   assert.ok(
     subscriptionStart >= 0 && subscriptionEnd > subscriptionStart,

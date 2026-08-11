@@ -8,6 +8,7 @@ import {
   query,
   ref,
   set,
+  update,
   type DataSnapshot,
   type Database,
   type Unsubscribe,
@@ -48,6 +49,8 @@ const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
 const GALLERY_DELETE_API_PATH = "/api/gallery/delete";
 const GALLERY_CLASSES_API_PATH = "/api/gallery/classes";
 const MAX_CLASS_NAME_LENGTH = 40;
+const CHARACTER_SLOT_PATTERN = /^slot-[1-3]$/u;
+export const MAX_SAVED_CHARACTERS = 3;
 
 export type GalleryEntry = {
   id: string;
@@ -72,6 +75,10 @@ export type SavedCharacterArtwork = {
   className: string;
   imageDataUrl: string;
   updatedAt: number;
+};
+
+export type SavedCharacterSlot = SavedCharacterArtwork & {
+  id: `slot-${1 | 2 | 3}`;
 };
 
 export type GallerySubscription = {
@@ -226,6 +233,36 @@ function validateGalleryEntryId(value: unknown): string {
     throw new Error("삭제할 갤러리 항목 ID가 올바르지 않습니다.");
   }
   return value;
+}
+
+function validateCharacterSlotId(value: unknown): SavedCharacterSlot["id"] {
+  if (typeof value !== "string" || !CHARACTER_SLOT_PATTERN.test(value)) {
+    throw new Error("캐릭터 저장 칸은 1번부터 3번까지만 사용할 수 있습니다.");
+  }
+  return value as SavedCharacterSlot["id"];
+}
+
+function parseSavedCharacterArtwork(
+  value: unknown,
+  expectedProfile: VisitorProfile,
+): SavedCharacterArtwork | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  try {
+    const record: SavedCharacterArtwork = {
+      name: validateName(candidate.name),
+      classId: validateGalleryEntryId(candidate.classId),
+      className: validateClassName(candidate.className),
+      imageDataUrl: validatePngDataUrl(candidate.imageDataUrl),
+      updatedAt: validateCreatedAt(candidate.updatedAt),
+    };
+    return record.classId === expectedProfile.classId &&
+      record.name === expectedProfile.name
+      ? record
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function validateRecordSize(record: GalleryRecord) {
@@ -553,7 +590,9 @@ export async function saveLatestCharacterArtwork(
   const key = visitorArtworkKey(activeProfile);
   const GALLERY_ARTWORK_PATH = `${GALLERY_ARTWORKS_PATH}/${key}`;
   const database = getGalleryDatabase();
-  await set(ref(database, GALLERY_ARTWORK_PATH), record);
+  // Preserve the optional three-slot library while updating the legacy/latest
+  // fields used by older deployed clients.
+  await update(ref(database, GALLERY_ARTWORK_PATH), record);
   return record;
 }
 
@@ -568,20 +607,125 @@ export async function loadLatestCharacterArtwork(
   const snapshot = await get(ref(database, GALLERY_ARTWORK_PATH));
   if (!snapshot.exists()) return null;
   const value = snapshot.val() as unknown;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const candidate = value as Record<string, unknown>;
-  try {
-    const record: SavedCharacterArtwork = {
-      name: validateName(candidate.name),
-      classId: validateGalleryEntryId(candidate.classId),
-      className: validateClassName(candidate.className),
-      imageDataUrl: validatePngDataUrl(candidate.imageDataUrl),
-      updatedAt: validateCreatedAt(candidate.updatedAt),
-    };
-    return record.classId === activeProfile.classId && record.name === activeProfile.name
-      ? record
-      : null;
-  } catch {
-    return null;
+  const legacy = parseSavedCharacterArtwork(value, activeProfile);
+  if (legacy) return legacy;
+  const slots = await loadSavedCharacterSlots(activeProfile, value);
+  return slots[0] ?? null;
+}
+
+function slotsFromArtworkRoot(
+  value: unknown,
+  activeProfile: VisitorProfile,
+): SavedCharacterSlot[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const slotsValue = (value as Record<string, unknown>).slots;
+  if (!slotsValue || typeof slotsValue !== "object" || Array.isArray(slotsValue)) {
+    return [];
   }
+  const slots: SavedCharacterSlot[] = [];
+  for (const [id, candidate] of Object.entries(slotsValue)) {
+    try {
+      const slotId = validateCharacterSlotId(id);
+      const record = parseSavedCharacterArtwork(candidate, activeProfile);
+      if (record) slots.push({ id: slotId, ...record });
+    } catch {
+      // Ignore invalid shared records without hiding valid saved characters.
+    }
+  }
+  return slots.sort(
+    (left, right) =>
+      right.updatedAt - left.updatedAt || left.id.localeCompare(right.id),
+  );
+}
+
+export async function loadSavedCharacterSlots(
+  profile: VisitorProfile,
+  prefetchedRoot?: unknown,
+): Promise<SavedCharacterSlot[]> {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) return [];
+  const key = visitorArtworkKey(activeProfile);
+  let rootValue = prefetchedRoot;
+  if (rootValue === undefined) {
+    const database = getGalleryDatabase();
+    const snapshot = await get(
+      ref(database, `${GALLERY_ARTWORKS_PATH}/${key}`),
+    );
+    if (!snapshot.exists()) return [];
+    rootValue = snapshot.val() as unknown;
+  }
+  const slots = slotsFromArtworkRoot(rootValue, activeProfile);
+  if (slots.length > 0) return slots.slice(0, MAX_SAVED_CHARACTERS);
+
+  // A previous deployment stored one latest record directly at this path.
+  // Expose it as slot 1 without deleting or rewriting the original record.
+  const legacy = parseSavedCharacterArtwork(rootValue, activeProfile);
+  return legacy ? [{ id: "slot-1", ...legacy }] : [];
+}
+
+export async function saveCharacterSlot(
+  profile: VisitorProfile,
+  slotId: SavedCharacterSlot["id"],
+  imageDataUrl: string,
+): Promise<SavedCharacterSlot> {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) {
+    throw new Error("게스트는 클라우드 작품 저장을 사용할 수 없습니다.");
+  }
+  const id = validateCharacterSlotId(slotId);
+  const activeClass = await requireActiveClass(activeProfile);
+  const record: SavedCharacterArtwork = {
+    name: validateName(activeProfile.name),
+    classId: activeProfile.classId,
+    className: activeClass.name,
+    imageDataUrl: validatePngDataUrl(imageDataUrl),
+    updatedAt: Date.now(),
+  };
+  const key = visitorArtworkKey(activeProfile);
+  const database = getGalleryDatabase();
+  await update(ref(database, `${GALLERY_ARTWORKS_PATH}/${key}`), {
+    ...record,
+    [`slots/${id}`]: record,
+  });
+  return { id, ...record };
+}
+
+export async function deleteCharacterSlot(
+  profile: VisitorProfile,
+  slotId: SavedCharacterSlot["id"],
+): Promise<void> {
+  const activeProfile = createVisitorProfile(profile);
+  if (activeProfile.guest || !activeProfile.classId) {
+    throw new Error("게스트는 클라우드 작품 저장을 사용할 수 없습니다.");
+  }
+  const id = validateCharacterSlotId(slotId);
+  const key = visitorArtworkKey(activeProfile);
+  const database = getGalleryDatabase();
+  const rootRef = ref(database, `${GALLERY_ARTWORKS_PATH}/${key}`);
+  const snapshot = await get(rootRef);
+  if (!snapshot.exists()) return;
+  const rootValue = snapshot.val() as unknown;
+  const actualSlots = slotsFromArtworkRoot(rootValue, activeProfile);
+
+  // Legacy-only data is represented as slot 1 by loadSavedCharacterSlots.
+  if (actualSlots.length === 0) {
+    if (id === "slot-1") await set(rootRef, null);
+    return;
+  }
+
+  const remaining = actualSlots.filter((slot) => slot.id !== id);
+  if (remaining.length === actualSlots.length) return;
+  if (remaining.length === 0) {
+    await set(rootRef, null);
+    return;
+  }
+  const newest = remaining[0];
+  await update(rootRef, {
+    [`slots/${id}`]: null,
+    name: newest.name,
+    classId: newest.classId,
+    className: newest.className,
+    imageDataUrl: newest.imageDataUrl,
+    updatedAt: newest.updatedAt,
+  });
 }

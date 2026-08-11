@@ -35,6 +35,20 @@ export type DollExpression = {
   browUpRight: number;
   lookX: number;
   lookY: number;
+  lookXLeft: number;
+  lookYLeft: number;
+  lookXRight: number;
+  lookYRight: number;
+  noseBridgeShiftX: number;
+  noseBridgeShiftY: number;
+  noseTipShiftX: number;
+  noseTipShiftY: number;
+  nostrilLeftFlare: number;
+  nostrilRightFlare: number;
+  upperLipLift: number;
+  lowerLipDrop: number;
+  mouthCornerLeftLift: number;
+  mouthCornerRightLift: number;
 };
 
 export const DOLL_MOTION_PRESETS = [
@@ -164,8 +178,16 @@ type ArtworkOwner = (typeof ARTWORK_OWNERS)[number];
 type OwnedSprites = Record<ArtworkOwner, RigSprite>;
 const OWNER_SEAM_BLEED_PX = 8;
 const FACE_REGION = { x: 236, y: 60, width: 128, height: 140 } as const;
-const FACE_MESH_X = [236, 252, 264, 276, 288, 300, 312, 324, 336, 348, 364] as const;
-const FACE_MESH_Y = [60, 78, 90, 100, 110, 120, 134, 146, 156, 170, 184, 200] as const;
+// Semantic anchors keep the regular mesh dense exactly where drawn eyes,
+// nose wings, lips, corners, and chin need to move independently.
+const FACE_MESH_X = [
+  236, 252, 255, 264, 270, 275, 276, 288, 289, 300, 311, 312, 324, 325, 330,
+  336, 345, 348, 364,
+] as const;
+const FACE_MESH_Y = [
+  60, 78, 88, 100, 111, 120, 126, 134, 139, 146, 148, 152, 158, 169, 170,
+  184, 200,
+] as const;
 let artworkOwnerMapCache: Uint8Array | null = null;
 
 const NEUTRAL_EXPRESSION: DollExpression = {
@@ -180,6 +202,20 @@ const NEUTRAL_EXPRESSION: DollExpression = {
   browUpRight: 0,
   lookX: 0,
   lookY: 0,
+  lookXLeft: 0,
+  lookYLeft: 0,
+  lookXRight: 0,
+  lookYRight: 0,
+  noseBridgeShiftX: 0,
+  noseBridgeShiftY: 0,
+  noseTipShiftX: 0,
+  noseTipShiftY: 0,
+  nostrilLeftFlare: 0,
+  nostrilRightFlare: 0,
+  upperLipLift: 0,
+  lowerLipDrop: 0,
+  mouthCornerLeftLift: 0,
+  mouthCornerRightLift: 0,
 };
 
 const REST_JOINTS: Record<JointName, Point> = {
@@ -562,7 +598,6 @@ function expressionFromFaceLandmarks(
   const lowerJawRatio =
     landmarkDistance(landmarks, 14, 152) / normalizedFaceWidth;
   const jawFromChin = clamp((lowerJawRatio - 0.17) / 0.2, 0, 1);
-  const jawOpen = clamp(mouthOpen * 0.82 + jawFromChin * 0.18, 0, 1);
   const upperLip = landmarks[13];
   const lowerLip = landmarks[14];
   const leftMouthCorner = landmarks[61];
@@ -573,25 +608,89 @@ function expressionFromFaceLandmarks(
     leftMouthCorner && rightMouthCorner
       ? (leftMouthCorner.y + rightMouthCorner.y) / 2
       : mouthCenterY;
-  const cornerLift = (mouthCenterY - mouthCornerY) / normalizedFaceWidth;
+  const upperLipLift =
+    upperLip && mouthWidth
+      ? clamp(((mouthCornerY - upperLip.y) / mouthWidth - 0.018) / 0.12, 0, 1)
+      : mouthOpen * 0.25;
+  const lowerLipDrop =
+    lowerLip && mouthWidth
+      ? clamp(((lowerLip.y - mouthCornerY) / mouthWidth - 0.012) / 0.16, 0, 1)
+      : mouthOpen * 0.75;
+  const mouthCornerLeftLift = leftMouthCorner
+    ? clamp((mouthCenterY - leftMouthCorner.y) / normalizedFaceWidth / 0.055, -1, 1)
+    : 0;
+  const mouthCornerRightLift = rightMouthCorner
+    ? clamp((mouthCenterY - rightMouthCorner.y) / normalizedFaceWidth / 0.055, -1, 1)
+    : 0;
+  const positiveCornerLift =
+    (Math.max(0, mouthCornerLeftLift) + Math.max(0, mouthCornerRightLift)) / 2;
   const smile = clamp(
-    (smileRatio - 0.28) / 0.16 + clamp((cornerLift - 0.004) / 0.045, 0, 1) * 0.35,
+    (smileRatio - 0.28) / 0.16 + positiveCornerLift * 0.35,
     0,
     1,
   );
+  const jawOpen = clamp(lowerLipDrop * 0.58 + jawFromChin * 0.42, 0, 1);
 
-  let lookX = 0;
-  let lookY = 0;
-  const leftIris = landmarks[468];
+  const solveEyeLook = (
+    irisIndex: number,
+    outerIndex: number,
+    innerIndex: number,
+    upperIndex: number,
+    lowerIndex: number,
+  ) => {
+    const iris = landmarks[irisIndex];
+    const outer = landmarks[outerIndex];
+    const inner = landmarks[innerIndex];
+    const upper = landmarks[upperIndex];
+    const lower = landmarks[lowerIndex];
+    if (!iris || !outer || !inner || !upper || !lower) return { x: 0, y: 0 };
+    const eyeSpan = Math.max(0.001, Math.hypot(inner.x - outer.x, inner.y - outer.y));
+    const eyeCenterX = (outer.x + inner.x) / 2;
+    const eyeCenterY = (upper.y + lower.y) / 2;
+    return {
+      x: clamp((iris.x - eyeCenterX) / eyeSpan * 3, -1, 1),
+      y: clamp((iris.y - eyeCenterY) / eyeSpan * 4, -1, 1),
+    };
+  };
+  const leftLook = solveEyeLook(468, 33, 133, 159, 145);
+  const rightLook = solveEyeLook(473, 362, 263, 386, 374);
+  const lookX = (leftLook.x + rightLook.x) / 2;
+  const lookY = (leftLook.y + rightLook.y) / 2;
+
   const leftEyeOuter = landmarks[33];
   const leftEyeInner = landmarks[133];
-  if (leftIris && leftEyeOuter && leftEyeInner) {
-    const eyeCenterX = (leftEyeOuter.x + leftEyeInner.x) / 2;
-    const eyeCenterY = (leftEyeOuter.y + leftEyeInner.y) / 2;
-    const eyeSpan = Math.max(0.001, leftEyeWidth);
-    lookX = clamp((leftIris.x - eyeCenterX) / eyeSpan * 3, -1, 1);
-    lookY = clamp((leftIris.y - eyeCenterY) / eyeSpan * 4, -1, 1);
-  }
+  const rightEyeInner = landmarks[362];
+  const rightEyeOuter = landmarks[263];
+  const noseBridge = landmarks[168];
+  const noseTip = landmarks[1];
+  const leftNostril = landmarks[98];
+  const rightNostril = landmarks[327];
+  const eyeCenterX =
+    leftEyeOuter && leftEyeInner && rightEyeInner && rightEyeOuter
+      ? (leftEyeOuter.x + leftEyeInner.x + rightEyeInner.x + rightEyeOuter.x) / 4
+      : noseBridge?.x ?? 0;
+  const eyeCenterY =
+    leftEyeOuter && leftEyeInner && rightEyeInner && rightEyeOuter
+      ? (leftEyeOuter.y + leftEyeInner.y + rightEyeInner.y + rightEyeOuter.y) / 4
+      : noseBridge?.y ?? 0;
+  const noseBridgeShiftX = noseBridge
+    ? clamp((noseBridge.x - eyeCenterX) / normalizedFaceWidth / 0.055, -1, 1)
+    : 0;
+  const noseBridgeShiftY = noseBridge
+    ? clamp(((noseBridge.y - eyeCenterY) / normalizedFaceWidth - 0.025) / 0.09, -1, 1)
+    : 0;
+  const noseTipShiftX = noseBridge && noseTip
+    ? clamp((noseTip.x - noseBridge.x) / normalizedFaceWidth / 0.065, -1, 1)
+    : 0;
+  const noseTipShiftY = noseBridge && noseTip
+    ? clamp(((noseTip.y - noseBridge.y) / normalizedFaceWidth - 0.18) / 0.12, -1, 1)
+    : 0;
+  const nostrilLeftFlare = noseTip && leftNostril
+    ? clamp((Math.abs(noseTip.x - leftNostril.x) / normalizedFaceWidth - 0.055) / 0.06, -1, 1)
+    : 0;
+  const nostrilRightFlare = noseTip && rightNostril
+    ? clamp((Math.abs(rightNostril.x - noseTip.x) / normalizedFaceWidth - 0.055) / 0.06, -1, 1)
+    : 0;
 
   return {
     blink: (blinkLeft + blinkRight) / 2,
@@ -605,6 +704,20 @@ function expressionFromFaceLandmarks(
     browUpRight,
     lookX,
     lookY,
+    lookXLeft: leftLook.x,
+    lookYLeft: leftLook.y,
+    lookXRight: rightLook.x,
+    lookYRight: rightLook.y,
+    noseBridgeShiftX,
+    noseBridgeShiftY,
+    noseTipShiftX,
+    noseTipShiftY,
+    nostrilLeftFlare,
+    nostrilRightFlare,
+    upperLipLift,
+    lowerLipDrop,
+    mouthCornerLeftLift,
+    mouthCornerRightLift,
   };
 }
 
@@ -621,6 +734,20 @@ function expressionFromMotion(expression: PaperDollExpression): DollExpression {
     browUpRight: expression.browUp,
     lookX: expression.lookX,
     lookY: expression.lookY,
+    lookXLeft: expression.lookX,
+    lookYLeft: expression.lookY,
+    lookXRight: expression.lookX,
+    lookYRight: expression.lookY,
+    noseBridgeShiftX: 0,
+    noseBridgeShiftY: 0,
+    noseTipShiftX: 0,
+    noseTipShiftY: 0,
+    nostrilLeftFlare: 0,
+    nostrilRightFlare: 0,
+    upperLipLift: expression.mouthOpen * 0.25,
+    lowerLipDrop: expression.mouthOpen * 0.75,
+    mouthCornerLeftLift: expression.smile,
+    mouthCornerRightLift: expression.smile,
   };
 }
 
@@ -644,6 +771,32 @@ function blendExpression(
       current.browUpRight + (next.browUpRight - current.browUpRight) * amount,
     lookX: current.lookX + (next.lookX - current.lookX) * amount,
     lookY: current.lookY + (next.lookY - current.lookY) * amount,
+    lookXLeft: current.lookXLeft + (next.lookXLeft - current.lookXLeft) * amount,
+    lookYLeft: current.lookYLeft + (next.lookYLeft - current.lookYLeft) * amount,
+    lookXRight: current.lookXRight + (next.lookXRight - current.lookXRight) * amount,
+    lookYRight: current.lookYRight + (next.lookYRight - current.lookYRight) * amount,
+    noseBridgeShiftX:
+      current.noseBridgeShiftX + (next.noseBridgeShiftX - current.noseBridgeShiftX) * amount,
+    noseBridgeShiftY:
+      current.noseBridgeShiftY + (next.noseBridgeShiftY - current.noseBridgeShiftY) * amount,
+    noseTipShiftX:
+      current.noseTipShiftX + (next.noseTipShiftX - current.noseTipShiftX) * amount,
+    noseTipShiftY:
+      current.noseTipShiftY + (next.noseTipShiftY - current.noseTipShiftY) * amount,
+    nostrilLeftFlare:
+      current.nostrilLeftFlare + (next.nostrilLeftFlare - current.nostrilLeftFlare) * amount,
+    nostrilRightFlare:
+      current.nostrilRightFlare + (next.nostrilRightFlare - current.nostrilRightFlare) * amount,
+    upperLipLift:
+      current.upperLipLift + (next.upperLipLift - current.upperLipLift) * amount,
+    lowerLipDrop:
+      current.lowerLipDrop + (next.lowerLipDrop - current.lowerLipDrop) * amount,
+    mouthCornerLeftLift:
+      current.mouthCornerLeftLift +
+      (next.mouthCornerLeftLift - current.mouthCornerLeftLift) * amount,
+    mouthCornerRightLift:
+      current.mouthCornerRightLift +
+      (next.mouthCornerRightLift - current.mouthCornerRightLift) * amount,
   };
 }
 
@@ -1277,28 +1430,46 @@ function regionInfluence(
 
 function warpFacialPoint(source: Point, expression: DollExpression): Point {
   const warped = { ...source };
-  const applyEye = (centerX: number, blink: number) => {
+  const applyEye = (
+    centerX: number,
+    blink: number,
+    lookX: number,
+    lookY: number,
+  ) => {
     const influence = regionInfluence(source, centerX, 111, 27, 18);
     warped.y += (111 - source.y) * blink * influence * 0.94;
-    warped.x += expression.lookX * 3 * influence * (1 - blink * 0.55);
-    warped.y += expression.lookY * 1.8 * influence * (1 - blink * 0.55);
+    warped.x += lookX * 3 * influence * (1 - blink * 0.55);
+    warped.y += lookY * 1.8 * influence * (1 - blink * 0.55);
   };
-  applyEye(270, expression.blinkLeft);
-  applyEye(330, expression.blinkRight);
+  applyEye(270, expression.blinkLeft, expression.lookXLeft, expression.lookYLeft);
+  applyEye(330, expression.blinkRight, expression.lookXRight, expression.lookYRight);
 
   const leftBrow = regionInfluence(source, 270, 88, 32, 15);
   const rightBrow = regionInfluence(source, 330, 88, 32, 15);
   warped.y -= expression.browUpLeft * leftBrow * 7;
   warped.y -= expression.browUpRight * rightBrow * 7;
 
-  const mouthInfluence = regionInfluence(source, 300, 152, 62, 24);
-  const lipAmount = clamp((source.y - 140) / 12, 0, 1);
-  const mouthX = (source.x - 300) / 62;
-  warped.x +=
-    (source.x - 300) * expression.smile * mouthInfluence * lipAmount * 0.1;
-  warped.y +=
-    (source.y - 152) * expression.mouthOpen * mouthInfluence * lipAmount * 0.7 -
-    Math.abs(mouthX) * expression.smile * mouthInfluence * lipAmount * 6.5;
+  const noseBridge = regionInfluence(source, 300, 126, 15, 22);
+  warped.x += expression.noseBridgeShiftX * noseBridge * 2.2;
+  warped.y += expression.noseBridgeShiftY * noseBridge * 1.8;
+  const noseTip = regionInfluence(source, 300, 139, 17, 11);
+  warped.x += expression.noseTipShiftX * noseTip * 3;
+  warped.y += expression.noseTipShiftY * noseTip * 2.5;
+  const leftNostril = regionInfluence(source, 289, 139, 11, 8);
+  const rightNostril = regionInfluence(source, 311, 139, 11, 8);
+  warped.x -= expression.nostrilLeftFlare * leftNostril * 2.4;
+  warped.x += expression.nostrilRightFlare * rightNostril * 2.4;
+
+  const upperLip = regionInfluence(source, 300, 148, 58, 12);
+  const lowerLip = regionInfluence(source, 300, 158, 58, 14);
+  warped.y -= expression.upperLipLift * upperLip * 5;
+  warped.y += expression.lowerLipDrop * lowerLip * 8;
+  const leftMouthCorner = regionInfluence(source, 275, 152, 15, 14);
+  const rightMouthCorner = regionInfluence(source, 325, 152, 15, 14);
+  warped.y -= expression.mouthCornerLeftLift * leftMouthCorner * 7;
+  warped.y -= expression.mouthCornerRightLift * rightMouthCorner * 7;
+  warped.x -= Math.max(0, expression.mouthCornerLeftLift) * leftMouthCorner * 3;
+  warped.x += Math.max(0, expression.mouthCornerRightLift) * rightMouthCorner * 3;
 
   const jawInfluence = regionInfluence(source, 300, 169, 64, 31);
   const lowerFaceAmount = clamp((source.y - 150) / 42, 0, 1);

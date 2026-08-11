@@ -13,6 +13,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -35,6 +36,7 @@ type Point = {
 export type CharacterCreatorProps = {
   initialArtwork?: string | null;
   initialArtworkKey?: string;
+  disabled?: boolean;
   onSendToStudio?: (dataUrl: string) => void | Promise<void>;
 };
 
@@ -172,6 +174,12 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
   context.setLineDash([]);
   context.beginPath();
   for (const [from, to] of bones) {
+    if (side === "front" && from === joints.head && to === joints.neck) {
+      // Keep the blue head bone out of the facial drawing area.
+      context.moveTo(300, 188);
+      context.lineTo(to.x, to.y);
+      continue;
+    }
     context.moveTo(from.x, from.y);
     context.lineTo(to.x, to.y);
   }
@@ -181,9 +189,9 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
     context.strokeStyle = "rgba(53, 58, 66, 0.34)";
     context.lineWidth = 1.5;
 
-    // Facial landmarks are display-only drawing anchors. Keeping the jaw,
-    // brows, eyes, nose, and mouth separate mirrors the regions animated by
-    // the paper-doll face mesh without baking any guide pixels into the PNG.
+    // Facial landmarks are display-only drawing anchors. Each semantic line
+    // matches a separately warped region in the paper-doll face mesh, without
+    // baking guide pixels into the transparent PNG.
     context.beginPath();
     context.moveTo(248, 78);
     context.bezierCurveTo(238, 110, 242, 156, 263, 176);
@@ -191,31 +199,62 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
     context.bezierCurveTo(358, 156, 362, 110, 352, 78);
     context.stroke();
 
+    // Left/right brows: outer, arch, and inner anchors remain independent.
     context.beginPath();
-    context.moveTo(255, 91);
-    context.quadraticCurveTo(270, 82, 285, 91);
-    context.moveTo(315, 91);
-    context.quadraticCurveTo(330, 82, 345, 91);
+    context.moveTo(254, 92);
+    context.quadraticCurveTo(269, 81, 286, 91);
+    context.moveTo(314, 91);
+    context.quadraticCurveTo(331, 81, 346, 92);
     context.stroke();
 
+    // Left/right eyes: separate upper/lower lids plus iris centers make blink
+    // and gaze strokes easier to place than a single oval.
     context.beginPath();
-    context.ellipse(270, 111, 14, 7, 0, 0, Math.PI * 2);
-    context.ellipse(330, 111, 14, 7, 0, 0, Math.PI * 2);
+    context.moveTo(255, 111);
+    context.quadraticCurveTo(270, 101, 285, 111);
+    context.quadraticCurveTo(270, 120, 255, 111);
+    context.moveTo(315, 111);
+    context.quadraticCurveTo(330, 101, 345, 111);
+    context.quadraticCurveTo(330, 120, 315, 111);
+    context.stroke();
+    context.beginPath();
+    context.arc(270, 111, 3.2, 0, Math.PI * 2);
+    context.arc(330, 111, 3.2, 0, Math.PI * 2);
     context.stroke();
 
+    // Nose bridge, tip, and left/right wings each have their own anchors.
     context.beginPath();
-    context.moveTo(300, 113);
-    context.quadraticCurveTo(296, 128, 294, 136);
-    context.quadraticCurveTo(300, 141, 306, 136);
+    context.moveTo(300, 116);
+    context.quadraticCurveTo(297, 126, 297, 134);
+    context.quadraticCurveTo(300, 139, 303, 134);
+    context.moveTo(288, 139);
+    context.quadraticCurveTo(294, 143, 300, 140);
+    context.quadraticCurveTo(306, 143, 312, 139);
     context.stroke();
 
+    // Upper lip, lower lip, and both corners are intentionally separate.
     context.beginPath();
-    context.moveTo(276, 151);
-    context.quadraticCurveTo(300, 139, 324, 151);
-    context.quadraticCurveTo(300, 166, 276, 151);
-    context.moveTo(284, 151);
-    context.quadraticCurveTo(300, 156, 316, 151);
+    context.moveTo(275, 152);
+    context.quadraticCurveTo(288, 148, 300, 143);
+    context.quadraticCurveTo(312, 148, 325, 152);
+    context.moveTo(275, 152);
+    context.quadraticCurveTo(300, 168, 325, 152);
+    context.moveTo(283, 153);
+    context.quadraticCurveTo(300, 158, 317, 153);
     context.stroke();
+
+    const semanticAnchors = [
+      [254, 92], [286, 91], [314, 91], [346, 92],
+      [255, 111], [285, 111], [315, 111], [345, 111],
+      [300, 116], [300, 140], [288, 139], [312, 139],
+      [275, 152], [300, 143], [300, 164], [325, 152], [300, 184],
+    ] as const;
+    context.fillStyle = "rgba(255, 107, 74, 0.58)";
+    for (const [x, y] of semanticAnchors) {
+      context.beginPath();
+      context.arc(x, y, 2.3, 0, Math.PI * 2);
+      context.fill();
+    }
   } else {
     context.strokeStyle = "rgba(53, 58, 66, 0.34)";
     context.lineWidth = 1.5;
@@ -235,6 +274,7 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
   context.strokeStyle = "rgba(77, 111, 230, 0.82)";
   context.lineWidth = 2.4;
   for (const joint of Object.values(joints)) {
+    if (side === "front" && joint === joints.head) continue;
     context.beginPath();
     context.arc(joint.x, joint.y, joint === joints.head ? 7 : 6, 0, Math.PI * 2);
     context.fill();
@@ -288,6 +328,7 @@ function drawStroke(
 export function CharacterCreator({
   initialArtwork,
   initialArtworkKey,
+  disabled = false,
   onSendToStudio,
 }: CharacterCreatorProps) {
   const displayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -307,6 +348,7 @@ export function CharacterCreator({
   const lastPointRef = useRef<Point | null>(null);
   const clearTimerRef = useRef<number | null>(null);
   const artworkImportGenerationRef = useRef(0);
+  const artworkImportPendingRef = useRef(false);
   const importedArtworkKeyRef = useRef<string | null>(null);
   const importedArtworkRef = useRef<string | null | undefined>(undefined);
 
@@ -320,9 +362,11 @@ export function CharacterCreator({
   });
   const [clearArmed, setClearArmed] = useState(false);
   const [sendingToStudio, setSendingToStudio] = useState(false);
+  const [importingArtwork, setImportingArtwork] = useState(false);
   const [status, setStatus] = useState(
     "앞면부터 자유롭게 그려 보세요. 몸 밖의 소매·치마·머리카락도 함께 움직여요.",
   );
+  const sideRef = useRef(side);
 
   const paintVisibleCanvas = useCallback((whichSide: CharacterSide) => {
     const displayCanvas = displayCanvasRef.current;
@@ -339,7 +383,11 @@ export function CharacterCreator({
     drawGuide(context, whichSide);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    sideRef.current = side;
+  }, [side]);
+
+  useLayoutEffect(() => {
     for (const whichSide of ["front", "back"] as const) {
       if (!drawingLayersRef.current[whichSide]) {
         const layer = document.createElement("canvas");
@@ -348,20 +396,20 @@ export function CharacterCreator({
         drawingLayersRef.current[whichSide] = layer;
       }
     }
-    paintVisibleCanvas(side);
+    paintVisibleCanvas(sideRef.current);
 
     return () => {
       if (clearTimerRef.current !== null) {
         window.clearTimeout(clearTimerRef.current);
       }
     };
-  }, [paintVisibleCanvas, side]);
+  }, [paintVisibleCanvas]);
 
   useEffect(() => {
     paintVisibleCanvas(side);
   }, [paintVisibleCanvas, side]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const importKey =
       initialArtworkKey?.trim() ||
       (initialArtwork ? `artwork:${initialArtwork}` : "empty-front-artwork");
@@ -374,25 +422,39 @@ export function CharacterCreator({
 
     const generation = artworkImportGenerationRef.current + 1;
     artworkImportGenerationRef.current = generation;
-    let resetTimer: number | null = null;
-    const image = initialArtwork ? new Image() : null;
+    const frontLayer = drawingLayersRef.current.front;
+    const backLayer = drawingLayersRef.current.back;
+    const frontContext = frontLayer?.getContext("2d");
+    const backContext = backLayer?.getContext("2d");
+    if (!frontLayer || !backLayer || !frontContext || !backContext) return;
 
+    // Commit the new editor session before the browser can paint or accept a
+    // pointer event. A slow PNG decode must never leave the previous slot's
+    // pixels available to the next slot or a new blank character.
+    artworkImportPendingRef.current = Boolean(initialArtwork);
+    drawingRef.current = false;
+    activePointerRef.current = null;
+    lastPointRef.current = null;
+    frontContext.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    backContext.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    const blankFront = frontContext.getImageData(
+      0,
+      0,
+      CANVAS_WIDTH,
+      CANVAS_HEIGHT,
+    );
+    undoHistoryRef.current = { front: [], back: [] };
+    redoHistoryRef.current = { front: [], back: [] };
+    setHistoryAvailability({
+      front: { undo: false, redo: false },
+      back: { undo: false, redo: false },
+    });
+    setImportingArtwork(Boolean(initialArtwork));
+    paintVisibleCanvas(sideRef.current);
+
+    const image = initialArtwork ? new Image() : null;
     const applyArtwork = (loadedImage: HTMLImageElement | null, failed = false) => {
       if (artworkImportGenerationRef.current !== generation) return;
-      const frontLayer = drawingLayersRef.current.front;
-      const backLayer = drawingLayersRef.current.back;
-      const frontContext = frontLayer?.getContext("2d");
-      const backContext = backLayer?.getContext("2d");
-      if (!frontLayer || !backLayer || !frontContext || !backContext) return;
-
-      frontContext.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      backContext.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      const blankFront = frontContext.getImageData(
-        0,
-        0,
-        CANVAS_WIDTH,
-        CANVAS_HEIGHT,
-      );
       if (loadedImage) {
         frontContext.drawImage(loadedImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       }
@@ -404,15 +466,19 @@ export function CharacterCreator({
       redoHistoryRef.current = { front: [], back: [] };
       importedArtworkKeyRef.current = importKey;
       importedArtworkRef.current = initialArtwork;
+      artworkImportPendingRef.current = false;
+      setImportingArtwork(false);
       setHistoryAvailability({
         front: { undo: Boolean(loadedImage), redo: false },
         back: { undo: false, redo: false },
       });
-      paintVisibleCanvas(side);
+      paintVisibleCanvas(sideRef.current);
       if (failed) {
         setStatus("저장된 캐릭터를 불러오지 못해 투명 캔버스로 시작했어요.");
       } else if (loadedImage) {
         setStatus("저장된 T-포즈 캐릭터를 불러왔어요. 그대로 이어 그릴 수 있어요.");
+      } else {
+        setStatus("새 투명 T-포즈 캔버스를 준비했어요.");
       }
     };
 
@@ -422,17 +488,16 @@ export function CharacterCreator({
       image.onerror = () => applyArtwork(null, true);
       image.src = initialArtwork;
     } else {
-      resetTimer = window.setTimeout(() => applyArtwork(null), 0);
+      applyArtwork(null);
     }
 
     return () => {
-      if (resetTimer !== null) window.clearTimeout(resetTimer);
       if (image) {
         image.onload = null;
         image.onerror = null;
       }
     };
-  }, [initialArtwork, initialArtworkKey, paintVisibleCanvas, side]);
+  }, [initialArtwork, initialArtworkKey, paintVisibleCanvas]);
 
   const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const canvas = displayCanvasRef.current;
@@ -452,9 +517,6 @@ export function CharacterCreator({
   };
 
   const saveUndoSnapshot = (whichSide: CharacterSide) => {
-    // A user's first stroke wins over a still-loading saved image so an older
-    // profile can never overwrite fresh work after an asynchronous decode.
-    artworkImportGenerationRef.current += 1;
     const layer = drawingLayersRef.current[whichSide];
     const context = layer?.getContext("2d");
     if (!layer || !context) return;
@@ -473,6 +535,15 @@ export function CharacterCreator({
     event: ReactPointerEvent<HTMLCanvasElement>,
   ) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (disabled || artworkImportPendingRef.current) {
+      event.preventDefault();
+      setStatus(
+        disabled
+          ? "캐릭터 보관함 작업이 끝난 뒤 이어 그릴 수 있어요."
+          : "저장된 캐릭터를 불러오는 중이에요. 잠시 후 이어 그려 주세요.",
+      );
+      return;
+    }
 
     const layer = drawingLayersRef.current[side];
     const context = layer?.getContext("2d");
@@ -505,6 +576,15 @@ export function CharacterCreator({
   const handlePointerMove = (
     event: ReactPointerEvent<HTMLCanvasElement>,
   ) => {
+    if (disabled) {
+      drawingRef.current = false;
+      activePointerRef.current = null;
+      lastPointRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (
       !drawingRef.current ||
       activePointerRef.current !== event.pointerId ||
@@ -542,6 +622,7 @@ export function CharacterCreator({
   };
 
   const switchSide = (nextSide: CharacterSide) => {
+    if (disabled) return;
     drawingRef.current = false;
     activePointerRef.current = null;
     lastPointRef.current = null;
@@ -555,6 +636,7 @@ export function CharacterCreator({
   };
 
   const restoreSnapshot = (direction: "undo" | "redo") => {
+    if (disabled || artworkImportPendingRef.current) return;
     const layer = drawingLayersRef.current[side];
     const context = layer?.getContext("2d");
     if (!layer || !context) return;
@@ -587,6 +669,14 @@ export function CharacterCreator({
   };
 
   const handleClear = () => {
+    if (disabled || artworkImportPendingRef.current) {
+      setStatus(
+        disabled
+          ? "캐릭터 보관함 작업이 끝난 뒤 지울 수 있어요."
+          : "저장된 캐릭터를 불러오는 중이에요. 잠시 후 지울 수 있어요.",
+      );
+      return;
+    }
     if (!clearArmed) {
       setClearArmed(true);
       setStatus("한 번 더 누르면 현재 면의 그림을 지워요. 실행 취소도 가능합니다.");
@@ -629,6 +719,14 @@ export function CharacterCreator({
   };
 
   const downloadPng = () => {
+    if (disabled || artworkImportPendingRef.current) {
+      setStatus(
+        disabled
+          ? "캐릭터 보관함 작업이 끝난 뒤 PNG로 저장할 수 있어요."
+          : "저장된 캐릭터를 모두 불러온 뒤 PNG로 저장할 수 있어요.",
+      );
+      return;
+    }
     const dataUrl = createExportDataUrl(side);
     if (!dataUrl) return;
 
@@ -644,6 +742,14 @@ export function CharacterCreator({
   };
 
   const sendToStudio = async () => {
+    if (disabled || artworkImportPendingRef.current) {
+      setStatus(
+        disabled
+          ? "캐릭터 보관함 작업이 끝난 뒤 스튜디오로 보낼 수 있어요."
+          : "저장된 캐릭터를 모두 불러온 뒤 스튜디오로 보낼 수 있어요.",
+      );
+      return;
+    }
     const dataUrl = createExportDataUrl("front");
     if (!dataUrl || sendingToStudio) return;
     setSendingToStudio(true);
@@ -663,21 +769,10 @@ export function CharacterCreator({
 
   const canUndo = historyAvailability[side].undo;
   const canRedo = historyAvailability[side].redo;
+  const editorDisabled = disabled || importingArtwork;
 
   return (
-    <section className={styles.creator} aria-labelledby="character-creator-title">
-      <header className={styles.heading}>
-        <span className={styles.eyebrow}>CHARACTER MAKER</span>
-        <div>
-          <h2 id="character-creator-title">내 손으로 만드는 캐릭터</h2>
-          <p>
-            투명 캔버스의 스켈레톤 위에 몸과 옷을 자유롭게 그려 보세요. 실루엣
-            밖의 소매·치마·머리카락도 가까운 관절을 따라 움직이고, 얼굴의 각
-            부위는 카메라 표정을 따라갑니다.
-          </p>
-        </div>
-      </header>
-
+    <section className={styles.creator} aria-label="캐릭터 만들기">
       <div className={styles.editorGrid}>
         <aside className={styles.controlPanel} aria-label="그리기 도구">
           <div className={styles.controlGroup}>
@@ -688,6 +783,7 @@ export function CharacterCreator({
                 className={side === "front" ? styles.segmentActive : ""}
                 aria-pressed={side === "front"}
                 onClick={() => switchSide("front")}
+                disabled={editorDisabled}
               >
                 앞면
               </button>
@@ -696,6 +792,7 @@ export function CharacterCreator({
                 className={side === "back" ? styles.segmentActive : ""}
                 aria-pressed={side === "back"}
                 onClick={() => switchSide("back")}
+                disabled={editorDisabled}
               >
                 뒷면
               </button>
@@ -712,6 +809,7 @@ export function CharacterCreator({
                 }`}
                 aria-pressed={tool === "pencil"}
                 onClick={() => setTool("pencil")}
+                disabled={editorDisabled}
               >
                 <Pencil size={18} strokeWidth={2} aria-hidden="true" />
                 연필
@@ -723,6 +821,7 @@ export function CharacterCreator({
                 }`}
                 aria-pressed={tool === "eraser"}
                 onClick={() => setTool("eraser")}
+                disabled={editorDisabled}
               >
                 <Eraser size={18} strokeWidth={2} aria-hidden="true" />
                 지우개
@@ -734,6 +833,7 @@ export function CharacterCreator({
                 }`}
                 aria-pressed={tool === "fill"}
                 onClick={() => setTool("fill")}
+                disabled={editorDisabled}
               >
                 <PaintBucket size={18} strokeWidth={2} aria-hidden="true" />
                 바탕 채우기
@@ -741,7 +841,7 @@ export function CharacterCreator({
             </div>
           </div>
 
-          <fieldset className={styles.controlGroup}>
+          <fieldset className={styles.controlGroup} disabled={editorDisabled}>
             <legend className={styles.groupLabel}>색상</legend>
             <div className={styles.palette}>
               {PALETTE.map((paletteColor) => (
@@ -775,7 +875,7 @@ export function CharacterCreator({
             </div>
           </fieldset>
 
-          <fieldset className={styles.controlGroup}>
+          <fieldset className={styles.controlGroup} disabled={editorDisabled}>
             <legend className={styles.groupLabel}>선 굵기</legend>
             <div className={styles.sizePicker}>
               {BRUSH_SIZES.map((size) => (
@@ -803,7 +903,7 @@ export function CharacterCreator({
             <div className={styles.historyRow}>
               <button
                 type="button"
-                disabled={!canUndo}
+                disabled={!canUndo || editorDisabled}
                 onClick={() => restoreSnapshot("undo")}
                 aria-label="실행 취소"
               >
@@ -812,7 +912,7 @@ export function CharacterCreator({
               </button>
               <button
                 type="button"
-                disabled={!canRedo}
+                disabled={!canRedo || editorDisabled}
                 onClick={() => restoreSnapshot("redo")}
                 aria-label="다시 실행"
               >
@@ -826,6 +926,7 @@ export function CharacterCreator({
                 clearArmed ? styles.clearArmed : ""
               }`}
               onClick={handleClear}
+              disabled={editorDisabled}
             >
               <Trash2 size={17} aria-hidden="true" />
               {clearArmed ? "한 번 더 눌러 지우기" : "현재 면 모두 지우기"}
@@ -835,10 +936,39 @@ export function CharacterCreator({
           <div className={styles.tipBox}>
             <span aria-hidden="true">✦</span>
             <p>
-              팔은 수평 T-포즈를 따라 그리세요. 눈·눈썹·코·입·턱 가이드에 맞추면
-              깜박임, 눈썹, 미소, 입 벌림과 턱 움직임이 각각 반영돼요. 모든
-              가이드와 체크무늬는 결과물에 저장되지 않습니다.
+              팔은 수평 T-포즈를 따라 그리세요. 앞면 얼굴은 주황 점을 기준으로
+              좌우 눈·눈썹, 콧대·코끝·콧방울, 윗입술·아랫입술·양 입꼬리·턱을
+              나눠 그리면 각 표정이 더 정확히 반영돼요.
+              모든 가이드와 체크무늬는 결과물에 저장되지 않습니다.
             </p>
+          </div>
+
+          <div className={styles.panelActions} aria-label="캐릭터 저장">
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={downloadPng}
+              disabled={editorDisabled}
+            >
+              <Download size={18} aria-hidden="true" />
+              현재 면 PNG 저장
+            </button>
+            <button
+              type="button"
+              className={styles.sendButton}
+              onClick={() => void sendToStudio()}
+              disabled={sendingToStudio || editorDisabled}
+              aria-busy={sendingToStudio || editorDisabled}
+            >
+              <Send size={18} aria-hidden="true" />
+              {disabled
+                ? "보관함 처리 중…"
+                : importingArtwork
+                ? "캐릭터 불러오는 중…"
+                : sendingToStudio
+                  ? "저장 중…"
+                  : "저장하고 스튜디오로"}
+            </button>
           </div>
         </aside>
 
@@ -849,9 +979,16 @@ export function CharacterCreator({
               T-포즈 · {side === "front" ? "앞면 편집 중" : "뒷면 편집 중"}
             </span>
             <span className={styles.guideNotice}>
-              투명 원본 · T-포즈 관절·표정 가이드는 저장되지 않아요
+              투명 원본 · T-포즈 관절·얼굴 가이드는 저장되지 않아요
             </span>
           </div>
+
+          {side === "front" ? (
+            <p id="character-face-guide-help" className={styles.faceGuideHint} role="note">
+              <strong>얼굴 가이드:</strong> 주황 점을 잇듯 좌우 눈·눈썹을 따로 그리고,
+              코 4지점과 윗입술·아랫입술·양 입꼬리·턱선을 분리해 주세요.
+            </p>
+          ) : null}
 
           <div className={styles.canvasFrame}>
             <canvas
@@ -860,7 +997,13 @@ export function CharacterCreator({
               width={CANVAS_WIDTH}
               height={CANVAS_HEIGHT}
               aria-label={`${side === "front" ? "앞면" : "뒷면"} 캐릭터 그리기 영역`}
-              aria-describedby="character-canvas-help"
+              aria-busy={editorDisabled}
+              aria-disabled={editorDisabled}
+              aria-describedby={
+                side === "front"
+                  ? "character-face-guide-help character-canvas-help"
+                  : "character-canvas-help"
+              }
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={finishStroke}
@@ -881,22 +1024,6 @@ export function CharacterCreator({
             {status}
           </div>
 
-          <div className={styles.actions}>
-            <button type="button" className={styles.downloadButton} onClick={downloadPng}>
-              <Download size={19} aria-hidden="true" />
-              현재 면 PNG 저장
-            </button>
-            <button
-              type="button"
-              className={styles.sendButton}
-              onClick={() => void sendToStudio()}
-              disabled={sendingToStudio}
-              aria-busy={sendingToStudio}
-            >
-              <Send size={19} aria-hidden="true" />
-              {sendingToStudio ? "저장 중…" : "저장하고 스튜디오로"}
-            </button>
-          </div>
         </div>
       </div>
     </section>

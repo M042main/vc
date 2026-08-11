@@ -7,7 +7,7 @@ const cssUrl = new URL("../app/globals.css", import.meta.url);
 test("keeps the fixed mobile mode switch clear of gallery actions and safe areas", async () => {
   const css = await readFile(cssUrl, "utf8");
   const mobile = css.match(
-    /@media\s*\(max-width:\s*900px\)\s*\{([\s\S]*?)\n\}/,
+    /@media\s*\(max-width:\s*(?:900|1120)px\)\s*\{([\s\S]*?)\n\}/,
   )?.[1];
 
   assert.ok(mobile, "the mobile shell media query must exist");

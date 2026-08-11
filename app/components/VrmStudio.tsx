@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   Check,
@@ -316,13 +316,35 @@ export type VrmStudioCapture = {
   fileName: string;
 };
 
+export type VrmStudioCreatedCharacter = {
+  id: string;
+  name: string;
+  artwork: string;
+};
+
+export interface VrmStudioProps {
+  /** Legacy single-character input. Prefer createdCharacters for new callers. */
+  artwork?: string | null;
+  /** Up to three locally created paper-doll characters shown in the stage picker. */
+  createdCharacters?: readonly VrmStudioCreatedCharacter[];
+  /** A string selects a drawing; null selects VRM; undefined leaves selection local. */
+  activeCreatedCharacterId?: string | null;
+  onSelectCreatedCharacter?: (id: string) => void;
+  onSelectVrm?: () => void;
+  onCaptureReady?: (capture: VrmStudioCapture) => void;
+}
+
+const MAX_CREATED_CHARACTER_OPTIONS = 3;
+const LEGACY_ARTWORK_ID = "__legacy-vrm-studio-artwork__";
+
 export function VrmStudio({
   artwork,
+  createdCharacters,
+  activeCreatedCharacterId,
+  onSelectCreatedCharacter,
+  onSelectVrm,
   onCaptureReady,
-}: {
-  artwork?: string | null;
-  onCaptureReady?: (capture: VrmStudioCapture) => void;
-}) {
+}: VrmStudioProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backgroundInputRef = useRef<HTMLInputElement>(null);
@@ -356,6 +378,9 @@ export function VrmStudio({
   const frameInFlightRef = useRef(false);
   const modelLoadSessionRef = useRef(0);
   const modelInteractionRef = useRef(0);
+  const characterSelectionSessionRef = useRef(0);
+  const controlledCreatedCharacterIdRef =
+    useRef(activeCreatedCharacterId);
   const restoreModelLoaderRef = useRef<
     (file?: File, options?: { restored?: boolean }) => Promise<void>
   >(async () => undefined);
@@ -404,19 +429,69 @@ export function VrmStudio({
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [animationSpeed, setAnimationSpeed] = useState(1);
   const [preferVrm, setPreferVrm] = useState(false);
+  const [selectedCreatedCharacterId, setSelectedCreatedCharacterId] =
+    useState<string | null>(activeCreatedCharacterId ?? null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  const artworkReady = Boolean(artwork);
-  const paperDollActive = artworkReady && !preferVrm;
+  const selectableCreatedCharacters = useMemo(() => {
+    const seen = new Set<string>();
+    const options: VrmStudioCreatedCharacter[] = [];
+    for (const character of createdCharacters ?? []) {
+      const id = character.id;
+      if (!id.trim() || !character.artwork || seen.has(id)) continue;
+      seen.add(id);
+      options.push({
+        id,
+        name: character.name.trim() || `그림 캐릭터 ${options.length + 1}`,
+        artwork: character.artwork,
+      });
+      if (options.length === MAX_CREATED_CHARACTER_OPTIONS) break;
+    }
+    if (options.length > 0 || !artwork) return options;
+    return [
+      {
+        id: LEGACY_ARTWORK_ID,
+        name: "내가 그린 캐릭터",
+        artwork,
+      },
+    ];
+  }, [artwork, createdCharacters]);
+  const effectiveCreatedCharacterId =
+    activeCreatedCharacterId === undefined
+      ? selectedCreatedCharacterId
+      : activeCreatedCharacterId;
+  const vrmPreferred =
+    activeCreatedCharacterId === undefined
+      ? preferVrm
+      : activeCreatedCharacterId === null;
+  const explicitlySelectedCreatedCharacter = effectiveCreatedCharacterId
+    ? selectableCreatedCharacters.find(
+        ({ id }) => id === effectiveCreatedCharacterId,
+      ) ?? null
+    : null;
+  const selectedCreatedCharacter =
+    explicitlySelectedCreatedCharacter ??
+    (effectiveCreatedCharacterId === null && vrmPreferred
+      ? null
+      : selectableCreatedCharacters[0] ?? null);
+  const activeArtwork = selectedCreatedCharacter?.artwork ?? null;
+  const artworkReady = Boolean(activeArtwork);
+  const paperDollActive = artworkReady && !vrmPreferred;
   const modelReady = modelState === "ready" && !paperDollActive;
-  const characterReady = modelReady || artworkReady;
+  const vrmAvailable = modelState === "ready";
+  const characterReady = modelReady || paperDollActive;
   const trackingRunning = trackingState === "running";
   const displayModelName = modelReady
     ? modelName
-    : artworkReady
-      ? "내가 그린 캐릭터"
+    : paperDollActive
+      ? selectedCreatedCharacter?.name ?? "내가 그린 캐릭터"
       : modelName;
+
+  useEffect(() => {
+    controlledCreatedCharacterIdRef.current = activeCreatedCharacterId;
+    characterSelectionSessionRef.current += 1;
+  }, [activeCreatedCharacterId]);
 
   const showToast = useCallback((message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -787,10 +862,10 @@ export function VrmStudio({
 
   useEffect(() => {
     if (mannequinRef.current) {
-      mannequinRef.current.visible = !modelReady && !artworkReady;
+      mannequinRef.current.visible = !modelReady && !paperDollActive;
     }
     if (vrmRef.current) vrmRef.current.scene.visible = modelReady;
-  }, [artworkReady, modelReady]);
+  }, [modelReady, paperDollActive]);
 
   useEffect(() => {
     paperDollActiveRef.current = paperDollActive;
@@ -1004,6 +1079,9 @@ export function VrmStudio({
       stopVrmAnimation();
       paperDollRef.current?.pauseAnimation();
       setAnimationPlaying(false);
+      const selectionSession = options.restored
+        ? characterSelectionSessionRef.current
+        : ++characterSelectionSessionRef.current;
       const loadSession = ++modelLoadSessionRef.current;
 
       const scene = sceneRef.current;
@@ -1045,7 +1123,18 @@ export function VrmStudio({
         vrmMotionPlayerRef.current = motionPlayer;
         vrmLegLockRef.current = legLock;
         vrmRef.current = loaded.vrm;
-        setPreferVrm(true);
+        const selectionIsCurrent =
+          characterSelectionSessionRef.current === selectionSession;
+        const controlledCharacterId =
+          controlledCreatedCharacterIdRef.current;
+        const shouldActivateVrm =
+          selectionIsCurrent &&
+          (!options.restored || controlledCharacterId == null);
+        if (shouldActivateVrm) {
+          setSelectedCreatedCharacterId(null);
+          setPreferVrm(true);
+          if (!options.restored) onSelectVrm?.();
+        }
         mannequinRef.current!.visible = false;
 
         if (previous) {
@@ -1058,7 +1147,11 @@ export function VrmStudio({
         setModelSize(`${(file.size / 1024 / 1024).toFixed(1)} MB · VRM 캐릭터`);
         setModelState("ready");
         if (options.restored) {
-          showToast("이 기기에 저장한 VRM과 무대 설정을 복원했어요.");
+          showToast(
+            shouldActivateVrm
+              ? "이 기기에 저장한 VRM과 무대 설정을 복원했어요."
+              : "저장한 VRM을 복원했어요. 캐릭터 선택에서 언제든 전환할 수 있어요.",
+          );
         } else {
           showToast("VRM을 불러왔어요. 이제 카메라를 연결해 보세요.");
           void savePersistedVrmFile(file).then((persisted) => {
@@ -1082,11 +1175,79 @@ export function VrmStudio({
     [
       exitStagePictureInPicture,
       isRecording,
+      onSelectVrm,
       showToast,
       stopTracking,
       stopVrmAnimation,
     ],
   );
+
+  const selectCreatedCharacter = useCallback(
+    async (character: VrmStudioCreatedCharacter) => {
+      if (
+        paperDollActive &&
+        selectedCreatedCharacter?.id === character.id
+      ) return;
+      if (isRecording || recordingBusyRef.current) {
+        showToast("애니메이션 저장이 끝난 뒤 캐릭터를 바꿔 주세요.");
+        return;
+      }
+      const selectionSession = ++characterSelectionSessionRef.current;
+      await exitStagePictureInPicture();
+      if (characterSelectionSessionRef.current !== selectionSession) return;
+
+      stopVrmAnimation();
+      paperDollRef.current?.pauseAnimation();
+      setAnimationPlaying(false);
+      setSelectedCreatedCharacterId(character.id);
+      setPreferVrm(false);
+      if (character.id !== LEGACY_ARTWORK_ID) {
+        onSelectCreatedCharacter?.(character.id);
+      }
+      showToast(`${character.name} 캐릭터로 전환했어요.`);
+    },
+    [
+      exitStagePictureInPicture,
+      isRecording,
+      onSelectCreatedCharacter,
+      paperDollActive,
+      selectedCreatedCharacter?.id,
+      showToast,
+      stopVrmAnimation,
+    ],
+  );
+
+  const selectVrmCharacter = useCallback(async () => {
+    if (modelReady) return;
+    if (!vrmAvailable || !vrmRef.current) {
+      showToast("먼저 VRM 파일을 선택해 주세요.");
+      return;
+    }
+    if (isRecording || recordingBusyRef.current) {
+      showToast("애니메이션 저장이 끝난 뒤 캐릭터를 바꿔 주세요.");
+      return;
+    }
+    const selectionSession = ++characterSelectionSessionRef.current;
+    await exitStagePictureInPicture();
+    if (characterSelectionSessionRef.current !== selectionSession) return;
+
+    paperDollRef.current?.pauseAnimation();
+    stopVrmAnimation();
+    setAnimationPlaying(false);
+    setSelectedCreatedCharacterId(null);
+    setPreferVrm(true);
+    onSelectVrm?.();
+    showToast(`${modelName} VRM으로 전환했어요.`);
+  }, [
+    exitStagePictureInPicture,
+    isRecording,
+    modelName,
+    modelReady,
+    onSelectVrm,
+    showToast,
+    stopVrmAnimation,
+    vrmAvailable,
+  ]);
 
   useEffect(() => {
     restoreModelLoaderRef.current = handleModelFile;
@@ -1764,7 +1925,7 @@ export function VrmStudio({
             ) : (
               <FileUp size={16} />
             )}
-            {modelReady ? "다른 VRM 선택" : "VRM 파일 선택"}
+            {vrmAvailable ? "다른 VRM 선택" : "VRM 파일 선택"}
           </button>
           <button
             className={styles.secondaryButton}
@@ -1900,10 +2061,10 @@ export function VrmStudio({
           aria-hidden={paperDollActive}
           aria-label="3D 캐릭터 미리보기"
         />
-        {paperDollActive && artwork ? (
+        {paperDollActive && activeArtwork ? (
           <PaperDollStage
             ref={paperDollRef}
-            artwork={artwork}
+            artwork={activeArtwork}
             backgroundColor={stageColor}
             backgroundImage={stageBackgroundImage}
             backgroundFit={stageBackgroundFit}
@@ -2066,27 +2227,68 @@ export function VrmStudio({
           <CircleUserRound size={17} aria-hidden="true" />
         </div>
 
-        <div className={styles.modelCard}>
-          <div className={styles.modelThumb}>
-            {paperDollActive && artwork ? (
-              // The paper-doll artwork is generated locally by CharacterCreator.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={artwork} alt="직접 그린 캐릭터 도안" />
-            ) : (
+        <span className={styles.sectionLabel}>캐릭터 선택</span>
+        {vrmAvailable || selectableCreatedCharacters.length > 0 ? (
+          <div className={styles.characterChoices} role="group" aria-label="무대 캐릭터 선택">
+            {vrmAvailable ? (
+              <button
+                type="button"
+                className={styles.characterChoice}
+                data-selected={modelReady}
+                aria-pressed={modelReady}
+                aria-label={`${modelName} VRM 선택`}
+                disabled={isRecording}
+                onClick={() => void selectVrmCharacter()}
+              >
+                <span className={styles.characterChoiceThumb} data-vrm="true">
+                  <CircleUserRound size={25} aria-hidden="true" />
+                  <small>VRM</small>
+                </span>
+                <span className={styles.characterChoiceInfo}>
+                  <strong>{modelName}</strong>
+                  <small>{modelSize || "3D 캐릭터"}</small>
+                </span>
+              </button>
+            ) : null}
+            {selectableCreatedCharacters.map((character) => {
+              const selected =
+                paperDollActive &&
+                selectedCreatedCharacter?.id === character.id;
+              return (
+                <button
+                  key={character.id}
+                  type="button"
+                  className={styles.characterChoice}
+                  data-selected={selected}
+                  aria-pressed={selected}
+                  aria-label={`${character.name} 그림 캐릭터 선택`}
+                  disabled={isRecording || modelState === "loading"}
+                  onClick={() => void selectCreatedCharacter(character)}
+                >
+                  <span className={styles.characterChoiceThumb}>
+                    {/* CharacterCreator exports a local transparent PNG Data URL. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={character.artwork} alt="" />
+                  </span>
+                  <span className={styles.characterChoiceInfo}>
+                    <strong>{character.name}</strong>
+                    <small>그림 캐릭터</small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className={styles.modelCard}>
+            <div className={styles.modelThumb}>
               <ImageIcon size={27} aria-hidden="true" />
-            )}
+            </div>
+            <div className={styles.modelInfo}>
+              <strong>{displayModelName}</strong>
+              <span>VRM을 올리거나 그림 캐릭터를 만들어 주세요</span>
+            </div>
           </div>
-          <div className={styles.modelInfo}>
-            <strong>{displayModelName}</strong>
-            <span>
-              {modelReady
-                ? modelSize
-                : artworkReady
-                  ? "내가 그린 도안 · 트래킹 준비됨"
-                  : "VRM을 선택해 주세요"}
-            </span>
-          </div>
-        </div>
+        )}
 
         <span className={styles.sectionLabel}>Stage background</span>
         <div className={styles.swatches} aria-label="무대 배경색">

@@ -81,7 +81,7 @@ test("uses one clear horizontal T-pose in the authoring guide and live rig", asy
   assert.match(silhouette, /lineTo\(552, 214\)/);
   assert.match(silhouette, /bezierCurveTo\(22, 223, 32, 214, 48, 214\)/);
   assert.match(creator, /T-포즈 · \{side === "front"/);
-  assert.match(creator, /T-포즈 관절·표정 가이드는 저장되지 않아요/);
+  assert.match(creator, /T-포즈 관절·얼굴 가이드는 저장되지 않아요/);
   assert.match(creator, /T-포즈 안팎 어디든 그릴 수 있으며/);
 });
 

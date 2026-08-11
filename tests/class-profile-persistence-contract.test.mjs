@@ -7,6 +7,11 @@ const files = {
   firebase: new URL("../app/lib/firebaseGallery.ts", import.meta.url),
   profile: new URL("../app/lib/visitorProfile.ts", import.meta.url),
   onboarding: new URL("../app/components/ClassOnboarding.tsx", import.meta.url),
+  onboardingCss: new URL(
+    "../app/components/ClassOnboarding.module.css",
+    import.meta.url,
+  ),
+  globals: new URL("../app/globals.css", import.meta.url),
   gallery: new URL("../app/components/OnlineGallery.tsx", import.meta.url),
   page: new URL("../app/page.tsx", import.meta.url),
   classesRoute: new URL("../app/api/gallery/classes/route.ts", import.meta.url),
@@ -117,11 +122,55 @@ test("wires the active profile through onboarding, artwork restore, creator save
   assert.match(page, /useVisitorProfile\s*\(\s*\)/);
   assert.match(page, /const\s+profileGateBlocking\s*=\s*!profile\s*&&\s*profileReady/);
   assert.match(page, /blocking=\{profileGateBlocking\}/);
-  assert.match(page, /onProfileChange=\{setProfile\}/);
-  assert.match(page, /loadLatestCharacterArtwork\(profile\)/);
-  assert.match(page, /saveLatestCharacterArtwork\(profile,\s*dataUrl\)/);
+  assert.match(page, /onProfileChange=\{[A-Za-z_$][A-Za-z0-9_$]*\}/);
+  assert.match(page, /loadSavedCharacterSlots\(profile\)/);
+  assert.match(page, /saveCharacterSlot\(profile,\s*slotId,\s*dataUrl\)/);
   assert.match(page, /characterArtworkOwnerKey\s*===\s*characterArtworkKey/);
   assert.match(page, /initialArtwork=\{activeCharacterArtwork\}/);
-  assert.match(page, /initialArtworkKey=\{characterArtworkKey\}/);
+  assert.match(page, /initialArtworkKey=\{characterEditorKey\}/);
   assert.match(page, /<OnlineGallery[\s\S]{0,400}profile=\{profile\}/);
+});
+
+test("moves the active student profile into accessible header actions", async () => {
+  const { onboarding, onboardingCss, globals, page } = await sources();
+  const profileActions = onboarding.slice(
+    onboarding.indexOf("export function VisitorProfileActions"),
+    onboarding.indexOf("export interface ClassOnboardingProps"),
+  );
+
+  assert.match(page, /<div className=["']header-actions["']>[\s\S]{0,500}<VisitorProfileActions/);
+  assert.match(page, /<VisitorProfileActions[\s\S]{0,180}profile=\{profile\}[\s\S]{0,180}onProfileChange=\{[A-Za-z_$][A-Za-z0-9_$]*\}/);
+  assert.match(page, /\{profileReady\s*&&\s*!profile\s*\?\s*\([\s\S]{0,120}<ClassOnboarding/);
+  assert.doesNotMatch(page, /className=["']profile-shell["']/);
+  assert.match(
+    page,
+    /<div className=["']header-actions["']>[\s\S]{0,900}!profileGateBlocking[\s\S]{0,100}renderAdminAccessButton/,
+  );
+  assert.match(page, /blockingModalControl=\{renderAdminAccessButton\(true\)\}/);
+
+  assert.match(profileActions, /profile\.className/);
+  assert.match(profileActions, /profile\.name/);
+  assert.match(profileActions, /aria-haspopup=["']dialog["']/);
+  assert.match(profileActions, /role=["']dialog["'][\s\S]{0,100}aria-modal=["']true["']/);
+  assert.match(profileActions, /aria-labelledby=\{titleId\}/);
+  assert.match(profileActions, /inputRef\.current\?\.focus\(\)[\s\S]{0,80}select\(\)/);
+  assert.match(profileActions, /event\.key\s*===\s*["']Escape["'][\s\S]{0,120}closeDialog\(\)/);
+  assert.match(profileActions, /event\.key\s*!==\s*["']Tab["']/);
+  assert.match(profileActions, /triggerRef\.current\?\.focus\(\)/);
+
+  assert.match(profileActions, /createVisitorProfile\(\{\s*\.\.\.profile,\s*name:\s*nameDraft\s*\}\)/);
+  assert.doesNotMatch(profileActions, /<select|classIdDraft|setClassIdDraft/);
+  assert.match(profileActions, /onProfileChange\(null\)/);
+  assert.match(profileActions, /학생 로그아웃/);
+  assert.match(profileActions, /aria-label=["']학생 프로필 로그아웃["']/);
+
+  assert.match(onboarding, /\{!profile\s*&&\s*!adminOnly\s*\?\s*\(/);
+  assert.match(page, /adminOnly[\s\S]{0,100}onProfileChange=\{[A-Za-z_$][A-Za-z0-9_$]*\}/);
+  assert.match(onboarding, /if\s*\(\s*!currentClass\s*\)[\s\S]{0,80}setProfile\(null\)/);
+  assert.match(onboarding, /onError:\s*\(\)\s*=>\s*undefined/);
+
+  assert.match(globals, /\.header-actions\s*\{[\s\S]{0,200}justify-self:\s*end/);
+  assert.match(globals, /\.admin-access-button\[data-gate-control=["']true["']\]/);
+  assert.match(onboardingCss, /@media\s*\(max-width:\s*620px\)[\s\S]*\.profileIdentity/);
+  assert.match(onboardingCss, /\.profileDialogBackdrop[\s\S]{0,100}position:\s*fixed/);
 });

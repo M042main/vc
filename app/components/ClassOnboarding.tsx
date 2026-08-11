@@ -1,9 +1,19 @@
 "use client";
 
-import { LoaderCircle, Plus, School, Trash2, UserRound } from "lucide-react";
+import {
+  LoaderCircle,
+  LogOut,
+  Pencil,
+  Plus,
+  School,
+  Trash2,
+  UserRound,
+  X,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -46,7 +56,233 @@ export function useVisitorProfile() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!profileReady || !profile || profile.guest || !profile.classId) return;
+    let active = true;
+    let unsubscribe: () => void = () => undefined;
+    const timer = window.setTimeout(() => {
+      if (!active) return;
+      unsubscribe = subscribeClassRecords({
+        onData: (classes) => {
+          if (!active) return;
+          const currentClass = classes.find((item) => item.id === profile.classId);
+          if (!currentClass) {
+            setProfile(null);
+            return;
+          }
+          if (currentClass.name !== profile.className) {
+            setProfile({ ...profile, className: currentClass.name });
+          }
+        },
+        // A failed read must never be mistaken for a deleted class.
+        onError: () => undefined,
+      });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [profile, profileReady, setProfile]);
+
   return { profile, profileReady, setProfile } as const;
+}
+
+export interface VisitorProfileActionsProps {
+  profile: VisitorProfile;
+  onProfileChange: (profile: VisitorProfile | null) => void;
+  disabled?: boolean;
+}
+
+export function VisitorProfileActions({
+  profile,
+  onProfileChange,
+  disabled = false,
+}: VisitorProfileActionsProps) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState(profile.name);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  const inputId = useId();
+  const errorId = useId();
+
+  const closeDialog = useCallback((restoreFocus = true) => {
+    setDialogOpen(false);
+    setError("");
+    if (restoreFocus) {
+      window.setTimeout(() => triggerRef.current?.focus(), 0);
+    }
+  }, []);
+
+  const openDialog = () => {
+    if (disabled) return;
+    setNameDraft(profile.name);
+    setError("");
+    setStatus("");
+    setDialogOpen(true);
+  };
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const focusTimer = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDialog();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!controls?.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeDialog, dialogOpen]);
+
+  const saveName = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (disabled) return;
+    try {
+      const nextProfile = createVisitorProfile({ ...profile, name: nameDraft });
+      onProfileChange(nextProfile);
+      setStatus(`${nextProfile.name} 이름으로 변경했습니다.`);
+      closeDialog();
+    } catch (saveError) {
+      setError(messageFrom(saveError, "이름을 변경하지 못했습니다."));
+      inputRef.current?.focus();
+    }
+  };
+
+  const logout = () => {
+    if (disabled) return;
+    setDialogOpen(false);
+    setStatus("");
+    onProfileChange(null);
+  };
+
+  return (
+    <div
+      className={styles.headerProfileActions}
+      aria-label="학생 프로필"
+      aria-busy={disabled}
+    >
+      <div className={styles.profileIdentity} title={`${profile.className} · ${profile.name}`}>
+        <span className={styles.profileIdentityIcon} aria-hidden="true">
+          {profile.guest ? <UserRound size={16} /> : <School size={16} />}
+        </span>
+        <span>
+          <small>{profile.className}</small>
+          <strong>{profile.name}</strong>
+        </span>
+      </div>
+      <button
+        ref={triggerRef}
+        className={styles.headerActionButton}
+        type="button"
+        onClick={openDialog}
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-label="학생 이름 변경"
+      >
+        <Pencil size={15} aria-hidden="true" />
+        <span>변경</span>
+      </button>
+      <button
+        className={[styles.headerActionButton, styles.logoutButton].join(" ")}
+        type="button"
+        onClick={logout}
+        disabled={disabled}
+        aria-label="학생 프로필 로그아웃"
+      >
+        <LogOut size={16} aria-hidden="true" />
+        <span>학생 로그아웃</span>
+      </button>
+      <span className={styles.srOnly} role="status" aria-live="polite">
+        {status}
+      </span>
+
+      {dialogOpen ? (
+        <div className={styles.profileDialogBackdrop}>
+          <section
+            ref={dialogRef}
+            className={styles.profileDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            aria-describedby={descriptionId}
+            tabIndex={-1}
+          >
+            <button
+              className={styles.profileDialogClose}
+              type="button"
+              onClick={() => closeDialog()}
+              aria-label="이름 변경 창 닫기"
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+            <span className={styles.profileDialogIcon} aria-hidden="true">
+              <UserRound size={22} />
+            </span>
+            <h2 id={titleId}>학생 이름 변경</h2>
+            <p id={descriptionId}>
+              <strong>{profile.className}</strong> 정보는 그대로 유지되고 이름만
+              변경됩니다.
+            </p>
+            <form onSubmit={saveName}>
+              <label htmlFor={inputId}>이름</label>
+              <input
+                ref={inputRef}
+                id={inputId}
+                value={nameDraft}
+                onChange={(event) => {
+                  setNameDraft(event.target.value);
+                  if (error) setError("");
+                }}
+                maxLength={24}
+                autoComplete="nickname"
+                disabled={disabled}
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? errorId : descriptionId}
+              />
+              {error ? (
+                <span id={errorId} className={styles.error} role="alert">
+                  {error}
+                </span>
+              ) : null}
+              <div className={styles.profileDialogActions}>
+                <button type="button" onClick={() => closeDialog()}>
+                  취소
+                </button>
+                <button type="submit" disabled={disabled}>이름 저장</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export interface ClassOnboardingProps {
@@ -54,6 +290,7 @@ export interface ClassOnboardingProps {
   profileReady?: boolean;
   blocking?: boolean;
   isAdmin?: boolean;
+  adminOnly?: boolean;
   className?: string;
   blockingModalControl?: ReactNode;
   onProfileChange: (profile: VisitorProfile | null) => void;
@@ -68,6 +305,7 @@ export function ClassOnboarding({
   profileReady = true,
   blocking = false,
   isAdmin = false,
+  adminOnly = false,
   className,
   blockingModalControl,
   onProfileChange,
@@ -271,38 +509,34 @@ export function ClassOnboarding({
   const panel = (
     <section
       ref={panelRef}
-      className={[styles.panel, className].filter(Boolean).join(" ")}
-      aria-label="방문자 프로필과 학급 설정"
+      className={[styles.panel, adminOnly ? styles.adminOnlyPanel : "", className]
+        .filter(Boolean)
+        .join(" ")}
+      aria-label={adminOnly ? "학급 관리" : "방문자 프로필과 학급 설정"}
       role={isBlocking ? "dialog" : undefined}
       aria-modal={isBlocking ? true : undefined}
     >
       {isBlocking ? blockingModalControl : null}
-      <div className={styles.summary}>
-        <span className={styles.profileIcon} aria-hidden="true">
-          {profile?.guest ? <UserRound size={18} /> : <School size={18} />}
-        </span>
-        <div>
-          <span>활성 프로필</span>
-          <strong>
-            {!profileReady
-              ? "불러오는 중"
-              : profile
-                ? `${profile.className} · ${profile.name}`
-                : "프로필을 설정해 주세요"}
-          </strong>
-        </div>
-        <button
-          type="button"
-          onClick={() => setEditing((value) => (isBlocking ? true : !value))}
-          disabled={isBlocking}
-        >
-          {isBlocking ? "설정 필요" : editing ? "닫기" : profile ? "변경" : "시작하기"}
-        </button>
-      </div>
-
-      {editing ? (
+      {!profile && !adminOnly ? (
         <>
-          <form className={styles.profileForm} onSubmit={submitClassProfile}>
+          <div className={styles.summary}>
+            <span className={styles.profileIcon} aria-hidden="true">
+              <School size={18} />
+            </span>
+            <div>
+              <span>활성 프로필</span>
+              <strong>
+                {!profileReady ? "불러오는 중" : "프로필을 설정해 주세요"}
+              </strong>
+            </div>
+            <button type="button" disabled={isBlocking}>
+              {isBlocking ? "설정 필요" : "시작하기"}
+            </button>
+          </div>
+
+          {editing ? (
+            <>
+              <form className={styles.profileForm} onSubmit={submitClassProfile}>
             <div className={styles.choiceHeading}>
               <strong>학급으로 참여하기</strong>
               <span>이름과 학급을 선택하면 작품과 갤러리를 이어서 사용할 수 있어요.</span>
@@ -341,9 +575,9 @@ export function ClassOnboarding({
             >
               학급으로 시작하기
             </button>
-          </form>
+              </form>
 
-          <div className={styles.guestExperience}>
+              <div className={styles.guestExperience}>
             <div>
               <strong>학급 없이 먼저 둘러볼까요?</strong>
               <p id="guest-experience-note" className={styles.guestNotice}>
@@ -359,7 +593,9 @@ export function ClassOnboarding({
             >
               게스트로 체험하기
             </button>
-          </div>
+              </div>
+            </>
+          ) : null}
         </>
       ) : null}
 
@@ -424,6 +660,8 @@ export function ClassOnboarding({
       <p className={styles.status} role="status" aria-live="polite">{status}</p>
     </section>
   );
+
+  if ((profile && !isAdmin) || (adminOnly && !isAdmin)) return null;
 
   return isBlocking ? (
     <div className={styles.blockingBackdrop}>{panel}</div>

@@ -29,16 +29,19 @@ test("isolates T-pose artwork without deleting or restoring the legacy downward-
 
   const restore = blockFrom(source, "if (!profileReady) return;", 3_200);
   assert.match(restore, /if \(profile\.guest\)/);
-  assert.match(restore, /localStorage\.getItem\(SAVED_CHARACTER_KEY\)/);
-  assert.match(restore, /\.get\(storageId\)/);
-  assert.match(restore, /loadLatestCharacterArtwork\(profile\)/);
+  assert.match(restore, /loadGuestCharacterArtwork\(profile\)/);
+  const guestMigration = blockFrom(source, "function loadGuestCharacterArtwork", 1_500);
+  assert.match(guestMigration, /storage\.getItem\(SAVED_CHARACTER_KEY\)/);
+  assert.match(guestMigration, /LEGACY_GUEST_CHARACTER_OWNER_KEY/);
+  assert.match(restore, /\.get\(legacyStorageId\)/);
+  assert.match(restore, /loadSavedCharacterSlots\(profile\)/);
 
   const save = blockFrom(source, "const handleSendToStudio", 2_000);
-  assert.match(save, /const storageId = characterStorageId\(profile\)/);
+  assert.match(save, /const storageId = profileCharacterStorageId\(profile, slotId\)/);
   assert.match(save, /id:\s*storageId/);
   assert.match(save, /if \(profile\.guest\)/);
-  assert.match(save, /localStorage\.setItem\(SAVED_CHARACTER_KEY, dataUrl\)/);
-  assert.match(save, /saveLatestCharacterArtwork\(profile, dataUrl\)/);
+  assert.match(save, /localStorage\.setItem\(guestCharacterArtworkKey\(profile\), dataUrl\)/);
+  assert.match(save, /saveCharacterSlot\(profile, slotId, dataUrl\)/);
 
   assert.doesNotMatch(source, /localStorage\.removeItem\(/);
   assert.doesNotMatch(source, /\.remove\(\s*["']motion-ink-latest-character["']/);

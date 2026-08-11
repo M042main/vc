@@ -8,6 +8,223 @@
   color: #171713;
 }
 
+.adminOnlyPanel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.headerProfileActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.profileIdentity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 190px;
+  min-height: 44px;
+  padding: 5px 11px 5px 6px;
+  border: 1px solid rgba(23, 23, 19, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.76);
+}
+
+.profileIdentityIcon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dfff45;
+  color: #171713;
+}
+
+.profileIdentity > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.profileIdentity small,
+.profileIdentity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profileIdentity small {
+  color: #6d6a62;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.profileIdentity strong {
+  color: #171713;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.headerActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 11px;
+  border: 1px solid rgba(23, 23, 19, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.76);
+  color: #45433d;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.headerActionButton:hover {
+  border-color: rgba(23, 23, 19, 0.32);
+  background: #fffdf8;
+  color: #171713;
+}
+
+.logoutButton {
+  color: #7f2b25;
+}
+
+.profileDialogBackdrop {
+  position: fixed;
+  z-index: 110;
+  inset: 0;
+  display: grid;
+  padding: 20px;
+  place-items: center;
+  background: rgba(23, 23, 19, 0.58);
+  backdrop-filter: blur(8px);
+}
+
+.profileDialog {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid #171713;
+  border-radius: 24px;
+  background: #fffdf8;
+  box-shadow: 8px 8px 0 #dfff45, 0 28px 70px rgba(23, 23, 19, 0.3);
+  color: #171713;
+}
+
+.profileDialogClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #5c5a52;
+  cursor: pointer;
+}
+
+.profileDialogClose:hover {
+  background: #e8e2d6;
+  color: #171713;
+}
+
+.profileDialogIcon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 14px;
+  place-items: center;
+  border: 1px solid #171713;
+  border-radius: 50%;
+  background: #dfff45;
+}
+
+.profileDialog h2 {
+  margin: 0 46px 8px 0;
+  font-size: 24px;
+  font-weight: 950;
+  letter-spacing: -0.045em;
+}
+
+.profileDialog p {
+  margin: 0 0 20px;
+  color: #5c5a52;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.profileDialog form {
+  display: grid;
+  gap: 9px;
+}
+
+.profileDialog label {
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.profileDialog input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid rgba(23, 23, 19, 0.3);
+  border-radius: 12px;
+  background: #fff;
+  color: #171713;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.profileDialog input[aria-invalid="true"] {
+  border-color: #a22f26;
+}
+
+.profileDialogActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.profileDialogActions button {
+  min-height: 46px;
+  border: 1px solid #171713;
+  border-radius: 12px;
+  background: #fffdf8;
+  color: #171713;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.profileDialogActions button:last-child {
+  background: #171713;
+  color: #fffdf8;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .blockingBackdrop {
   position: fixed;
   z-index: 90;
@@ -285,6 +502,34 @@
     border-radius: 22px 22px 12px 12px;
   }
 
+  .profileDialogBackdrop {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .profileDialog {
+    padding: 24px 20px max(24px, env(safe-area-inset-bottom));
+    border-radius: 22px 22px 14px 14px;
+  }
+
+  .profileIdentity {
+    max-width: 132px;
+  }
+
+  .headerActionButton {
+    width: 42px;
+    padding: 0;
+  }
+
+  .headerActionButton > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+  }
+
   .profileForm {
     grid-template-columns: 1fr;
   }
@@ -315,6 +560,27 @@
   .deleteConfirm,
   .deleteConfirm button {
     width: 100%;
+  }
+}
+
+@media (max-width: 400px) {
+  .headerProfileActions {
+    gap: 4px;
+  }
+
+  .profileIdentity {
+    max-width: 106px;
+    padding-right: 8px;
+  }
+
+  .profileIdentityIcon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .headerActionButton {
+    width: 40px;
+    min-height: 40px;
   }
 }
 
