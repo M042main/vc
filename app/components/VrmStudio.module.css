@@ -799,13 +799,14 @@
 }
 
 .swatches {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(44px, 1fr));
   gap: 7px;
 }
 
 .swatch {
-  width: 44px;
+  width: 100%;
+  min-width: 44px;
   height: 44px;
   border: 2px solid transparent;
   border-radius: 50%;
@@ -822,6 +823,53 @@
 .swatch[data-selected="true"] {
   border-color: #fffdf8;
   outline: 2px solid #171713;
+}
+
+.customColorControl {
+  position: relative;
+  display: grid;
+  min-width: 44px;
+  height: 44px;
+  place-items: center;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(23, 23, 19, 0.14);
+  cursor: pointer;
+}
+
+.customColorControl[data-selected="true"] {
+  border-color: #fffdf8;
+  outline: 2px solid #171713;
+}
+
+.customColorControl:focus-within {
+  outline: 3px solid #171713;
+  outline-offset: 2px;
+}
+
+.customColorControl input {
+  position: absolute;
+  inset: -8px;
+  width: calc(100% + 16px);
+  height: calc(100% + 16px);
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+.customColorControl span {
+  position: relative;
+  z-index: 1;
+  padding: 3px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #171713;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .backgroundImagePanel {

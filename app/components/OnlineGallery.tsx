@@ -6,7 +6,6 @@ import {
   Heart,
   Images,
   LoaderCircle,
-  Pencil,
   RefreshCw,
   Trash2,
   UserRound,
@@ -43,18 +42,9 @@ type NameAction =
   | { kind: "edit" };
 
 export interface OnlineGalleryProps {
-  /** The latest transparent PNG capture produced by the studio. */
-  pendingCapture?: {
-    imageDataUrl: string;
-    fileName: string;
-  } | null;
-  /** @deprecated Prefer pendingCapture when the studio can provide a filename. */
-  captureDataUrl?: string | null;
   className?: string;
   isAdmin?: boolean;
   profile?: VisitorProfile | null;
-  /** @deprecated Automatic upload is owned by the always-mounted page controller. */
-  onUploadComplete?: (entry: GalleryEntry | void) => void;
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -572,39 +562,6 @@ export function OnlineGallery({
           <span>CHARACTERS</span>
         </div>
       </header>
-
-      <div className={styles.toolbar}>
-        <div className={styles.namePanel}>
-          <span className={styles.userIcon} aria-hidden="true">
-            <UserRound size={18} />
-          </span>
-          <div>
-            <span>활성 프로필</span>
-            <strong>
-              {profile
-                ? `${profile.className} · ${profile.name}`
-                : viewerName || "프로필을 먼저 설정해 주세요"}
-            </strong>
-          </div>
-          {profile ? (
-            <span className={styles.profileState}>
-              {profile.guest ? "로컬 체험" : "캡처 자동 저장"}
-            </span>
-          ) : (
-            <button
-              type="button"
-              className={styles.editNameButton}
-              onClick={(event) =>
-                openNameDialog({ kind: "edit" }, event.currentTarget)
-              }
-              aria-label={viewerName ? "저장된 이름 수정" : "다운로드에 사용할 이름 설정"}
-            >
-              <Pencil size={15} aria-hidden="true" />
-              {viewerName ? "수정" : "설정"}
-            </button>
-          )}
-        </div>
-      </div>
 
       {profile?.guest ? (
         <p className={styles.guestNotice} role="note">

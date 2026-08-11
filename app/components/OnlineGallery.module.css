@@ -114,43 +114,6 @@
   letter-spacing: 0.14em;
 }
 
-.toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.namePanel {
-  min-width: 0;
-  border: 1px solid rgba(23, 23, 19, 0.14);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
-}
-
-.namePanel > div {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.namePanel > div > span {
-  color: #77746c;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.namePanel > div > strong {
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .confirmNameButton {
   display: inline-flex;
   align-items: center;
@@ -167,25 +130,6 @@
   transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
 }
 
-.namePanel {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 11px;
-  padding: 11px 12px;
-}
-
-.userIcon {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  border-radius: 50%;
-  background: #e8ff7b;
-  color: #283500;
-}
-
-.editNameButton,
 .downloadButton,
 .likeButton,
 .deleteButton,
@@ -204,16 +148,6 @@
   font-size: 10px;
   font-weight: 900;
   transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
-}
-
-.profileState {
-  padding: 7px 9px;
-  border-radius: 999px;
-  background: #f0ede5;
-  color: #5f5c54;
-  font-size: 9px;
-  font-weight: 850;
-  white-space: nowrap;
 }
 
 .guestNotice {
@@ -654,7 +588,6 @@
     transform: translateY(-1px);
   }
 
-  .editNameButton:hover,
   .errorState button:hover {
     border-color: #171713;
     background: #f1eee7;
@@ -699,16 +632,6 @@
   }
 }
 
-@media (max-width: 800px) {
-  .toolbar {
-    grid-template-columns: 1fr;
-  }
-
-  .namePanel {
-    min-height: 64px;
-  }
-}
-
 @media (max-width: 590px) {
   .gallery {
     padding: 20px 14px;
@@ -728,21 +651,6 @@
     justify-self: start;
     min-width: 104px;
     text-align: left;
-  }
-
-  .namePanel {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .editNameButton {
-    grid-column: 1 / -1;
-    width: 100%;
-  }
-
-  .profileState {
-    grid-column: 1 / -1;
-    justify-self: stretch;
-    text-align: center;
   }
 
   .galleryFilter {

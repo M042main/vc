@@ -258,19 +258,32 @@ test("returns a complete named entry for the page-level automatic uploader", asy
     /return\s*\{\s*id\s*,\s*\.\.\.record\s*,\s*likeCount:\s*0\s*,\s*likeActorKeys:\s*\[\]\s*\}/,
   );
   assert.doesNotMatch(ui, /function\s+OnlineGallery[\s\S]{0,8000}publishGalleryEntry\s*\(/);
-  assert.match(ui, /pendingCapture\?:/);
+  assert.doesNotMatch(
+    ui,
+    /(?:pendingCapture|captureDataUrl|onUploadComplete)\?:/,
+    "the gallery view must not retain the removed manual-upload handoff props",
+  );
 });
 
-test("wires the full-body PNG capture into the mounted online gallery", async () => {
+test("publishes completed full-body captures from the always-mounted page controller", async () => {
   const { all } = await gallerySources();
 
   assert.match(all, /new\s+FileReader\s*\(/, "capture blobs must become Data URLs in the browser");
-  assert.match(all, /onCaptureReady\s*=\{/, "the studio must expose completed full-body captures");
-  assert.match(all, /<OnlineGallery\b/, "the online gallery must be mounted in the application");
   assert.match(
     all,
-    /<OnlineGallery[\s\S]{0,300}(?:captureDataUrl|pendingCapture)=\{/,
-    "the mounted gallery must receive the latest transparent full-body PNG",
+    /onCaptureReady\s*=\{handleCaptureReady\}/,
+    "the studio must expose completed full-body captures to the page controller",
+  );
+  assert.match(
+    all,
+    /handleCaptureReady[\s\S]{0,1800}await\s+publishGalleryEntry\s*\(\{[\s\S]{0,260}imageDataUrl:\s*galleryImageDataUrl/,
+    "the page controller must automatically publish the prepared capture",
+  );
+  assert.match(all, /<OnlineGallery\b/, "the online gallery must be mounted in the application");
+  assert.doesNotMatch(
+    all,
+    /<OnlineGallery[\s\S]{0,300}(?:captureDataUrl|pendingCapture|onUploadComplete)=\{/,
+    "the mounted gallery must not expose a second manual-upload path",
   );
 });
 

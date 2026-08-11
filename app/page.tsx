@@ -16,6 +16,7 @@ import {
   Paintbrush,
   Settings,
   ShieldCheck,
+  Sparkles,
   X,
 } from "lucide-react";
 import { CharacterCreator } from "./components/CharacterCreator";
@@ -58,8 +59,13 @@ const OnlineGallery = lazy(() =>
     default: module.OnlineGallery,
   })),
 );
+const AiImageGenerator = lazy(() =>
+  import("./components/AiImageGenerator").then((module) => ({
+    default: module.AiImageGenerator,
+  })),
+);
 
-type WorkspaceMode = "studio" | "creator" | "gallery";
+type WorkspaceMode = "studio" | "creator" | "gallery" | "ai";
 // T-pose artwork uses a separate room from the legacy downward-arm rig. The
 // old v1 key and record remain untouched so existing drawings are preserved,
 // but they are never interpreted with incompatible T-pose joints.
@@ -791,6 +797,14 @@ export default function Home() {
               <span className="gallery-ready-dot" aria-hidden="true" />
             ) : null}
           </button>
+          <button
+            className={mode === "ai" ? "is-active" : ""}
+            onClick={() => setMode("ai")}
+            type="button"
+          >
+            <Sparkles size={17} aria-hidden="true" />
+            AI 이미지 생성
+          </button>
         </nav>
 
         <div className="header-actions">
@@ -844,7 +858,7 @@ export default function Home() {
               />
             </div>
           </div>
-        ) : (
+        ) : mode === "gallery" ? (
           <Suspense
             fallback={
               <div className="gallery-loading-shell" role="status">
@@ -853,11 +867,19 @@ export default function Home() {
             }
           >
             <OnlineGallery
-              pendingCapture={latestCapture}
-              onUploadComplete={() => setLatestCapture(null)}
               isAdmin={adminMode}
               profile={profile}
             />
+          </Suspense>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="gallery-loading-shell" role="status">
+                AI 이미지 도구를 여는 중입니다.
+              </div>
+            }
+          >
+            <AiImageGenerator />
           </Suspense>
         )}
       </section>

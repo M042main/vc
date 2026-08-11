@@ -35,6 +35,7 @@ test("server-renders the Virtual Creator studio", async () => {
   assert.match(html, /트래킹 스튜디오/);
   assert.match(html, /캐릭터 만들기/);
   assert.match(html, /온라인 갤러리/);
+  assert.match(html, /AI 이미지 생성/);
   assert.match(html, /VRM/);
   assert.doesNotMatch(
     html,
@@ -57,6 +58,7 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(page, /<VrmStudio/);
   assert.match(page, /<CharacterCreator/);
   assert.match(page, /<OnlineGallery/);
+  assert.match(page, /<AiImageGenerator/);
   assert.match(page, /onCaptureReady=\{handleCaptureReady\}/);
   assert.match(page, /handleCaptureReady[\s\S]{0,1200}publishGalleryEntry\s*\(/);
   assert.match(page, /isAdmin=\{adminMode\}/);

@@ -23,7 +23,7 @@ test("keeps the fixed mobile mode switch clear of gallery actions and safe areas
   );
 });
 
-test("keeps all three mode labels inside narrow mobile buttons", async () => {
+test("keeps all four mode labels inside narrow mobile buttons", async () => {
   const css = await readFile(cssUrl, "utf8");
   const buttonRule = css.match(/\.mode-switch button\s*\{([^}]*)\}/)?.[1] ?? "";
 

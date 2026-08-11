@@ -84,13 +84,14 @@ type TrackerMessage =
 
 export const CHROMA_KEY_GREEN = "#00ff00";
 const STAGE_COLORS = [
-  { value: "#171719", label: "차콜" },
-  { value: "#332d58", label: "바이올렛" },
-  { value: "#254a48", label: "딥 그린" },
-  { value: "#eee8dc", label: "오프화이트" },
+  { value: "#000000", label: "검정" },
+  { value: "#808080", label: "회색" },
   { value: CHROMA_KEY_GREEN, label: "크로마키 초록" },
 ] as const;
-type StageColor = (typeof STAGE_COLORS)[number]["value"];
+const DEFAULT_CUSTOM_STAGE_COLOR = "#ffffff";
+const LEGACY_STAGE_COLORS = new Set(["#332d58", "#254a48"]);
+const HEX_STAGE_COLOR = /^#[0-9a-f]{6}$/i;
+type StageColor = string;
 const MAX_VRM_SIZE = MAX_PERSISTED_VRM_BYTES;
 const MAX_STAGE_BACKGROUND_DIMENSION = 8192;
 const TRACKING_INPUT_MAX_WIDTH = 480;
@@ -463,6 +464,9 @@ export function VrmStudio({
   const [modelName, setModelName] = useState("아직 불러온 모델이 없어요");
   const [modelSize, setModelSize] = useState("");
   const [stageColor, setStageColor] = useState<StageColor>(STAGE_COLORS[0].value);
+  const [customStageColor, setCustomStageColor] = useState(
+    DEFAULT_CUSTOM_STAGE_COLOR,
+  );
   const [stageBackgroundImage, setStageBackgroundImage] =
     useState<HTMLImageElement | null>(null);
   const [stageBackgroundName, setStageBackgroundName] = useState("");
@@ -1143,6 +1147,15 @@ export function VrmStudio({
     void clearPersistedStageBackground();
   }, []);
 
+  const selectCustomStageColor = useCallback(
+    (color: string) => {
+      if (!HEX_STAGE_COLOR.test(color)) return;
+      setCustomStageColor(color);
+      selectStageColor(color);
+    },
+    [selectStageColor],
+  );
+
   const removeStageBackgroundImage = useCallback(() => {
     settingsInteractionRef.current += 1;
     backgroundLoadSessionRef.current += 1;
@@ -1375,10 +1388,16 @@ export function VrmStudio({
         snapshot.settings &&
         settingsInteractionRef.current === settingsInteraction
       ) {
-        const restoredColor = STAGE_COLORS.find(
-          ({ value }) => value === snapshot.settings?.stageColor,
-        )?.value;
-        if (restoredColor) setStageColor(restoredColor);
+        const restoredColor = snapshot.settings.stageColor.toLowerCase();
+        if (
+          HEX_STAGE_COLOR.test(restoredColor) &&
+          !LEGACY_STAGE_COLORS.has(restoredColor)
+        ) {
+          setStageColor(restoredColor);
+          if (!STAGE_COLORS.some(({ value }) => value === restoredColor)) {
+            setCustomStageColor(restoredColor);
+          }
+        }
         setStageBackgroundFit(snapshot.settings.backgroundFit);
         setSelectedMotion(snapshot.settings.selectedMotion);
         setAnimationSpeed(snapshot.settings.animationSpeed);
@@ -2428,8 +2447,8 @@ export function VrmStudio({
           </div>
         )}
 
-        <span className={styles.sectionLabel}>Stage background</span>
-        <div className={styles.swatches} aria-label="무대 배경색">
+        <span className={styles.sectionLabel}>무대 배경색</span>
+        <div className={styles.swatches} aria-label="무대 배경색 선택">
           {STAGE_COLORS.map(({ value, label }) => (
             <button
               key={value}
@@ -2444,6 +2463,22 @@ export function VrmStudio({
               title={label}
             />
           ))}
+          <label
+            className={styles.customColorControl}
+            data-selected={
+              !stageBackgroundImage &&
+              !STAGE_COLORS.some(({ value }) => value === stageColor)
+            }
+            title="자유 배경색"
+          >
+            <input
+              type="color"
+              value={customStageColor}
+              onChange={(event) => selectCustomStageColor(event.target.value)}
+              aria-label="자유 배경색 선택"
+            />
+            <span>자유색</span>
+          </label>
         </div>
 
         <div

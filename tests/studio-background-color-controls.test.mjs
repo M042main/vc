@@ -1,0 +1,64 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const studioUrl = new URL("../app/components/VrmStudio.tsx", import.meta.url);
+const studioCssUrl = new URL(
+  "../app/components/VrmStudio.module.css",
+  import.meta.url,
+);
+const galleryUrl = new URL(
+  "../app/components/OnlineGallery.tsx",
+  import.meta.url,
+);
+const galleryCssUrl = new URL(
+  "../app/components/OnlineGallery.module.css",
+  import.meta.url,
+);
+
+test("offers black, gray, chroma-key, and one custom color control", async () => {
+  const [studio, css] = await Promise.all([
+    readFile(studioUrl, "utf8"),
+    readFile(studioCssUrl, "utf8"),
+  ]);
+
+  const catalog = studio.match(/const\s+STAGE_COLORS\s*=\s*\[([\s\S]*?)\]\s*as const/);
+  assert.ok(catalog, "stage color preset catalog must exist");
+  assert.match(catalog[1], /value:\s*["']#000000["']\s*,\s*label:\s*["']검정["']/i);
+  assert.match(catalog[1], /value:\s*["']#808080["']\s*,\s*label:\s*["']회색["']/i);
+  assert.match(catalog[1], /value:\s*CHROMA_KEY_GREEN\s*,\s*label:\s*["']크로마키 초록["']/);
+  assert.doesNotMatch(catalog[1], /바이올렛|딥 그린|#332d58|#254a48/i);
+  assert.equal(
+    [...catalog[1].matchAll(/\{\s*value:/g)].length,
+    3,
+    "the fourth choice is the custom color picker, not another fixed preset",
+  );
+
+  assert.match(studio, /type=["']color["']/);
+  assert.match(studio, /aria-label=["']자유 배경색 선택["']/);
+  assert.match(studio, /selectCustomStageColor\(event\.target\.value\)/);
+  assert.match(studio, /setCustomStageColor\(color\)[\s\S]{0,100}selectStageColor\(color\)/);
+  assert.match(studio, /className=\{styles\.customColorControl\}/);
+  assert.match(css, /\.swatches\s*\{[\s\S]{0,180}grid-template-columns:\s*repeat\(4,/);
+  assert.match(css, /\.customColorControl\s*\{[\s\S]{0,240}height:\s*44px/);
+});
+
+test("keeps custom colors persistent while migrating the removed presets", async () => {
+  const studio = await readFile(studioUrl, "utf8");
+
+  assert.match(studio, /HEX_STAGE_COLOR\.test\(restoredColor\)/);
+  assert.match(studio, /setStageColor\(restoredColor\)/);
+  assert.match(studio, /setCustomStageColor\(restoredColor\)/);
+  assert.match(studio, /LEGACY_STAGE_COLORS\s*=\s*new Set\(\[[\s\S]*?#332d58[\s\S]*?#254a48/);
+});
+
+test("does not render the gallery CSS-module profile panel name", async () => {
+  const [gallery, css] = await Promise.all([
+    readFile(galleryUrl, "utf8"),
+    readFile(galleryCssUrl, "utf8"),
+  ]);
+
+  assert.doesNotMatch(gallery, /styles\.namePanel/);
+  assert.doesNotMatch(css, /\.namePanel\b/);
+  assert.doesNotMatch(gallery, /<span>활성 프로필<\/span>/);
+});
