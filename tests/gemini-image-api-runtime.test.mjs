@@ -119,7 +119,8 @@ test("Gemini key stays server-only and the route is Edge/Worker compatible", asy
   assert.match(source, /classAiAccess === "disabled"[\s\S]{0,180}ai_disabled_for_class/u);
   assert.match(source, /export const runtime = "edge"/);
   assert.match(source, /new AbortController\(\)/);
-  assert.match(source, /REQUEST_TIMEOUT_MS\s*=\s*60_000/);
+  assert.match(source, /CLASS_SETTINGS_TIMEOUT_MS\s*=\s*5_000/);
+  assert.match(source, /REQUEST_TIMEOUT_MS\s*=\s*50_000/);
   assert.match(source, /sec-fetch-site/);
   assert.match(source, /cf-connecting-ip/);
   assert.match(source, /const rateLimitBuckets = new Map/);
@@ -540,7 +541,7 @@ test("content type, malformed JSON, prompt, MIME, byte size, and resolution are 
     const oversized = await route.POST(
       generationRequest(
         { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
-        { "Content-Length": String(12 * 1024 * 1024 + 1) },
+        { "Content-Length": String(Math.floor(5.75 * 1024 * 1024) + 1) },
       ),
     );
     assert.equal(oversized.status, 413);

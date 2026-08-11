@@ -450,8 +450,11 @@ export function AiImageGenerator({
     setGenerationMessage("입력한 상황과 자세로 이미지를 생성하고 있습니다.");
 
     try {
+      const sourceImageDataUrl = await prepareGalleryPngDataUrl(
+        selectedEntry.imageDataUrl,
+      );
       const generatedImage = await generateImage({
-        imageDataUrl: selectedEntry.imageDataUrl,
+        imageDataUrl: sourceImageDataUrl,
         prompt: normalizedPrompt,
         classId: profile.classId,
         signal: controller.signal,

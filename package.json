@@ -8,9 +8,11 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
+    "build:netlify": "vite build --mode netlify",
     "start": "vinext start",
     "test": "npm run build && node --test",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test:netlify": "npm run build:netlify && node --test tests/netlify-deployment-contract.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .netlify --ignore-pattern .output",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
@@ -20,6 +22,7 @@
     "firebase": "11.6.1",
     "kalidokit": "^1.1.5",
     "lucide-react": "^1.31.0",
+    "nitro": "^3.0.260610-beta",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "three": "^0.185.1"

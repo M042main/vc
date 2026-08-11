@@ -70,7 +70,10 @@ test("makes exactly one image request from one source photo and the user's promp
   const { component } = await sources();
   assert.doesNotMatch(component, /GENERATION_VARIANTS|Promise\.allSettled|MAX_RESULTS/u);
   assert.equal((component.match(/await generateImage\(\{/gu) ?? []).length, 1);
-  assert.match(component, /imageDataUrl: selectedEntry\.imageDataUrl,[\s\S]{0,120}prompt: normalizedPrompt/u);
+  assert.match(
+    component,
+    /sourceImageDataUrl\s*=\s*await prepareGalleryPngDataUrl\([\s\S]{0,120}selectedEntry\.imageDataUrl[\s\S]{0,220}imageDataUrl:\s*sourceImageDataUrl,[\s\S]{0,120}prompt:\s*normalizedPrompt/u,
+  );
   assert.match(component, /classId: profile\.classId/u);
   assert.match(component, /setResults\(\[result\]\)/u);
   assert.match(

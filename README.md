@@ -91,8 +91,32 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
+- `npm run build:netlify`: create the Nitro Netlify deployment output
+- `npm run test:netlify`: build and verify the Netlify deployment contract
 - `npm test`: build the starter and verify its rendered loading skeleton
 - `npm run db:generate`: generate Drizzle migrations after schema changes
+
+## Deploy to Netlify
+
+This repository keeps the existing Sites/Cloudflare build as its default and
+uses Vinext's Nitro adapter only for Netlify builds.
+
+1. Import the repository into Netlify. The committed `netlify.toml` selects
+   `npm run build:netlify`; Nitro generates Netlify's publish and function
+   output automatically.
+2. In **Project configuration → Environment variables**, add
+   `GEMINI_API_KEY` as a secret that is available to Functions. Do not put the
+   key in `netlify.toml` or commit it to the repository.
+3. Deploy. Nitro generates the Netlify server function and routing metadata,
+   while static `_next` assets, MediaPipe worker files, and WASM are served from
+   `dist`.
+
+Netlify does not provide the Sites-only `oai-authenticated-user-email` header.
+The student experience, tracking, Firebase gallery, and AI generation can run
+on Netlify, but administrator write actions require a trusted Netlify Identity
+integration (or another server-verified administrator session) before they can
+be enabled there. Never replace that server check with a browser-supplied
+header.
 
 ## Learn More
 

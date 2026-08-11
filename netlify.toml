@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build:netlify"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22.14.0"
+  NITRO_PRESET = "netlify"
+
+[[headers]]
+  for = "/_next/static/*"
+
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

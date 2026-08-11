@@ -20,7 +20,7 @@ async function loadRoute(relativePath, tag) {
 }
 
 function adminRequest(method, body) {
-  return new Request("https://site.test/api/gallery/classes", {
+  return new Request("https://motion-ink-vrm-studio.m042.chatgpt.site/api/gallery/classes", {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -143,7 +143,7 @@ test("class and gallery deletion target only their validated isolated child", as
     );
     assert.equal(classResponse.status, 200);
 
-    const galleryRequest = new Request("https://site.test/api/gallery/delete", {
+    const galleryRequest = new Request("https://motion-ink-vrm-studio.m042.chatgpt.site/api/gallery/delete", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

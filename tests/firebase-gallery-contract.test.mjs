@@ -129,10 +129,11 @@ test("routes deletion through authenticated server code to one validated child",
 
   assert.match(route, /oai-authenticated-user-email/);
   assert.match(route, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
+  assert.match(route, /TRUSTED_SITES_HOSTNAME\s*=\s*["']motion-ink-vrm-studio\.m042\.chatgpt\.site["']/);
   assert.match(
     route,
-    /request\.headers\.get\s*\(\s*AUTHENTICATED_USER_EMAIL_HEADER\s*\)\s*!==\s*ADMIN_EMAIL[\s\S]{0,180}403/,
-    "the route must reject every email except the exact admin email",
+    /new URL\(request\.url\)\.hostname\.toLowerCase\(\)\s*===\s*TRUSTED_SITES_HOSTNAME[\s\S]{0,220}request\.headers\.get\(AUTHENTICATED_USER_EMAIL_HEADER\)\s*===\s*ADMIN_EMAIL/u,
+    "the route must trust the exact admin email only on the Sites production host",
   );
   assert.match(route, /FIREBASE_PUSH_KEY_PATTERN\s*=\s*\/\^\[-_A-Za-z0-9\]\{20\}\$\/u/);
   assert.match(route, new RegExp(REQUIRED_BASE_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

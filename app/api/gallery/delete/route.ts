@@ -1,5 +1,6 @@
 const AUTHENTICATED_USER_EMAIL_HEADER = "oai-authenticated-user-email";
 const ADMIN_EMAIL = "m042@m042.kr";
+const TRUSTED_SITES_HOSTNAME = "motion-ink-vrm-studio.m042.chatgpt.site";
 const FIREBASE_DATABASE_ORIGIN =
   "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app";
 // 이 부분은 우리 반 공용 데이터베이스에서 내 방을 만드는 주소입니다
@@ -16,6 +17,13 @@ type ApiErrorCode =
   | "firebase_unavailable";
 
 export const dynamic = "force-dynamic";
+
+function isAdmin(request: Request) {
+  return (
+    new URL(request.url).hostname.toLowerCase() === TRUSTED_SITES_HOSTNAME &&
+    request.headers.get(AUTHENTICATED_USER_EMAIL_HEADER) === ADMIN_EMAIL
+  );
+}
 
 function errorResponse(
   error: string,
@@ -101,7 +109,7 @@ function validatedEntryId(value: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  if (request.headers.get(AUTHENTICATED_USER_EMAIL_HEADER) !== ADMIN_EMAIL) {
+  if (!isAdmin(request)) {
     return errorResponse("이 계정에는 갤러리 삭제 권한이 없습니다.", 403);
   }
 

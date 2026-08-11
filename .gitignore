@@ -37,6 +37,8 @@ vite-dev*.log
 .vercel
 
 /dist/
+/.netlify/
+/.output/
 /.wrangler/
 /outputs/
 /work/

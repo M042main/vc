@@ -134,7 +134,7 @@ function executionContext() {
 test("registers the protected class route in the built Sites worker", async () => {
   const worker = await sitesWorker();
   const unauthorized = await worker.fetch(
-    new Request("http://localhost/api/gallery/classes", {
+    new Request("https://motion-ink-vrm-studio.m042.chatgpt.site/api/gallery/classes", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "런타임 확인" }),
@@ -148,7 +148,7 @@ test("registers the protected class route in the built Sites worker", async () =
   assert.deepEqual(await unauthorized.json(), { error: "학급 관리 권한이 없습니다." });
 
   const invalidAuthorizedRequest = await worker.fetch(
-    new Request("http://localhost/api/gallery/classes", {
+    new Request("https://motion-ink-vrm-studio.m042.chatgpt.site/api/gallery/classes", {
       method: "POST",
       headers: {
         "content-type": "application/json",

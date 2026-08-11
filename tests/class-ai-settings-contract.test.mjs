@@ -24,7 +24,7 @@ async function loadRoute(tag) {
 }
 
 function request(method, body, email = ADMIN_EMAIL) {
-  return new Request("https://site.test/api/gallery/classes", {
+  return new Request("https://motion-ink-vrm-studio.m042.chatgpt.site/api/gallery/classes", {
     method,
     headers: {
       "Content-Type": "application/json",

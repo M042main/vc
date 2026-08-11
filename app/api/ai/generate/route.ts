@@ -7,13 +7,15 @@ const FIREBASE_DATABASE_ORIGIN =
 const GALLERY_CLASSES_PATH =
   "/000000/박근석_t7/motion_ink_gallery_a7f3c9/classes";
 const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
-const CLASS_SETTINGS_TIMEOUT_MS = 8_000;
+const CLASS_SETTINGS_TIMEOUT_MS = 5_000;
 
-const REQUEST_TIMEOUT_MS = 60_000;
-const MAX_REQUEST_BYTES = 12 * 1024 * 1024;
-const MAX_INPUT_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_OUTPUT_IMAGE_BYTES = 10 * 1024 * 1024;
-const MAX_UPSTREAM_RESPONSE_BYTES = 14 * 1024 * 1024;
+// Keep JSON + Base64 payloads below Netlify Functions' 6 MiB buffered limit.
+// These limits also reduce memory pressure on the Sites deployment.
+const REQUEST_TIMEOUT_MS = 50_000;
+const MAX_REQUEST_BYTES = Math.floor(5.75 * 1024 * 1024);
+const MAX_INPUT_IMAGE_BYTES = Math.floor(4.25 * 1024 * 1024);
+const MAX_OUTPUT_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_UPSTREAM_RESPONSE_BYTES = 6 * 1024 * 1024;
 const MAX_PROMPT_CODE_POINTS = 1_200;
 const MIN_IMAGE_SIDE = 64;
 const MAX_IMAGE_SIDE = 8_192;
