@@ -1146,13 +1146,9 @@ export function VrmStudio({
     (color: string) => {
       if (!HEX_STAGE_COLOR.test(color)) return;
       setCustomStageColorDraft(color);
+      selectStageColor(color);
     },
-    [],
-  );
-
-  const applyCustomStageColor = useCallback(
-    () => selectStageColor(customStageColorDraft),
-    [customStageColorDraft, selectStageColor],
+    [selectStageColor],
   );
 
   const removeStageBackgroundImage = useCallback(() => {
@@ -2465,17 +2461,6 @@ export function VrmStudio({
             />
             <span>자유색</span>
           </label>
-          <button
-            type="button"
-            className={styles.applyCustomColorButton}
-            onClick={applyCustomStageColor}
-            disabled={
-              !stageBackgroundImage && stageColor === customStageColorDraft
-            }
-            aria-label={`자유 배경색 ${customStageColorDraft} 적용`}
-          >
-            적용
-          </button>
         </div>
 
         <div

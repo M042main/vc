@@ -856,24 +856,6 @@
   pointer-events: none;
 }
 
-.applyCustomColorButton {
-  grid-column: 1 / -1;
-  min-height: 44px;
-  border: 1px solid #171713;
-  border-radius: 11px;
-  background: #171713;
-  color: #fffdf8;
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.applyCustomColorButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
 .backgroundImagePanel {
   display: grid;
   min-width: 0;

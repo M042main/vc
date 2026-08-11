@@ -553,21 +553,19 @@ export function OnlineGallery({
           </span>
           <h2 id={headingId}>함께 만든 캐릭터를 둘러보세요</h2>
         </div>
-        <div className={styles.galleryFilter}>
-          <label htmlFor={`${headingId}-class-filter`}>학급별 보기</label>
-          <select
-            id={`${headingId}-class-filter`}
-            value={effectiveClassFilter}
-            onChange={(event) => setClassFilter(event.target.value)}
-          >
-            <option value="all">전체 학급</option>
-            {classOptions.map((item) => (
-              <option key={item.id} value={item.id}>{item.name}</option>
-            ))}
-            <option value="unclassified">미분류 · 이전 갤러리</option>
-          </select>
-          <span aria-live="polite">{visibleEntries.length}개 표시</span>
-        </div>
+        <select
+          id={`${headingId}-class-filter`}
+          className={styles.galleryFilter}
+          value={effectiveClassFilter}
+          onChange={(event) => setClassFilter(event.target.value)}
+          aria-label="학급별 갤러리 필터"
+        >
+          <option value="all">전체 학급</option>
+          {classOptions.map((item) => (
+            <option key={item.id} value={item.id}>{item.name}</option>
+          ))}
+          <option value="unclassified">미분류 · 이전 갤러리</option>
+        </select>
       </header>
 
       {profile?.guest ? (

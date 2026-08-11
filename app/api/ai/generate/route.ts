@@ -1,6 +1,6 @@
 const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_ENDPOINT =
-  `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent`;
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const MAX_REQUEST_BYTES = 12 * 1024 * 1024;
@@ -29,7 +29,6 @@ type ApiErrorCode =
   | "ai_not_configured"
   | "ai_rate_limited"
   | "ai_request_failed"
-  | "ai_request_cancelled"
   | "ai_timeout"
   | "ai_unavailable"
   | "invalid_image"
@@ -516,6 +515,29 @@ function wasContentBlocked(payload: unknown) {
   );
 }
 
+function logUpstreamFetchFailure(error: unknown, apiKey: string) {
+  const rawMessage = error instanceof Error ? error.message : "Unknown fetch failure";
+  const message = rawMessage.replaceAll(apiKey, "[redacted]").slice(0, 300);
+  const cause =
+    error instanceof Error && isRecord(error.cause)
+      ? {
+          code:
+            typeof error.cause.code === "string"
+              ? error.cause.code.slice(0, 80)
+              : undefined,
+          name:
+            typeof error.cause.name === "string"
+              ? error.cause.name.slice(0, 80)
+              : undefined,
+        }
+      : undefined;
+  console.error("Gemini upstream fetch failed", {
+    name: error instanceof Error ? error.name : typeof error,
+    message,
+    cause,
+  });
+}
+
 export async function POST(request: Request) {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
     return errorResponse("JSON 형식으로 요청해 주세요.", 415, {
@@ -597,31 +619,23 @@ export async function POST(request: Request) {
 
   const controller = new AbortController();
   let timedOut = false;
-  const abortFromRequest = () => controller.abort(request.signal.reason);
-  if (request.signal.aborted) abortFromRequest();
-  else request.signal.addEventListener("abort", abortFromRequest, { once: true });
   const timeout = setTimeout(() => {
     if (controller.signal.aborted) return;
     timedOut = true;
     controller.abort();
   }, REQUEST_TIMEOUT_MS);
-  const abortedResponse = () =>
-    timedOut
-      ? errorResponse("AI 이미지 생성 시간이 초과되었습니다.", 504, {
-          code: "ai_timeout",
-          retryable: true,
-        })
-      : errorResponse("AI 이미지 생성 요청이 취소되었습니다.", 499, {
-          code: "ai_request_cancelled",
-          retryable: true,
-        });
+  const timeoutResponse = () =>
+    errorResponse("AI 이미지 생성 시간이 초과되었습니다.", 504, {
+      code: "ai_timeout",
+      retryable: true,
+    });
 
   try {
     let upstreamResponse: Response;
     try {
       upstreamResponse = await fetch(GEMINI_ENDPOINT, {
         method: "POST",
-        redirect: "error",
+        redirect: "follow",
         signal: controller.signal,
         headers: {
           Accept: "application/json",
@@ -647,8 +661,8 @@ export async function POST(request: Request) {
         }),
       });
     } catch (error) {
-      if (controller.signal.aborted) return abortedResponse();
-      void error;
+      if (timedOut) return timeoutResponse();
+      logUpstreamFetchFailure(error, apiKey);
       return errorResponse("AI 이미지 생성 서비스에 연결하지 못했습니다.", 502, {
         code: "ai_network_error",
         retryable: true,
@@ -657,7 +671,7 @@ export async function POST(request: Request) {
 
     if (!upstreamResponse.ok) {
       await readResponseTextWithLimit(upstreamResponse, 64 * 1024);
-      if (controller.signal.aborted) return abortedResponse();
+      if (timedOut) return timeoutResponse();
       return upstreamFailureResponse(upstreamResponse.status);
     }
 
@@ -666,7 +680,7 @@ export async function POST(request: Request) {
       MAX_UPSTREAM_RESPONSE_BYTES,
     );
     if (upstreamText === null) {
-      if (controller.signal.aborted) return abortedResponse();
+      if (timedOut) return timeoutResponse();
       return errorResponse("AI 이미지 응답이 너무 크거나 손상되었습니다.", 502, {
         code: "ai_invalid_response",
         retryable: true,
@@ -703,7 +717,6 @@ export async function POST(request: Request) {
     );
   } finally {
     clearTimeout(timeout);
-    request.signal.removeEventListener("abort", abortFromRequest);
     releaseUpstreamSlot(upstreamSlotKey);
   }
 }

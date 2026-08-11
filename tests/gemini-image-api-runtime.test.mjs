@@ -112,8 +112,8 @@ test("Gemini key stays server-only and the route is Edge/Worker compatible", asy
     source,
     /const retryAfter = reserveRateLimit\(request\)[\s\S]{0,900}const payload = await readRequestPayload\(request\)/,
   );
-  assert.match(source, /request\.signal\.addEventListener\("abort", abortFromRequest/);
-  assert.match(source, /request\.signal\.removeEventListener\("abort", abortFromRequest\)/);
+  assert.doesNotMatch(source, /request\.signal\.addEventListener/);
+  assert.doesNotMatch(source, /request\.signal\.removeEventListener/);
   assert.doesNotMatch(source, /AIza[0-9A-Za-z_-]{20,}/);
   assert.doesNotMatch(source, /Buffer|node:/);
 });
@@ -247,53 +247,56 @@ test("allows the three UI variants but rejects a fourth concurrent upstream requ
   );
 });
 
-test("propagates client aborts upstream and releases every cancelled slot", async () => {
-  const route = await loadRoute("client-abort");
-  const observedSignals = [];
-  let completeImmediately = false;
+test("uses an independent timeout signal instead of the Sites request signal", async () => {
+  const route = await loadRoute("independent-timeout-signal");
+  const clientController = new AbortController();
+  let upstreamSignal;
+  let resolveUpstream;
+  let holdResponse = true;
   let calls = 0;
 
   await withApiKey(TEST_API_KEY, () =>
     withFetch(async (_input, init) => {
       calls += 1;
-      if (completeImmediately) return imageResponse();
-      return new Promise((_resolve, reject) => {
-        observedSignals.push(init.signal);
-        const rejectAbort = () =>
-          reject(init.signal.reason ?? new DOMException("Aborted", "AbortError"));
-        if (init.signal.aborted) rejectAbort();
-        else init.signal.addEventListener("abort", rejectAbort, { once: true });
+      upstreamSignal = init.signal;
+      if (!holdResponse) return imageResponse();
+      return new Promise((resolve) => {
+        resolveUpstream = resolve;
       });
     }, async () => {
-      for (let index = 0; index < 3; index += 1) {
-        const clientController = new AbortController();
-        const responsePromise = route.POST(
-          generationRequest(
-            { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
-            { "oai-authenticated-user-id": "cancel-user" },
-            clientController.signal,
-          ),
-        );
-        await waitUntil(
-          () => observedSignals.length === index + 1,
-          "the upstream fetch should receive a linked signal",
-        );
-        clientController.abort();
-        const response = await responsePromise;
-        assert.equal(response.status, 499);
-        assert.equal((await response.json()).code, "ai_request_cancelled");
-        assert.equal(observedSignals[index].aborted, true);
-      }
-
-      completeImmediately = true;
-      const afterCancellation = await route.POST(
+      const responsePromise = route.POST(
         generationRequest(
           { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
-          { "oai-authenticated-user-id": "cancel-user" },
+          { "oai-authenticated-user-id": "adapter-signal-user" },
+          clientController.signal,
         ),
       );
-      assert.equal(afterCancellation.status, 200);
-      assert.equal(calls, 4, "cancelled requests must release all three slots");
+      await waitUntil(
+        () => typeof resolveUpstream === "function",
+        "the upstream request should start",
+      );
+
+      clientController.abort();
+      assert.ok(upstreamSignal instanceof AbortSignal);
+      assert.equal(
+        upstreamSignal.aborted,
+        false,
+        "the Sites adapter signal must not immediately abort Gemini",
+      );
+
+      holdResponse = false;
+      resolveUpstream(imageResponse());
+      const response = await responsePromise;
+      assert.equal(response.status, 200);
+
+      const afterRelease = await route.POST(
+        generationRequest(
+          { prompt: "캐릭터", imageDataUrl: pngDataUrl() },
+          { "oai-authenticated-user-id": "adapter-signal-user" },
+        ),
+      );
+      assert.equal(afterRelease.status, 200);
+      assert.equal(calls, 2, "the completed request must release its upstream slot");
     }),
   );
 });
@@ -308,10 +311,10 @@ test("valid image+prompt uses the official Gemini 2.5 Flash Image REST shape", a
       calls += 1;
       assert.equal(
         String(input),
-        "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-image:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
       );
       assert.equal(init.method, "POST");
-      assert.equal(init.redirect, "error");
+      assert.equal(init.redirect, "follow");
       assert.equal(init.headers["x-goog-api-key"], TEST_API_KEY);
       assert.equal(init.headers.Authorization, undefined);
       assert.ok(init.signal instanceof AbortSignal);
@@ -477,17 +480,30 @@ test("rate limits, safety blocks, malformed output, and network failures are act
     assert.equal(malformed.status, 502);
     assert.equal((await malformed.json()).code, "ai_invalid_response");
 
-    const network = await withFetch(
-      async () => {
-        throw new TypeError("simulated Worker network failure");
-      },
-      () => route.POST(request()),
-    );
+    const logged = [];
+    const originalConsoleError = console.error;
+    console.error = (...values) => logged.push(JSON.stringify(values));
+    let network;
+    try {
+      network = await withFetch(
+        async () => {
+          throw new TypeError(
+            `simulated Worker network failure ${TEST_API_KEY}`,
+          );
+        },
+        () => route.POST(request()),
+      );
+    } finally {
+      console.error = originalConsoleError;
+    }
     assert.equal(network.status, 502);
     assert.deepEqual(await network.json(), {
       error: "AI 이미지 생성 서비스에 연결하지 못했습니다.",
       code: "ai_network_error",
       retryable: true,
     });
+    assert.equal(logged.length, 1);
+    assert.doesNotMatch(logged[0], new RegExp(TEST_API_KEY, "u"));
+    assert.match(logged[0], /\[redacted\]/u);
   });
 });

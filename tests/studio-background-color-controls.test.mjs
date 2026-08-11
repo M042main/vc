@@ -37,21 +37,16 @@ test("offers black, gray, chroma-key, and one custom color control", async () =>
   assert.match(studio, /type=["']color["']/);
   assert.match(studio, /aria-label=["']자유 배경색 선택["']/);
   assert.match(studio, /updateCustomStageColorDraft\(event\.target\.value\)/);
-  assert.match(studio, /setCustomStageColorDraft\(color\)/);
   assert.match(
     studio,
-    /const\s+applyCustomStageColor[\s\S]{0,180}selectStageColor\(customStageColorDraft\)/,
+    /const\s+updateCustomStageColorDraft[\s\S]{0,240}setCustomStageColorDraft\(color\)[\s\S]{0,80}selectStageColor\(color\)/,
   );
-  assert.match(studio, /onClick=\{applyCustomStageColor\}/);
-  assert.match(studio, /aria-label=\{`자유 배경색 \$\{customStageColorDraft\} 적용`\}/);
-  assert.doesNotMatch(
-    studio,
-    /onChange=\{\(event\)\s*=>[\s\S]{0,120}selectStageColor\(event\.target\.value\)/,
-  );
+  assert.doesNotMatch(studio, /applyCustomStageColor|applyCustomColorButton/);
+  assert.doesNotMatch(studio, />\s*적용\s*<\/button>/);
   assert.match(studio, /className=\{styles\.customColorControl\}/);
   assert.match(css, /\.swatches\s*\{[\s\S]{0,180}grid-template-columns:\s*repeat\(4,/);
   assert.match(css, /\.customColorControl\s*\{[\s\S]{0,240}height:\s*44px/);
-  assert.match(css, /\.applyCustomColorButton\s*\{[\s\S]{0,180}min-height:\s*44px/);
+  assert.doesNotMatch(css, /\.applyCustomColorButton\b/);
 });
 
 test("keeps custom colors persistent while migrating the removed presets", async () => {
@@ -74,7 +69,7 @@ test("does not render the gallery CSS-module profile panel name", async () => {
   assert.doesNotMatch(gallery, /<span>활성 프로필<\/span>/);
 });
 
-test("replaces the gallery live-count badge with the existing class filter", async () => {
+test("renders only the accessible gallery class filter select", async () => {
   const [gallery, css] = await Promise.all([
     readFile(galleryUrl, "utf8"),
     readFile(galleryCssUrl, "utf8"),
@@ -89,9 +84,12 @@ test("replaces the gallery live-count badge with the existing class filter", asy
   );
   assert.match(
     gallery,
-    /<header className=\{styles\.header\}>[\s\S]{0,1800}<div className=\{styles\.galleryFilter\}>[\s\S]{0,500}<select[\s\S]{0,300}value=\{effectiveClassFilter\}[\s\S]{0,300}onChange=\{\(event\) => setClassFilter\(event\.target\.value\)\}[\s\S]{0,700}<\/header>/,
+    /<header className=\{styles\.header\}>[\s\S]{0,1800}<select[\s\S]{0,240}className=\{styles\.galleryFilter\}[\s\S]{0,240}value=\{effectiveClassFilter\}[\s\S]{0,240}onChange=\{\(event\) => setClassFilter\(event\.target\.value\)\}[\s\S]{0,180}aria-label=["']학급별 갤러리 필터["'][\s\S]{0,700}<\/header>/,
   );
-  assert.match(css, /\.galleryFilter\s*\{[\s\S]{0,180}display:\s*grid;/);
+  assert.doesNotMatch(gallery, /<label[^>]*>학급별 보기<\/label>/);
+  assert.doesNotMatch(gallery, /개 표시<\/span>/);
+  assert.doesNotMatch(css, /\.galleryFilter\s+(?:label|span|select)/);
+  assert.match(css, /\.galleryFilter\s*\{[\s\S]{0,180}min-height:\s*38px/);
   assert.match(
     css,
     /@media\s*\(max-width:\s*590px\)[\s\S]{0,700}\.galleryFilter\s*\{[\s\S]{0,120}width:\s*100%;/,

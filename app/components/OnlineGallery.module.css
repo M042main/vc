@@ -138,28 +138,8 @@
 }
 
 .galleryFilter {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
   align-self: end;
-  gap: 7px 10px;
   width: min(290px, 100%);
-  padding: 10px 11px;
-  border: 1px solid rgba(23, 23, 19, 0.13);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.66);
-  box-shadow: 4px 4px 0 rgba(223, 255, 69, 0.72);
-}
-
-.galleryFilter label,
-.galleryFilter span {
-  font-size: 10px;
-  font-weight: 850;
-}
-
-.galleryFilter select {
-  grid-column: 1 / -1;
-  width: 100%;
   min-height: 38px;
   padding: 0 32px 0 10px;
   border: 1px solid rgba(23, 23, 19, 0.22);
@@ -168,11 +148,6 @@
   color: #171713;
   font: inherit;
   font-size: 11px;
-}
-
-.galleryFilter span {
-  color: #706d65;
-  text-align: right;
 }
 
 .actionStatus {

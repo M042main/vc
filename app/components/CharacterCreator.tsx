@@ -13,6 +13,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -53,11 +54,10 @@ const PALETTE = [
   "#9A684B",
 ] as const;
 
-const BRUSH_SIZES = [
-  { label: "얇게", value: 6 },
-  { label: "보통", value: 14 },
-  { label: "굵게", value: 28 },
-] as const;
+const BRUSH_SIZE_MIN = 2;
+const BRUSH_SIZE_MAX = 40;
+const BRUSH_SIZE_STEP = 1;
+const DEFAULT_BRUSH_SIZE = 14;
 
 function createSilhouettePath() {
   const path = new Path2D();
@@ -355,7 +355,8 @@ export function CharacterCreator({
   const [side, setSide] = useState<CharacterSide>("front");
   const [tool, setTool] = useState<DrawingTool>("pencil");
   const [color, setColor] = useState<string>(PALETTE[0]);
-  const [brushSize, setBrushSize] = useState<number>(BRUSH_SIZES[1].value);
+  const brushSizeInputId = useId();
+  const [brushSize, setBrushSize] = useState<number>(DEFAULT_BRUSH_SIZE);
   const [historyAvailability, setHistoryAvailability] = useState({
     front: { undo: false, redo: false },
     back: { undo: false, redo: false },
@@ -877,24 +878,36 @@ export function CharacterCreator({
 
           <fieldset className={styles.controlGroup} disabled={editorDisabled}>
             <legend className={styles.groupLabel}>선 굵기</legend>
-            <div className={styles.sizePicker}>
-              {BRUSH_SIZES.map((size) => (
-                <button
-                  key={size.value}
-                  type="button"
-                  className={brushSize === size.value ? styles.sizeActive : ""}
-                  aria-label={`${size.label} 선 굵기`}
-                  aria-pressed={brushSize === size.value}
-                  onClick={() => setBrushSize(size.value)}
-                >
-                  <span
-                    className={styles.sizeDot}
-                    style={{ width: size.value, height: size.value }}
-                    aria-hidden="true"
-                  />
-                  <span>{size.label}</span>
-                </button>
-              ))}
+            <div className={styles.brushSizeControl}>
+              <div className={styles.brushSizePreview} aria-hidden="true">
+                <span
+                  className={styles.brushSizeDot}
+                  style={{ width: brushSize, height: brushSize }}
+                />
+              </div>
+              <div className={styles.brushSizeSliderGroup}>
+                <div className={styles.brushSizeMeta}>
+                  <span>{BRUSH_SIZE_MIN}px</span>
+                  <output htmlFor={brushSizeInputId} aria-live="polite">
+                    {brushSize}px
+                  </output>
+                  <span>{BRUSH_SIZE_MAX}px</span>
+                </div>
+                <label className={styles.srOnly} htmlFor={brushSizeInputId}>
+                  선 굵기
+                </label>
+                <input
+                  id={brushSizeInputId}
+                  className={styles.brushSizeSlider}
+                  type="range"
+                  min={BRUSH_SIZE_MIN}
+                  max={BRUSH_SIZE_MAX}
+                  step={BRUSH_SIZE_STEP}
+                  value={brushSize}
+                  aria-valuetext={`${brushSize}px`}
+                  onChange={(event) => setBrushSize(Number(event.target.value))}
+                />
+              </div>
             </div>
           </fieldset>
 
