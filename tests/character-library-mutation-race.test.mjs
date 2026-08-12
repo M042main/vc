@@ -44,7 +44,7 @@ test("restore, save, delete, and profile transitions share the lock and reject s
   const restore = block(
     page,
     "useEffect(() => {\n    if (!profileReady)",
-    "useEffect(() => {\n    const timer",
+    "useEffect(() => {\n    const requestId = ++adminSessionRequestRef.current;",
   );
   const profileChange = block(
     page,

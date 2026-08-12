@@ -80,7 +80,8 @@ test("keeps Netlify on Nitro without replacing the existing Sites build", async 
   assert.match(gitignore, /^\/dist\/$/mu);
   assert.match(gitignore, /^\/\.netlify\/$/mu);
   assert.match(readme, /GEMINI_API_KEY[\s\S]{0,220}(secret|비밀|Do not|넣지)/iu);
-  assert.match(readme, /oai-authenticated-user-email/u);
+  assert.match(readme, /ADMIN_ACCESS_CODE/u);
+  assert.match(readme, /ADMIN_SESSION_SECRET/u);
 });
 
 test("preserves all browser API paths for the Netlify server function", async () => {
@@ -90,6 +91,7 @@ test("preserves all browser API paths for the Netlify server function", async ()
   ]);
   const routes = [
     ["app/api/ai/generate/route.ts", "/api/ai/generate"],
+    ["app/api/admin/session/route.ts", "/api/admin/session"],
     ["app/api/gallery/classes/route.ts", "/api/gallery/classes"],
     ["app/api/gallery/delete/route.ts", "/api/gallery/delete"],
   ];
@@ -156,6 +158,7 @@ test(
     ).join("\n");
     for (const route of [
       "/api/ai/generate",
+      "/api/admin/session",
       "/api/gallery/classes",
       "/api/gallery/delete",
     ]) {
@@ -198,6 +201,12 @@ test(
         status: 415,
       },
       {
+        path: "/api/admin/session",
+        method: "GET",
+        headers: { Accept: "application/json" },
+        status: 200,
+      },
+      {
         path: "/api/gallery/classes",
         headers: {
           "Content-Type": "application/json",
@@ -217,9 +226,9 @@ test(
     for (const apiCase of apiCases) {
       const response = await netlifyFunction.default(
         new Request(`https://virtual-creator.netlify.app${apiCase.path}`, {
-          method: "POST",
+          method: apiCase.method ?? "POST",
           headers: apiCase.headers,
-          body: "{}",
+          body: apiCase.method === "GET" ? undefined : "{}",
         }),
       );
       assert.equal(

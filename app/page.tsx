@@ -73,8 +73,6 @@ type WorkspaceMode = "studio" | "creator" | "gallery" | "ai";
 const SAVED_CHARACTER_KEY = "motion-ink.saved-character.t-pose.v2";
 const SAVED_CHARACTER_ID = "motion-ink-latest-character-t-pose-v2";
 const LEGACY_GUEST_CHARACTER_OWNER_KEY = `${SAVED_CHARACTER_KEY}:migration-owner`;
-const ADMIN_ID = "m042";
-const ADMIN_SESSION_KEY = "virtual-creator.admin.m042";
 const GALLERY_IMAGE_TARGET_BYTES = Math.floor(5.5 * 1024 * 1024);
 
 type LibraryMutationToken = {
@@ -261,6 +259,8 @@ export default function Home() {
   const [adminDialogOpen, setAdminDialogOpen] = useState(false);
   const [adminIdDraft, setAdminIdDraft] = useState("");
   const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminLoginBusy, setAdminLoginBusy] = useState(false);
+  const adminSessionRequestRef = useRef(0);
   const characterStoreRef = useRef<PaperDollCharacterStore | null>(null);
   const artworkGenerationRef = useRef(0);
   const libraryMutationRef = useRef<LibraryMutationState>({
@@ -475,16 +475,29 @@ export default function Home() {
   }, [profile, profileReady]);
 
   useEffect(() => {
+    const requestId = ++adminSessionRequestRef.current;
+    let active = true;
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      try {
-        setAdminMode(
-          window.sessionStorage.getItem(ADMIN_SESSION_KEY) === "active",
-        );
-      } catch {
-        // Session storage can be unavailable in strict privacy modes.
-      }
+      void fetch("/api/admin/session", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          const payload = (await response.json()) as { authenticated?: unknown };
+          if (active && adminSessionRequestRef.current === requestId) {
+            setAdminMode(response.ok && payload.authenticated === true);
+          }
+        })
+        .catch(() => undefined);
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -536,31 +549,77 @@ export default function Home() {
     restoreAdminTriggerFocus();
   };
 
-  const enterAdminMode = (event: FormEvent<HTMLFormElement>) => {
+  const enterAdminMode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (adminIdDraft.normalize("NFKC").trim().toLowerCase() !== ADMIN_ID) {
-      setAdminError("관리자 이름이 일치하지 않습니다.");
+    if (adminLoginBusy) return;
+    const code = adminIdDraft.normalize("NFKC").trim();
+    if (!code) {
+      setAdminError("관리자 코드를 입력해 주세요.");
       adminInputRef.current?.focus();
       return;
     }
-    setAdminMode(true);
-    setMode("gallery");
+    setAdminLoginBusy(true);
+    const requestId = ++adminSessionRequestRef.current;
+    setAdminError(null);
     try {
-      window.sessionStorage.setItem(ADMIN_SESSION_KEY, "active");
-    } catch {
-      // The current tab still keeps admin mode even without session storage.
+      const response = await fetch("/api/admin/session", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json; charset=utf-8",
+        },
+        body: JSON.stringify({ code }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { authenticated?: unknown; error?: unknown }
+        | null;
+      if (!response.ok || payload?.authenticated !== true) {
+        throw new Error(
+          typeof payload?.error === "string"
+            ? payload.error
+            : "관리자 로그인을 완료하지 못했습니다.",
+        );
+      }
+      if (adminSessionRequestRef.current !== requestId) return;
+      setAdminMode(true);
+      setMode("gallery");
+      closeAdminDialog();
+    } catch (error) {
+      if (adminSessionRequestRef.current === requestId) {
+        setAdminError(
+          error instanceof Error ? error.message : "관리자 로그인을 완료하지 못했습니다.",
+        );
+        adminInputRef.current?.focus();
+      }
+    } finally {
+      if (adminSessionRequestRef.current === requestId) setAdminLoginBusy(false);
     }
-    closeAdminDialog();
   };
 
-  const leaveAdminMode = () => {
-    setAdminMode(false);
+  const leaveAdminMode = async () => {
+    if (adminLoginBusy) return;
+    setAdminLoginBusy(true);
+    const requestId = ++adminSessionRequestRef.current;
     try {
-      window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
-    } catch {
-      // Nothing else is required when session storage is unavailable.
+      const response = await fetch("/api/admin/session", {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("관리자 로그아웃을 완료하지 못했습니다.");
+      if (adminSessionRequestRef.current !== requestId) return;
+      setAdminMode(false);
+      closeAdminDialog();
+    } catch (error) {
+      if (adminSessionRequestRef.current === requestId) {
+        setAdminError(
+          error instanceof Error ? error.message : "관리자 로그아웃을 완료하지 못했습니다.",
+        );
+      }
+    } finally {
+      if (adminSessionRequestRef.current === requestId) setAdminLoginBusy(false);
     }
-    closeAdminDialog();
   };
 
   const handleProfileChange = (nextProfile: VisitorProfile | null) => {
@@ -964,15 +1023,16 @@ export default function Home() {
                 <button
                   className="admin-logout-button"
                   type="button"
-                  onClick={leaveAdminMode}
+                  onClick={() => void leaveAdminMode()}
+                  disabled={adminLoginBusy}
                 >
                   <LogOut size={17} aria-hidden="true" /> 관리자 모드 종료
                 </button>
               </>
             ) : (
-              <form onSubmit={enterAdminMode}>
-                <p>갤러리 관리 기능을 열려면 관리자 이름을 입력하세요.</p>
-                <label htmlFor="admin-id">관리자 이름</label>
+              <form onSubmit={(event) => void enterAdminMode(event)}>
+                <p>갤러리 관리 기능을 열려면 관리자 코드를 입력하세요.</p>
+                <label htmlFor="admin-id">관리자 코드</label>
                 <input
                   ref={adminInputRef}
                   id="admin-id"
@@ -981,8 +1041,9 @@ export default function Home() {
                     setAdminIdDraft(event.target.value);
                     if (adminError) setAdminError(null);
                   }}
-                  autoComplete="username"
-                  maxLength={24}
+                  type="password"
+                  autoComplete="current-password"
+                  maxLength={128}
                   aria-invalid={Boolean(adminError)}
                   aria-describedby={adminError ? "admin-id-error" : undefined}
                 />
@@ -991,8 +1052,12 @@ export default function Home() {
                     {adminError}
                   </span>
                 ) : null}
-                <button className="admin-submit-button" type="submit">
-                  관리자 모드 열기
+                <button
+                  className="admin-submit-button"
+                  type="submit"
+                  disabled={adminLoginBusy}
+                >
+                  {adminLoginBusy ? "확인 중" : "관리자 모드 열기"}
                 </button>
               </form>
             )}

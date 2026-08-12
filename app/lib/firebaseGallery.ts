@@ -42,7 +42,8 @@ const GALLERY_ENTRIES_PATH = `${GALLERY_DATABASE_PATH}/entries`;
 const GALLERY_CLASSES_PATH = `${GALLERY_DATABASE_PATH}/classes`;
 const GALLERY_ARTWORKS_PATH = `${GALLERY_DATABASE_PATH}/artworks`;
 
-const MAX_GALLERY_ENTRIES = 30;
+// Keep three numbered pages available while bounding Firebase Data URL memory.
+const MAX_GALLERY_ENTRIES = 90;
 const MAX_AI_SOURCE_ENTRIES = 12;
 const MAX_GALLERY_NAME_LENGTH = 60;
 const MAX_PNG_DATA_URL_SIZE = 6 * 1024 * 1024;
@@ -663,6 +664,40 @@ export async function deleteGalleryEntry(id: string): Promise<void> {
     throw await apiError(
       response,
       "관리자 권한으로 캐릭터를 삭제하지 못했습니다.",
+    );
+  }
+}
+
+export async function deleteAllGalleryEntries(): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(GALLERY_DELETE_API_PATH, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        all: true,
+        confirmation: "DELETE_ALL_GALLERY",
+      }),
+    });
+  } catch (error) {
+    throw new GalleryServiceError(
+      "관리자 전체 삭제 요청을 전송하지 못했습니다. 네트워크 연결을 확인하고 다시 시도해 주세요.",
+      {
+        code: "gallery_api_unreachable",
+        retryable: true,
+        status: null,
+        cause: error,
+      },
+    );
+  }
+  if (!response.ok) {
+    throw await apiError(
+      response,
+      "관리자 권한으로 갤러리 사진 전체를 삭제하지 못했습니다.",
     );
   }
 }

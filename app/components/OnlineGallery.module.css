@@ -159,6 +159,47 @@
   line-height: 1.5;
 }
 
+.adminBulkActions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 2px 4px;
+}
+
+.deleteAllButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid #942e26;
+  border-radius: 12px;
+  background: #fff;
+  color: #942e26;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.deleteAllConfirm {
+  width: min(100%, 560px);
+  padding: 12px;
+  border: 1px solid rgba(148, 46, 38, 0.35);
+  border-radius: 14px;
+  background: #fff0ed;
+  color: #6f211b;
+}
+
+.deleteAllConfirm p {
+  margin: 0 0 9px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.deleteAllConfirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .content {
   min-height: 270px;
   margin-top: 3px;
@@ -209,6 +250,67 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
   gap: 14px;
+}
+
+.pagination {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(23, 23, 19, 0.14);
+}
+
+.paginationStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.paginationPages {
+  display: flex;
+  min-width: 0;
+  gap: 7px;
+  overflow-x: auto;
+  justify-self: center;
+  padding: 4px;
+  scrollbar-width: thin;
+  overscroll-behavior-inline: contain;
+}
+
+.paginationArrow,
+.paginationNumber {
+  display: inline-grid;
+  min-width: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(23, 23, 19, 0.22);
+  border-radius: 12px;
+  background: #fff;
+  color: #171713;
+  font-size: 11px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.paginationNumber[aria-current="page"] {
+  border-color: #171713;
+  background: #dfff45;
+  box-shadow: inset 0 0 0 1px #171713;
+}
+
+.paginationArrow:disabled {
+  border-color: rgba(23, 23, 19, 0.1);
+  background: rgba(255, 255, 255, 0.46);
+  color: #99968e;
+  opacity: 1;
 }
 
 .card {
@@ -745,6 +847,17 @@
   .cardImage:hover .cardImageHint {
     background: #dfff45;
   }
+
+  .paginationArrow:not(:disabled):hover,
+  .paginationNumber:hover {
+    border-color: #171713;
+    background: #f1eee7;
+    transform: translateY(-1px);
+  }
+
+  .paginationNumber[aria-current="page"]:hover {
+    background: #dfff45;
+  }
 }
 
 @media (max-width: 590px) {
@@ -769,6 +882,16 @@
 
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .pagination {
+    gap: 6px;
+    margin-top: 18px;
+  }
+
+  .paginationPages {
+    width: 100%;
+    justify-self: stretch;
   }
 
   .cardBody {

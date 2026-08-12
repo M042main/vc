@@ -6,9 +6,30 @@ import ts from "typescript";
 const ADMIN_EMAIL = "m042@m042.kr";
 const PUSH_KEY = "-1234567890123456789";
 const PRIVATE_ROOM = "/000000/박근석_t7/motion_ink_gallery_a7f3c9";
+const ADMIN_SESSION_SECRET = "runtime-test-admin-session-secret";
 
 async function loadRoute(relativePath, tag) {
-  const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
+  let source = await readFile(new URL(relativePath, import.meta.url), "utf8");
+  if (source.includes('from "../../../lib/adminSession"')) {
+    const adminSessionSource = await readFile(
+      new URL("../app/lib/adminSession.ts", import.meta.url),
+      "utf8",
+    );
+    const { outputText: adminSessionModule } = ts.transpileModule(
+      adminSessionSource,
+      {
+        compilerOptions: {
+          module: ts.ModuleKind.ESNext,
+          target: ts.ScriptTarget.ES2022,
+        },
+      },
+    );
+    const adminSessionUrl = `data:text/javascript;base64,${Buffer.from(adminSessionModule).toString("base64")}`;
+    source = source.replace(
+      'from "../../../lib/adminSession"',
+      `from "${adminSessionUrl}"`,
+    );
+  }
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,
@@ -28,6 +49,26 @@ function adminRequest(method, body) {
     },
     body: JSON.stringify(body),
   });
+}
+
+async function signedAdminCookie() {
+  const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
+  const nonce = "abcdefghijklmnopqrstuv";
+  const payload = `${expiresAt}.${nonce}`;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(ADMIN_SESSION_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = Array.from(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)),
+    ),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return `__Host-vc-admin=${payload}.${signature}`;
 }
 
 async function withFetch(mock, run) {
@@ -68,6 +109,40 @@ test("class creation uses the exact regional Firebase collection and Worker-safe
   const payload = await response.json();
   assert.equal(payload.classRecord.id, PUSH_KEY);
   assert.equal(payload.classRecord.name, "1학년 1반");
+});
+
+test("class creation accepts the signed server administrator session on Netlify", async () => {
+  const previousSecret = process.env.ADMIN_SESSION_SECRET;
+  process.env.ADMIN_SESSION_SECRET = ADMIN_SESSION_SECRET;
+  try {
+    const route = await loadRoute(
+      "../app/api/gallery/classes/route.ts",
+      "class-cookie-create",
+    );
+    const cookie = await signedAdminCookie();
+    let calls = 0;
+    const response = await withFetch(async () => {
+      calls += 1;
+      return Response.json({ name: PUSH_KEY });
+    }, () =>
+      route.POST(
+        new Request("https://virtual-creator.netlify.app/api/gallery/classes", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: cookie,
+          },
+          body: JSON.stringify({ name: "넷리파이 학급" }),
+        }),
+      ));
+
+    assert.equal(response.status, 201);
+    assert.equal(calls, 1);
+    assert.equal((await response.json()).classRecord.name, "넷리파이 학급");
+  } finally {
+    if (previousSecret === undefined) delete process.env.ADMIN_SESSION_SECRET;
+    else process.env.ADMIN_SESSION_SECRET = previousSecret;
+  }
 });
 
 test("class creation never retries an uncertain POST and returns actionable network metadata", async () => {

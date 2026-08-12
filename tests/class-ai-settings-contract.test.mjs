@@ -12,7 +12,22 @@ async function source(relativePath) {
 }
 
 async function loadRoute(tag) {
-  const routeSource = await source("../app/api/gallery/classes/route.ts");
+  let routeSource = await source("../app/api/gallery/classes/route.ts");
+  const adminSessionSource = await source("../app/lib/adminSession.ts");
+  const { outputText: adminSessionModule } = ts.transpileModule(
+    adminSessionSource,
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.ESNext,
+        target: ts.ScriptTarget.ES2022,
+      },
+    },
+  );
+  const adminSessionUrl = `data:text/javascript;base64,${Buffer.from(adminSessionModule).toString("base64")}`;
+  routeSource = routeSource.replace(
+    'from "../../../lib/adminSession"',
+    `from "${adminSessionUrl}"`,
+  );
   const { outputText } = ts.transpileModule(routeSource, {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,

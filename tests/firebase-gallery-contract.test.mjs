@@ -7,6 +7,7 @@ const galleryDeleteRouteUrl = new URL(
   "../app/api/gallery/delete/route.ts",
   import.meta.url,
 );
+const adminSessionUrl = new URL("../app/lib/adminSession.ts", import.meta.url);
 const REQUIRED_BASE_PATH = "/000000/박근석_t7/motion_ink_gallery_a7f3c9";
 
 async function collectSources(directory = appRoot) {
@@ -104,10 +105,11 @@ test("publishes with push plus set and tears down the realtime listener", async 
   );
 });
 
-test("routes deletion through authenticated server code to one validated child", async () => {
-  const [{ firebase }, route] = await Promise.all([
+test("routes deletion through shared authenticated server code to isolated gallery paths", async () => {
+  const [{ firebase }, route, adminSession] = await Promise.all([
     gallerySources(),
     readFile(galleryDeleteRouteUrl, "utf8"),
+    readFile(adminSessionUrl, "utf8"),
   ]);
 
   assert.doesNotMatch(
@@ -127,13 +129,15 @@ test("routes deletion through authenticated server code to one validated child",
     "the client must send only a validated ID to the same-origin POST route",
   );
 
-  assert.match(route, /oai-authenticated-user-email/);
-  assert.match(route, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
-  assert.match(route, /TRUSTED_SITES_HOSTNAME\s*=\s*["']motion-ink-vrm-studio\.m042\.chatgpt\.site["']/);
+  assert.match(route, /import\s*\{\s*isAdminRequest\s*\}\s*from\s*["'][^"']*adminSession["']/u);
+  assert.match(route, /await\s+isAdminRequest\s*\(\s*request\s*\)/u);
+  assert.match(adminSession, /oai-authenticated-user-email/);
+  assert.match(adminSession, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
+  assert.match(adminSession, /TRUSTED_SITES_HOSTNAME\s*=\s*["']motion-ink-vrm-studio\.m042\.chatgpt\.site["']/);
   assert.match(
-    route,
+    adminSession,
     /new URL\(request\.url\)\.hostname\.toLowerCase\(\)\s*===\s*TRUSTED_SITES_HOSTNAME[\s\S]{0,220}request\.headers\.get\(AUTHENTICATED_USER_EMAIL_HEADER\)\s*===\s*ADMIN_EMAIL/u,
-    "the route must trust the exact admin email only on the Sites production host",
+    "the shared session must trust the exact admin email only on the Sites production host",
   );
   assert.match(route, /FIREBASE_PUSH_KEY_PATTERN\s*=\s*\/\^\[-_A-Za-z0-9\]\{20\}\$\/u/);
   assert.match(route, new RegExp(REQUIRED_BASE_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -148,11 +152,11 @@ test("routes deletion through authenticated server code to one validated child",
   );
   assert.doesNotMatch(
     route,
-    /fetch\s*\(\s*(?:FIREBASE_DATABASE_ORIGIN|GALLERY_ENTRIES_PATH)\s*,/,
-    "the route must never target the database origin or entries collection",
+    /fetch\s*\(\s*FIREBASE_DATABASE_ORIGIN\s*,/,
+    "the route must never target the database origin",
   );
   assert.ok(
-    route.indexOf("AUTHENTICATED_USER_EMAIL_HEADER") < route.indexOf("firebaseEntryUrl"),
+    route.indexOf("isAdminRequest") < route.indexOf("firebaseEntryUrl"),
     "authorization must happen before constructing or issuing the delete request",
   );
 });

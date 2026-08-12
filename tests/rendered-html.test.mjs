@@ -62,7 +62,8 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.match(page, /onCaptureReady=\{handleCaptureReady\}/);
   assert.match(page, /handleCaptureReady[\s\S]{0,1200}publishGalleryEntry\s*\(/);
   assert.match(page, /isAdmin=\{adminMode\}/);
-  assert.match(page, /ADMIN_ID\s*=\s*"m042"/);
+  assert.match(page, /fetch\("\/api\/admin\/session"/);
+  assert.doesNotMatch(page, /ADMIN_ID|ADMIN_SESSION_KEY|sessionStorage/);
   assert.match(page, /VIRTUAL CREATOR/);
   assert.doesNotMatch(page, /MOTION INK|<footer|Kalidoface 3D와|카메라 사용에는 HTTPS/i);
   assert.match(layout, /Virtual Creator/);

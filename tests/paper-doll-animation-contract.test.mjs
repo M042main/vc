@@ -12,7 +12,6 @@ const creatorUrl = new URL(
   "../app/components/CharacterCreator.tsx",
   import.meta.url,
 );
-const pageUrl = new URL("../app/page.tsx", import.meta.url);
 
 function unwrapExpression(expression) {
   let current = expression;
@@ -169,11 +168,10 @@ test("records and downloads a browser-local animation file", async () => {
 });
 
 test("preserves live tracking and transparent PNG export without upload APIs", async () => {
-  const [paperDollSource, studioSource, creatorSource, pageSource] = await Promise.all([
+  const [paperDollSource, studioSource, creatorSource] = await Promise.all([
     readFile(paperDollUrl, "utf8"),
     readFile(studioUrl, "utf8"),
     readFile(creatorUrl, "utf8"),
-    readFile(pageUrl, "utf8"),
   ]);
 
   assert.match(studioSource, /createHolisticTrackingWorker\s*\(/);
@@ -183,7 +181,7 @@ test("preserves live tracking and transparent PNG export without upload APIs", a
   assert.match(studioSource, /downloadBlob\s*\(/);
   assert.match(paperDollSource, /["']image\/png["']/);
 
-  const browserOnlySource = [paperDollSource, studioSource, creatorSource, pageSource].join(
+  const browserOnlySource = [paperDollSource, studioSource, creatorSource].join(
     "\n",
   );
   for (const [pattern, label] of [

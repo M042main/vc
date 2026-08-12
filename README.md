@@ -105,18 +105,20 @@ uses Vinext's Nitro adapter only for Netlify builds.
    `npm run build:netlify`; Nitro generates Netlify's publish and function
    output automatically.
 2. In **Project configuration → Environment variables**, add
-   `GEMINI_API_KEY` as a secret that is available to Functions. Do not put the
-   key in `netlify.toml` or commit it to the repository.
+   `GEMINI_API_KEY`, `ADMIN_ACCESS_CODE`, and `ADMIN_SESSION_SECRET` as secrets
+   that are available to Functions. Use an independent random value of at
+   least 32 characters for `ADMIN_SESSION_SECRET`. Do not put these values in
+   `netlify.toml` or commit them to the repository.
 3. Deploy. Nitro generates the Netlify server function and routing metadata,
    while static `_next` assets, MediaPipe worker files, and WASM are served from
    `dist`.
 
 Netlify does not provide the Sites-only `oai-authenticated-user-email` header.
-The student experience, tracking, Firebase gallery, and AI generation can run
-on Netlify, but administrator write actions require a trusted Netlify Identity
-integration (or another server-verified administrator session) before they can
-be enabled there. Never replace that server check with a browser-supplied
-header.
+This app therefore verifies `ADMIN_ACCESS_CODE` on the server and issues a
+short-lived, HMAC-signed HttpOnly administrator session using
+`ADMIN_SESSION_SECRET`. Administrator class and gallery write actions reject
+requests without that server-issued session. Never expose either value to
+browser code or replace the session check with a browser-supplied header.
 
 ## Learn More
 

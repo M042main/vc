@@ -1,6 +1,5 @@
-const AUTHENTICATED_USER_EMAIL_HEADER = "oai-authenticated-user-email";
-const ADMIN_EMAIL = "m042@m042.kr";
-const TRUSTED_SITES_HOSTNAME = "motion-ink-vrm-studio.m042.chatgpt.site";
+import { isAdminRequest } from "../../../lib/adminSession";
+
 const FIREBASE_DATABASE_ORIGIN =
   "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app";
 // 이 부분은 우리 반 공용 데이터베이스에서 내 방을 만드는 주소입니다
@@ -44,13 +43,6 @@ function errorResponse(
     { status, headers: { "Cache-Control": "no-store" } },
   );
 }
-function isAdmin(request: Request) {
-  return (
-    new URL(request.url).hostname.toLowerCase() === TRUSTED_SITES_HOSTNAME &&
-    request.headers.get(AUTHENTICATED_USER_EMAIL_HEADER) === ADMIN_EMAIL
-  );
-}
-
 function validatedClassId(value: unknown): string | null {
   return typeof value === "string" && FIREBASE_PUSH_KEY_PATTERN.test(value)
     ? value
@@ -144,7 +136,9 @@ function firebaseFailureResponse(
 }
 
 export async function POST(request: Request) {
-  if (!isAdmin(request)) return errorResponse("학급 관리 권한이 없습니다.", 403);
+  if (!(await isAdminRequest(request))) {
+    return errorResponse("학급 관리 권한이 없습니다.", 403);
+  }
   const payload = await requestPayload(request);
   const name = validatedClassName(payload?.name);
   if (!name) return errorResponse("학급 이름이 올바르지 않습니다.", 400);
@@ -203,7 +197,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!isAdmin(request)) return errorResponse("학급 관리 권한이 없습니다.", 403);
+  if (!(await isAdminRequest(request))) {
+    return errorResponse("학급 관리 권한이 없습니다.", 403);
+  }
   const payload = await requestPayload(request);
   const id = validatedClassId(payload?.id);
   if (!id) return errorResponse("변경할 학급 ID가 올바르지 않습니다.", 400);
@@ -307,7 +303,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!isAdmin(request)) return errorResponse("학급 관리 권한이 없습니다.", 403);
+  if (!(await isAdminRequest(request))) {
+    return errorResponse("학급 관리 권한이 없습니다.", 403);
+  }
   const payload = await requestPayload(request);
   const id = validatedClassId(payload?.id);
   if (!id) return errorResponse("삭제할 학급 ID가 올바르지 않습니다.", 400);

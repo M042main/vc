@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   Download,
   Heart,
@@ -24,6 +26,7 @@ import {
 } from "react";
 import {
   deleteGalleryEntry,
+  deleteAllGalleryEntries,
   getGalleryLikeActorKey,
   subscribeClassRecords,
   subscribeGalleryEntries,
@@ -37,6 +40,7 @@ import styles from "./OnlineGallery.module.css";
 const GALLERY_NAME_COOKIE = "motion_ink_gallery_name";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const NAME_MAX_LENGTH = 24;
+const GALLERY_PAGE_SIZE = 30;
 
 type NameAction =
   | { kind: "download"; entry: GalleryEntry }
@@ -145,8 +149,11 @@ export function OnlineGallery({
   const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteAllConfirming, setDeleteAllConfirming] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [classFilter, setClassFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
   const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -154,9 +161,15 @@ export function OnlineGallery({
   const previewDialogRef = useRef<HTMLElement>(null);
   const previewCloseRef = useRef<HTMLButtonElement>(null);
   const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const galleryFilterRef = useRef<HTMLSelectElement>(null);
+  const deleteAllTriggerRef = useRef<HTMLButtonElement>(null);
+  const deleteAllConfirmRef = useRef<HTMLButtonElement>(null);
   const objectUrlsRef = useRef(new Set<string>());
   const revokeTimersRef = useRef(new Set<number>());
   const likeInFlightRef = useRef(new Set<string>());
+  const downloadInFlightRef = useRef(false);
+  const deleteInFlightRef = useRef<string | null>(null);
+  const deleteAllInFlightRef = useRef(false);
   const likeOwner =
     profile && !profile.guest
       ? `${profile.classId ?? ""}:${profile.name}`
@@ -273,6 +286,7 @@ export function OnlineGallery({
     if (isAdmin) return;
     const timer = window.setTimeout(() => {
       setDeleteCandidateId(null);
+      setDeleteAllConfirming(false);
       setDeleteError(null);
     }, 0);
     return () => window.clearTimeout(timer);
@@ -309,6 +323,35 @@ export function OnlineGallery({
       }),
     [activeClassIds, effectiveClassFilter, entries],
   );
+  const totalPages = Math.max(
+    1,
+    Math.ceil(visibleEntries.length / GALLERY_PAGE_SIZE),
+  );
+  const activePage = Math.min(currentPage, totalPages);
+  const paginatedEntries = useMemo(() => {
+    const firstEntryIndex = (activePage - 1) * GALLERY_PAGE_SIZE;
+    return visibleEntries.slice(
+      firstEntryIndex,
+      firstEntryIndex + GALLERY_PAGE_SIZE,
+    );
+  }, [activePage, visibleEntries]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCurrentPage(1), 0);
+    return () => window.clearTimeout(timer);
+  }, [effectiveClassFilter]);
+
+  useEffect(() => {
+    if (currentPage <= totalPages) return;
+    const timer = window.setTimeout(() => setCurrentPage(totalPages), 0);
+    return () => window.clearTimeout(timer);
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    if (!deleteAllConfirming) return;
+    const timer = window.setTimeout(() => deleteAllConfirmRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [deleteAllConfirming]);
 
   const closeNameDialog = useCallback(() => {
     setNameAction(null);
@@ -348,7 +391,14 @@ export function OnlineGallery({
 
   const downloadEntry = useCallback(
     async (entry: GalleryEntry, downloaderName: string) => {
-      if (downloadingId) return;
+      if (
+        downloadingId ||
+        downloadInFlightRef.current ||
+        deleteAllInFlightRef.current
+      ) {
+        return;
+      }
+      downloadInFlightRef.current = true;
       setDownloadingId(entry.id);
       setActionMessage(`${entry.name}님의 캐릭터를 준비하고 있습니다.`);
       try {
@@ -374,6 +424,7 @@ export function OnlineGallery({
       } catch (error) {
         setActionMessage(errorMessage(error, "캐릭터를 다운로드하지 못했습니다."));
       } finally {
+        downloadInFlightRef.current = false;
         setDownloadingId(null);
       }
     },
@@ -382,6 +433,7 @@ export function OnlineGallery({
 
   const requestDownload = useCallback(
     (entry: GalleryEntry, event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (deleteAllInFlightRef.current) return;
       const downloaderName = profile?.name || viewerName;
       if (!downloaderName) {
         openNameDialog({ kind: "download", entry }, event.currentTarget);
@@ -394,6 +446,7 @@ export function OnlineGallery({
 
   const requestLike = useCallback(
     async (entry: GalleryEntry) => {
+      if (deleteAllInFlightRef.current) return;
       if (!profile) {
         setActionMessage("좋아요를 누르려면 먼저 학급 프로필을 설정해 주세요.");
         return;
@@ -475,11 +528,18 @@ export function OnlineGallery({
 
   const requestDelete = useCallback(
     (entry: GalleryEntry) => {
-      if (!isAdmin || deletingId) return;
+      if (
+        !isAdmin ||
+        deletingId ||
+        deletingAll ||
+        deleteAllInFlightRef.current
+      ) {
+        return;
+      }
       setDeleteCandidateId(entry.id);
       setDeleteError(null);
     },
-    [deletingId, isAdmin],
+    [deletingAll, deletingId, isAdmin],
   );
 
   const cancelDelete = useCallback(() => {
@@ -490,7 +550,17 @@ export function OnlineGallery({
 
   const confirmDelete = useCallback(
     async (entry: GalleryEntry) => {
-      if (!isAdmin || deletingId || deleteCandidateId !== entry.id) return;
+      if (
+        !isAdmin ||
+        deletingId ||
+        deletingAll ||
+        deleteInFlightRef.current ||
+        deleteAllInFlightRef.current ||
+        deleteCandidateId !== entry.id
+      ) {
+        return;
+      }
+      deleteInFlightRef.current = entry.id;
       setDeletingId(entry.id);
       setDeleteError(null);
       setActionMessage(`${entry.name}님의 캐릭터를 갤러리에서 삭제하는 중입니다.`);
@@ -509,11 +579,52 @@ export function OnlineGallery({
         setDeleteError(message);
         setActionMessage(message);
       } finally {
+        deleteInFlightRef.current = null;
         setDeletingId(null);
       }
     },
-    [deleteCandidateId, deletingId, isAdmin],
+    [deletingAll, deleteCandidateId, deletingId, isAdmin],
   );
+
+  const confirmDeleteAll = useCallback(async () => {
+    if (
+      !isAdmin ||
+      deletingId ||
+      deletingAll ||
+      deleteInFlightRef.current ||
+      deleteAllInFlightRef.current ||
+      !deleteAllConfirming
+    ) {
+      return;
+    }
+    if (downloadInFlightRef.current || likeInFlightRef.current.size > 0) {
+      const message = "진행 중인 다운로드나 좋아요 저장이 끝난 뒤 다시 시도해 주세요.";
+      setDeleteError(message);
+      setActionMessage(message);
+      return;
+    }
+    deleteAllInFlightRef.current = true;
+    setDeletingAll(true);
+    setDeleteError(null);
+    setActionMessage("온라인 갤러리의 모든 사진을 삭제하는 중입니다.");
+    try {
+      await deleteAllGalleryEntries();
+      setDeleteAllConfirming(false);
+      setDeleteCandidateId(null);
+      setCurrentPage(1);
+      setGalleryLoading(true);
+      setSubscriptionVersion((version) => version + 1);
+      setActionMessage("온라인 갤러리의 모든 사진을 삭제했습니다.");
+      window.setTimeout(() => galleryFilterRef.current?.focus(), 0);
+    } catch (error) {
+      const message = errorMessage(error, "갤러리 사진 전체를 삭제하지 못했습니다.");
+      setDeleteError(message);
+      setActionMessage(message);
+    } finally {
+      deleteAllInFlightRef.current = false;
+      setDeletingAll(false);
+    }
+  }, [deleteAllConfirming, deletingAll, deletingId, isAdmin]);
 
   const submitName = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -625,6 +736,7 @@ export function OnlineGallery({
           <h2 id={headingId}>함께 만든 캐릭터를 둘러보세요</h2>
         </div>
         <select
+          ref={galleryFilterRef}
           id={`${headingId}-class-filter`}
           className={styles.galleryFilter}
           value={effectiveClassFilter}
@@ -646,11 +758,85 @@ export function OnlineGallery({
         </p>
       ) : null}
 
+      {isAdmin && entries.length > 0 ? (
+        <div className={styles.adminBulkActions}>
+          {deleteAllConfirming ? (
+            <div
+              className={styles.deleteAllConfirm}
+              role="group"
+              aria-label="갤러리 사진 전체 삭제 확인"
+            >
+              <p>
+                현재 화면에 불러온 수와 관계없이 온라인 갤러리의 모든 사진을
+                삭제합니다. 계속하면 복구할 수 없습니다.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  ref={deleteAllConfirmRef}
+                  className={styles.confirmDeleteButton}
+                  onClick={() => void confirmDeleteAll()}
+                  disabled={
+                    deletingAll ||
+                    deletingId !== null ||
+                    downloadingId !== null ||
+                    likingIds.size > 0
+                  }
+                >
+                  {deletingAll ? (
+                    <LoaderCircle
+                      className={styles.spinner}
+                      size={16}
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Trash2 size={16} aria-hidden="true" />
+                  )}
+                  {deletingAll ? "전체 삭제 중" : "모든 사진 삭제 확인"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.cancelDeleteButton}
+                  onClick={() => {
+                    setDeleteAllConfirming(false);
+                    setDeleteError(null);
+                    window.setTimeout(() => deleteAllTriggerRef.current?.focus(), 0);
+                  }}
+                  disabled={deletingAll}
+                >
+                  취소
+                </button>
+              </div>
+              {deleteError ? <span className={styles.deleteError} role="alert">{deleteError}</span> : null}
+            </div>
+          ) : (
+            <button
+              type="button"
+              ref={deleteAllTriggerRef}
+              className={styles.deleteAllButton}
+              onClick={() => {
+                setDeleteCandidateId(null);
+                setDeleteError(null);
+                setDeleteAllConfirming(true);
+              }}
+              disabled={
+                deletingAll ||
+                deletingId !== null ||
+                downloadingId !== null ||
+                likingIds.size > 0
+              }
+            >
+              <Trash2 size={16} aria-hidden="true" /> 모든 사진 삭제
+            </button>
+          )}
+        </div>
+      ) : null}
+
       <p className={styles.actionStatus} role="status" aria-live="polite">
         {actionMessage}
       </p>
 
-      <div className={styles.content} aria-busy={galleryLoading}>
+      <div className={styles.content} aria-busy={galleryLoading || deletingAll}>
         {galleryLoading ? (
           <div className={styles.loadingState} role="status" aria-live="polite">
             <LoaderCircle className={styles.spinner} size={24} aria-hidden="true" />
@@ -680,8 +866,9 @@ export function OnlineGallery({
             <span>첫 번째 캐릭터를 갤러리에 남겨보세요.</span>
           </div>
         ) : (
+          <>
           <div className={styles.grid} role="list" aria-label="온라인 캐릭터 목록">
-            {visibleEntries.map((entry) => {
+            {paginatedEntries.map((entry) => {
               const serverLiked = Boolean(
                 likeActorKey && entry.likeActorKeys.includes(likeActorKey),
               );
@@ -710,6 +897,7 @@ export function OnlineGallery({
                   aria-haspopup="dialog"
                   aria-label={`${entry.name}님의 캐릭터 전체보기`}
                   title={`${entry.name}님의 캐릭터 전체보기`}
+                  disabled={deletingAll}
                 >
                   {/* Firebase entries contain PNG Data URLs created by this app. */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -740,7 +928,9 @@ export function OnlineGallery({
                       type="button"
                       className={styles.downloadButton}
                       onClick={(event) => requestDownload(entry, event)}
-                      disabled={downloadingId !== null || deletingId !== null}
+                      disabled={
+                        downloadingId !== null || deletingId !== null || deletingAll
+                      }
                       aria-label={
                         downloadingId === entry.id
                           ? `${entry.name}님의 캐릭터 PNG 준비 중`
@@ -763,7 +953,7 @@ export function OnlineGallery({
                       className={styles.likeButton}
                       data-liked={displayedLiked}
                       onClick={() => void requestLike(entry)}
-                      disabled={likeBusy || deletingId !== null}
+                      disabled={likeBusy || deletingId !== null || deletingAll}
                       aria-label={likeLabel}
                       aria-pressed={displayedLiked}
                       title={likeLabel}
@@ -789,7 +979,7 @@ export function OnlineGallery({
                         type="button"
                         className={styles.deleteButton}
                         onClick={() => requestDelete(entry)}
-                        disabled={deletingId !== null}
+                        disabled={deletingId !== null || deletingAll}
                         aria-label={`${entry.name}님의 캐릭터 삭제 선택`}
                         aria-expanded={deleteCandidateId === entry.id}
                         aria-controls={
@@ -824,7 +1014,7 @@ export function OnlineGallery({
                         type="button"
                         className={styles.confirmDeleteButton}
                         onClick={() => void confirmDelete(entry)}
-                        disabled={deletingId !== null}
+                        disabled={deletingId !== null || deletingAll}
                       >
                         {deletingId === entry.id ? (
                           <LoaderCircle
@@ -841,7 +1031,7 @@ export function OnlineGallery({
                         type="button"
                         className={styles.cancelDeleteButton}
                         onClick={cancelDelete}
-                        disabled={deletingId !== null}
+                        disabled={deletingId !== null || deletingAll}
                       >
                         취소
                       </button>
@@ -857,6 +1047,55 @@ export function OnlineGallery({
               );
             })}
           </div>
+          {totalPages > 1 ? (
+            <nav className={styles.pagination} aria-label="온라인 갤러리 페이지">
+              <span
+                className={styles.paginationStatus}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                총 {visibleEntries.length}개 중 {activePage}페이지, 전체 {totalPages}페이지
+              </span>
+              <button
+                type="button"
+                className={styles.paginationArrow}
+                onClick={() => setCurrentPage(activePage - 1)}
+                disabled={activePage === 1}
+                aria-label="이전 갤러리 페이지"
+              >
+                <ChevronLeft size={18} aria-hidden="true" />
+              </button>
+              <div className={styles.paginationPages}>
+                {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                  (pageNumber) => (
+                    <button
+                      type="button"
+                      className={styles.paginationNumber}
+                      key={pageNumber}
+                      onClick={() => setCurrentPage(pageNumber)}
+                      aria-current={pageNumber === activePage ? "page" : undefined}
+                      aria-label={`${pageNumber}페이지${
+                        pageNumber === activePage ? ", 현재 페이지" : "로 이동"
+                      }`}
+                    >
+                      {pageNumber}
+                    </button>
+                  ),
+                )}
+              </div>
+              <button
+                type="button"
+                className={styles.paginationArrow}
+                onClick={() => setCurrentPage(activePage + 1)}
+                disabled={activePage === totalPages}
+                aria-label="다음 갤러리 페이지"
+              >
+                <ChevronRight size={18} aria-hidden="true" />
+              </button>
+            </nav>
+          ) : null}
+          </>
         )}
       </div>
 

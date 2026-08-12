@@ -5,6 +5,8 @@ import test from "node:test";
 const pageUrl = new URL("../app/page.tsx", import.meta.url);
 const layoutUrl = new URL("../app/layout.tsx", import.meta.url);
 const globalsUrl = new URL("../app/globals.css", import.meta.url);
+const adminSessionUrl = new URL("../app/lib/adminSession.ts", import.meta.url);
+const adminRouteUrl = new URL("../app/api/admin/session/route.ts", import.meta.url);
 
 test("renames the product to Virtual Creator and removes the requested footer", async () => {
   const [page, layout] = await Promise.all([
@@ -19,19 +21,29 @@ test("renames the product to Virtual Creator and removes the requested footer", 
   assert.doesNotMatch(layout, /MOTION INK/);
 });
 
-test("opens m042 admin mode from the top-right gear and passes it to the gallery", async () => {
-  const [page, globals] = await Promise.all([
+test("opens server-authenticated admin mode from the top-right gear and passes it to the gallery", async () => {
+  const [page, globals, adminSession, adminRoute] = await Promise.all([
     readFile(pageUrl, "utf8"),
     readFile(globalsUrl, "utf8"),
+    readFile(adminSessionUrl, "utf8"),
+    readFile(adminRouteUrl, "utf8"),
   ]);
 
-  assert.match(page, /ADMIN_ID\s*=\s*"m042"/);
   assert.match(page, /<Settings[^>]*aria-hidden="true"/);
   assert.match(page, /관리자 m042 접근/);
   assert.match(page, /role="dialog"/);
   assert.match(page, /aria-modal="true"/);
-  assert.match(page, /window\.sessionStorage\.setItem\(ADMIN_SESSION_KEY, "active"\)/);
-  assert.match(page, /window\.sessionStorage\.removeItem\(ADMIN_SESSION_KEY\)/);
+  assert.match(page, /fetch\("\/api\/admin\/session"[\s\S]{0,220}method:\s*"POST"[\s\S]{0,220}credentials:\s*"same-origin"/);
+  assert.match(page, /fetch\("\/api\/admin\/session"[\s\S]{0,220}method:\s*"DELETE"/);
+  assert.doesNotMatch(page, /ADMIN_ID|ADMIN_SESSION_KEY|sessionStorage/);
+  assert.match(adminSession, /ADMIN_COOKIE_NAME\s*=\s*"__Host-vc-admin"/);
+  assert.match(adminSession, /HttpOnly; Secure; SameSite=Strict/);
+  assert.match(adminSession, /ADMIN_ACCESS_CODE/);
+  assert.match(adminSession, /ADMIN_SESSION_SECRET/);
+  assert.match(adminRoute, /createAdminSessionCookie/);
+  assert.match(adminRoute, /export async function GET/);
+  assert.match(adminRoute, /export async function POST/);
+  assert.match(adminRoute, /export async function DELETE/);
   assert.match(page, /isAdmin=\{adminMode\}/);
   assert.match(page, /관리자 모드 종료/);
   assert.match(page, /const\s+profileGateBlocking\s*=\s*!profile\s*&&\s*profileReady/);

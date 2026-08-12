@@ -15,6 +15,7 @@ const files = {
   gallery: new URL("../app/components/OnlineGallery.tsx", import.meta.url),
   page: new URL("../app/page.tsx", import.meta.url),
   classesRoute: new URL("../app/api/gallery/classes/route.ts", import.meta.url),
+  adminSession: new URL("../app/lib/adminSession.ts", import.meta.url),
 };
 
 async function sources() {
@@ -33,13 +34,21 @@ test("keeps classes, gallery entries, and artwork inside the assigned Firebase r
   assert.doesNotMatch(classesRoute, /\/entries|\/artworks/);
 });
 
-test("keeps class create and delete behind exact Sites-email authorization", async () => {
-  const { firebase, classesRoute } = await sources();
-  assert.match(classesRoute, /oai-authenticated-user-email/);
-  assert.match(classesRoute, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
+test("keeps class create and delete behind server-verified administrator authorization", async () => {
+  const { firebase, classesRoute, adminSession } = await sources();
+  assert.match(
+    classesRoute,
+    /import\s*\{\s*isAdminRequest\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/lib\/adminSession["']/,
+  );
+  assert.match(adminSession, /oai-authenticated-user-email/);
+  assert.match(adminSession, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
   assert.match(classesRoute, /export\s+async\s+function\s+POST/);
   assert.match(classesRoute, /export\s+async\s+function\s+DELETE/);
-  assert.match(classesRoute, /if\s*\(\s*!isAdmin\s*\(request\)\s*\)[\s\S]{0,100}403/g);
+  assert.ok(
+    [...classesRoute.matchAll(/if\s*\(\s*!\(await\s+isAdminRequest\(request\)\)\s*\)[\s\S]{0,120}403/gu)]
+      .length >= 2,
+    "class creation and deletion must await the server-side administrator check",
+  );
   assert.match(classesRoute, /FIREBASE_PUSH_KEY_PATTERN/);
   assert.match(
     classesRoute,
@@ -77,7 +86,7 @@ test("stores class metadata while keeping legacy gallery records readable and fi
   assert.match(gallery, /effectiveClassFilter\s*===\s*["']all["']/);
   assert.match(gallery, /effectiveClassFilter\s*===\s*["']unclassified["']/);
   assert.match(gallery, /!entry\.classId\s*\|\|\s*!activeClassIds\.has\s*\(\s*entry\.classId\s*\)/);
-  assert.match(gallery, /visibleEntries\.map\s*\(/);
+  assert.match(gallery, /paginatedEntries\.map\s*\(/);
   assert.match(gallery, /profile\.guest[\s\S]{0,220}게스트는 로컬 체험만 가능/);
   assert.match(gallery, /profile\?\.guest[\s\S]{0,320}온라인\s*갤러리 업로드와 좋아요/);
 });

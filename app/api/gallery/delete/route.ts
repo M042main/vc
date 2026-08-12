@@ -1,12 +1,12 @@
-const AUTHENTICATED_USER_EMAIL_HEADER = "oai-authenticated-user-email";
-const ADMIN_EMAIL = "m042@m042.kr";
-const TRUSTED_SITES_HOSTNAME = "motion-ink-vrm-studio.m042.chatgpt.site";
+import { isAdminRequest } from "../../../lib/adminSession";
+
 const FIREBASE_DATABASE_ORIGIN =
   "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app";
 // 이 부분은 우리 반 공용 데이터베이스에서 내 방을 만드는 주소입니다
 const GALLERY_ENTRIES_PATH =
   "/000000/박근석_t7/motion_ink_gallery_a7f3c9/entries";
 const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
+const DELETE_ALL_CONFIRMATION = "DELETE_ALL_GALLERY";
 
 type ApiErrorCode =
   | "firebase_network_error"
@@ -17,13 +17,6 @@ type ApiErrorCode =
   | "firebase_unavailable";
 
 export const dynamic = "force-dynamic";
-
-function isAdmin(request: Request) {
-  return (
-    new URL(request.url).hostname.toLowerCase() === TRUSTED_SITES_HOSTNAME &&
-    request.headers.get(AUTHENTICATED_USER_EMAIL_HEADER) === ADMIN_EMAIL
-  );
-}
 
 function errorResponse(
   error: string,
@@ -109,7 +102,7 @@ function validatedEntryId(value: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  if (!isAdmin(request)) {
+  if (!(await isAdminRequest(request))) {
     return errorResponse("이 계정에는 갤러리 삭제 권한이 없습니다.", 403);
   }
 
@@ -124,7 +117,41 @@ export async function POST(request: Request) {
     return errorResponse("삭제 요청 형식이 올바르지 않습니다.", 400);
   }
 
-  const id = validatedEntryId((payload as Record<string, unknown>).id);
+  const deleteRequest = payload as Record<string, unknown>;
+  if (deleteRequest.all === true) {
+    if (deleteRequest.confirmation !== DELETE_ALL_CONFIRMATION) {
+      return errorResponse(
+        "전체 사진 삭제 확인 문구가 올바르지 않습니다.",
+        400,
+      );
+    }
+
+    const firebaseEntriesUrl = new URL(
+      `${GALLERY_ENTRIES_PATH}.json`,
+      FIREBASE_DATABASE_ORIGIN,
+    );
+    let firebaseResponse: Response;
+    try {
+      firebaseResponse = await fetch(firebaseEntriesUrl, {
+        method: "DELETE",
+        redirect: "follow",
+        headers: { Accept: "application/json" },
+      });
+    } catch {
+      return errorResponse(
+        "Firebase 전체 삭제 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        502,
+        { code: "firebase_network_error", retryable: true },
+      );
+    }
+    if (!firebaseResponse.ok) return firebaseFailureResponse(firebaseResponse);
+    return Response.json(
+      { deleted: true, all: true },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const id = validatedEntryId(deleteRequest.id);
   if (!id) {
     return errorResponse("삭제할 갤러리 항목 ID가 올바르지 않습니다.", 400);
   }
