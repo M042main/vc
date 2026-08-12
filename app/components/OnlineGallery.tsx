@@ -739,9 +739,6 @@ export function OnlineGallery({
     >
       <header className={styles.header}>
         <div>
-          <span className={styles.eyebrow}>
-            <span aria-hidden="true" /> ONLINE GALLERY · LIVE
-          </span>
           <h2 id={headingId}>함께 만든 캐릭터를 둘러보세요</h2>
         </div>
         <select

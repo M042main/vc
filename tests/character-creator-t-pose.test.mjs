@@ -87,8 +87,10 @@ test("uses one clear horizontal T-pose in the authoring guide and live rig", asy
   );
   assert.match(
     creator,
-    /aria-label=\{`\$\{side === "front" \? "앞면" : "뒷면"\} 캐릭터 그리기 영역`\}/,
+    /aria-label="앞면 캐릭터 그리기 영역"/,
   );
+  assert.match(creator, /const EDITOR_SIDE = "front" as const/);
+  assert.doesNotMatch(creator, /캐릭터 면 선택|switchSide|setSide\(|"back"\s*\?\s*styles\.segmentActive/);
   assert.match(creator, /T-포즈 안팎 어디든 그릴 수 있으며/);
 });
 

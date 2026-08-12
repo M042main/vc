@@ -118,7 +118,7 @@ test("drives independent eye, brow, nose, lip, mouth-corner, and jaw regions fro
   assert.match(warp, /regionInfluence\(source, 300, 169/);
 });
 
-test("removes the maker heading and keeps both save actions at the bottom of the tool panel", async () => {
+test("keeps only the Studio save action at the bottom of the front-only tool panel", async () => {
   const [source, css] = await Promise.all([
     readFile(creatorUrl, "utf8"),
     readFile(creatorCssUrl, "utf8"),
@@ -134,11 +134,14 @@ test("removes the maker heading and keeps both save actions at the bottom of the
   assert.match(source, /"character-face-guide-help character-canvas-help"/);
   assert.ok(asideStart >= 0 && actionsStart > asideStart && actionsStart < asideEnd);
   assert.ok(stageStart > asideEnd, "save actions must not remain in the right stage column");
-  assert.equal(source.match(/현재 면 PNG 저장/g)?.length, 1);
+  assert.doesNotMatch(source, /현재 면 PNG 저장|downloadPng|styles\.downloadButton/u);
+  assert.doesNotMatch(source, /보이는 면|캐릭터 면 선택|styles\.segmented|styles\.sideBadge/u);
+  assert.match(source, /const EDITOR_SIDE = "front" as const/u);
+  assert.match(source, /const dataUrl = createExportDataUrl\(\);/u);
   assert.equal(source.match(/저장하고 스튜디오로/g)?.length, 1);
   assert.match(css, /\.panelActions\s*\{[\s\S]{0,180}margin-top:\s*auto/);
-  assert.match(css, /@media\s*\(max-width:\s*720px\)[\s\S]{0,700}\.panelActions\s*\{[\s\S]{0,160}grid-template-columns:\s*repeat\(2/);
-  assert.match(css, /@media\s*\(max-width:\s*480px\)[\s\S]{0,900}\.panelActions\s*\{[\s\S]{0,100}grid-template-columns:\s*1fr/);
+  assert.doesNotMatch(css, /\.(?:segmented|segmentActive|sideBadge|downloadButton)\b/u);
+  assert.match(css, /@media\s*\(max-width:\s*720px\)[\s\S]{0,700}\.panelActions\s*\{[\s\S]{0,160}grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 });
 
 test("composites an optional live background but omits it from transparent capture", async () => {

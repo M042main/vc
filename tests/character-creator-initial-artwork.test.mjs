@@ -52,7 +52,7 @@ test("clears the previous slot before decoding and never lets the first stroke c
     "blanking the old owner cannot be deferred to a timer",
   );
   assert.match(importEffect, /undoHistoryRef\.current\s*=\s*\{\s*front:\s*\[\],\s*back:\s*\[\]\s*\}/);
-  assert.match(importEffect, /paintVisibleCanvas\(sideRef\.current\)[\s\S]*const image/);
+  assert.match(importEffect, /paintVisibleCanvas\(\)[\s\S]*const image/);
   assert.match(
     pointerDown,
     /if\s*\(disabled\s*\|\|\s*artworkImportPendingRef\.current\)[\s\S]*return/,

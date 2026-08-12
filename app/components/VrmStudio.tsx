@@ -2082,10 +2082,6 @@ export function VrmStudio({
               <Upload size={24} aria-hidden="true" />
             </span>
             <h3>캐릭터를 무대에 올려볼까요?</h3>
-            <p>
-              VRM 0.x와 1.x를 지원합니다. 파일은 업로드되지 않고 이 기기에서만
-              열립니다.
-            </p>
             <button type="button" onClick={() => fileInputRef.current?.click()}>
               파일 찾아보기
             </button>
@@ -2329,7 +2325,7 @@ export function VrmStudio({
             aria-haspopup="dialog"
           >
             {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
-            {isCapturing ? "전신 맞추는 중" : "전신 PNG 자동 저장"}
+            {isCapturing ? "전신 맞추는 중" : "캐릭터 사진찍기"}
           </button>
         </div>
 

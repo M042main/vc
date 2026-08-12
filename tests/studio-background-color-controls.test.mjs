@@ -77,6 +77,9 @@ test("renders only the accessible gallery class filter select", async () => {
 
   assert.doesNotMatch(gallery, /styles\.liveCount|formattedCount|CHARACTERS/);
   assert.doesNotMatch(css, /\.liveCount\b/);
+  assert.doesNotMatch(gallery, /ONLINE GALLERY\s*·\s*LIVE|styles\.eyebrow/);
+  assert.doesNotMatch(css, /\.eyebrow\b/);
+  assert.match(gallery, /<h2 id=\{headingId\}>함께 만든 캐릭터를 둘러보세요<\/h2>/);
   assert.equal(
     [...gallery.matchAll(/className=\{styles\.galleryFilter\}/g)].length,
     1,

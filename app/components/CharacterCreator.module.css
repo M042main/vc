@@ -50,33 +50,6 @@
   letter-spacing: -0.01em;
 }
 
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 4px;
-  background: #e8e7e2;
-  border-radius: 12px;
-}
-
-.segmented button {
-  min-height: 38px;
-  color: #666c75;
-  background: transparent;
-  border: 0;
-  border-radius: 9px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 750;
-  cursor: pointer;
-  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
-}
-
-.segmented .segmentActive {
-  color: var(--ink);
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(30, 33, 38, 0.09);
-}
-
 .toolGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -369,22 +342,6 @@
   outline-offset: 3px;
 }
 
-.sideBadge {
-  position: absolute;
-  top: 26px;
-  left: 26px;
-  padding: 6px 9px;
-  color: rgba(32, 37, 44, 0.62);
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(56, 60, 66, 0.12);
-  border-radius: 999px;
-  backdrop-filter: blur(6px);
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-  pointer-events: none;
-}
-
 .panelActions {
   display: grid;
   gap: 10px;
@@ -418,16 +375,6 @@
   transform: none;
 }
 
-.downloadButton {
-  color: #3d444e;
-  background: #fff;
-  border: 1px solid #d9d9d6;
-}
-
-.downloadButton:hover {
-  box-shadow: 0 8px 18px rgba(30, 34, 40, 0.08);
-}
-
 .sendButton {
   color: #fff;
   background: var(--accent);
@@ -440,7 +387,6 @@
   box-shadow: 0 11px 25px rgba(218, 69, 41, 0.28);
 }
 
-.segmented button:focus-visible,
 .toolButton:focus-visible,
 .swatch:focus-visible,
 .customColor:focus-within,
@@ -495,7 +441,7 @@
 
   .panelActions {
     grid-column: 1 / -1;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .canvasFrame {
@@ -529,14 +475,6 @@
     border-radius: 11px;
   }
 
-  .sideBadge {
-    top: 18px;
-    left: 18px;
-  }
-
-  .panelActions {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

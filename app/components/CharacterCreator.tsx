@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Download,
   Eraser,
   PaintBucket,
   Pencil,
@@ -12,7 +11,6 @@ import {
 } from "lucide-react";
 import {
   useCallback,
-  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -26,6 +24,7 @@ const CANVAS_HEIGHT = 760;
 const MAX_HISTORY = 14;
 
 type CharacterSide = "front" | "back";
+const EDITOR_SIDE = "front" as const satisfies CharacterSide;
 type DrawingTool = "pencil" | "eraser" | "fill";
 
 type Point = {
@@ -126,7 +125,7 @@ function drawWorkspace(context: CanvasRenderingContext2D) {
   context.restore();
 }
 
-function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
+function drawGuide(context: CanvasRenderingContext2D) {
   const silhouette = createSilhouettePath();
   const joints = {
     head: { x: 300, y: 111 },
@@ -174,7 +173,7 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
   context.setLineDash([]);
   context.beginPath();
   for (const [from, to] of bones) {
-    if (side === "front" && from === joints.head && to === joints.neck) {
+    if (from === joints.head && to === joints.neck) {
       // Keep the blue head bone out of the facial drawing area.
       context.moveTo(300, 188);
       context.lineTo(to.x, to.y);
@@ -185,96 +184,81 @@ function drawGuide(context: CanvasRenderingContext2D, side: CharacterSide) {
   }
   context.stroke();
 
-  if (side === "front") {
-    context.strokeStyle = "rgba(53, 58, 66, 0.34)";
-    context.lineWidth = 1.5;
+  context.strokeStyle = "rgba(53, 58, 66, 0.34)";
+  context.lineWidth = 1.5;
 
-    // Facial landmarks are display-only drawing anchors. Each semantic line
-    // matches a separately warped region in the paper-doll face mesh, without
-    // baking guide pixels into the transparent PNG.
-    context.beginPath();
-    context.moveTo(248, 78);
-    context.bezierCurveTo(238, 110, 242, 156, 263, 176);
-    context.quadraticCurveTo(300, 201, 337, 176);
-    context.bezierCurveTo(358, 156, 362, 110, 352, 78);
-    context.stroke();
+  // Facial landmarks are display-only drawing anchors. Each semantic line
+  // matches a separately warped region in the paper-doll face mesh, without
+  // baking guide pixels into the transparent PNG.
+  context.beginPath();
+  context.moveTo(248, 78);
+  context.bezierCurveTo(238, 110, 242, 156, 263, 176);
+  context.quadraticCurveTo(300, 201, 337, 176);
+  context.bezierCurveTo(358, 156, 362, 110, 352, 78);
+  context.stroke();
 
-    // Left/right brows: outer, arch, and inner anchors remain independent.
-    context.beginPath();
-    context.moveTo(254, 92);
-    context.quadraticCurveTo(269, 81, 286, 91);
-    context.moveTo(314, 91);
-    context.quadraticCurveTo(331, 81, 346, 92);
-    context.stroke();
+  // Left/right brows: outer, arch, and inner anchors remain independent.
+  context.beginPath();
+  context.moveTo(254, 92);
+  context.quadraticCurveTo(269, 81, 286, 91);
+  context.moveTo(314, 91);
+  context.quadraticCurveTo(331, 81, 346, 92);
+  context.stroke();
 
-    // Left/right eyes: separate upper/lower lids plus iris centers make blink
-    // and gaze strokes easier to place than a single oval.
-    context.beginPath();
-    context.moveTo(255, 111);
-    context.quadraticCurveTo(270, 101, 285, 111);
-    context.quadraticCurveTo(270, 120, 255, 111);
-    context.moveTo(315, 111);
-    context.quadraticCurveTo(330, 101, 345, 111);
-    context.quadraticCurveTo(330, 120, 315, 111);
-    context.stroke();
-    context.beginPath();
-    context.arc(270, 111, 3.2, 0, Math.PI * 2);
-    context.arc(330, 111, 3.2, 0, Math.PI * 2);
-    context.stroke();
+  // Left/right eyes: separate upper/lower lids plus iris centers make blink
+  // and gaze strokes easier to place than a single oval.
+  context.beginPath();
+  context.moveTo(255, 111);
+  context.quadraticCurveTo(270, 101, 285, 111);
+  context.quadraticCurveTo(270, 120, 255, 111);
+  context.moveTo(315, 111);
+  context.quadraticCurveTo(330, 101, 345, 111);
+  context.quadraticCurveTo(330, 120, 315, 111);
+  context.stroke();
+  context.beginPath();
+  context.arc(270, 111, 3.2, 0, Math.PI * 2);
+  context.arc(330, 111, 3.2, 0, Math.PI * 2);
+  context.stroke();
 
-    // Nose bridge, tip, and left/right wings each have their own anchors.
-    context.beginPath();
-    context.moveTo(300, 116);
-    context.quadraticCurveTo(297, 126, 297, 134);
-    context.quadraticCurveTo(300, 139, 303, 134);
-    context.moveTo(288, 139);
-    context.quadraticCurveTo(294, 143, 300, 140);
-    context.quadraticCurveTo(306, 143, 312, 139);
-    context.stroke();
+  // Nose bridge, tip, and left/right wings each have their own anchors.
+  context.beginPath();
+  context.moveTo(300, 116);
+  context.quadraticCurveTo(297, 126, 297, 134);
+  context.quadraticCurveTo(300, 139, 303, 134);
+  context.moveTo(288, 139);
+  context.quadraticCurveTo(294, 143, 300, 140);
+  context.quadraticCurveTo(306, 143, 312, 139);
+  context.stroke();
 
-    // Upper lip, lower lip, and both corners are intentionally separate.
-    context.beginPath();
-    context.moveTo(275, 152);
-    context.quadraticCurveTo(288, 148, 300, 143);
-    context.quadraticCurveTo(312, 148, 325, 152);
-    context.moveTo(275, 152);
-    context.quadraticCurveTo(300, 168, 325, 152);
-    context.moveTo(283, 153);
-    context.quadraticCurveTo(300, 158, 317, 153);
-    context.stroke();
+  // Upper lip, lower lip, and both corners are intentionally separate.
+  context.beginPath();
+  context.moveTo(275, 152);
+  context.quadraticCurveTo(288, 148, 300, 143);
+  context.quadraticCurveTo(312, 148, 325, 152);
+  context.moveTo(275, 152);
+  context.quadraticCurveTo(300, 168, 325, 152);
+  context.moveTo(283, 153);
+  context.quadraticCurveTo(300, 158, 317, 153);
+  context.stroke();
 
-    const semanticAnchors = [
-      [254, 92], [286, 91], [314, 91], [346, 92],
-      [255, 111], [285, 111], [315, 111], [345, 111],
-      [300, 116], [300, 140], [288, 139], [312, 139],
-      [275, 152], [300, 143], [300, 164], [325, 152], [300, 184],
-    ] as const;
-    context.fillStyle = "rgba(255, 107, 74, 0.58)";
-    for (const [x, y] of semanticAnchors) {
-      context.beginPath();
-      context.arc(x, y, 2.3, 0, Math.PI * 2);
-      context.fill();
-    }
-  } else {
-    context.strokeStyle = "rgba(53, 58, 66, 0.34)";
-    context.lineWidth = 1.5;
+  const semanticAnchors = [
+    [254, 92], [286, 91], [314, 91], [346, 92],
+    [255, 111], [285, 111], [315, 111], [345, 111],
+    [300, 116], [300, 140], [288, 139], [312, 139],
+    [275, 152], [300, 143], [300, 164], [325, 152], [300, 184],
+  ] as const;
+  context.fillStyle = "rgba(255, 107, 74, 0.58)";
+  for (const [x, y] of semanticAnchors) {
     context.beginPath();
-    context.arc(300, 115, 58, 1.12 * Math.PI, 1.88 * Math.PI);
-    context.stroke();
-
-    context.beginPath();
-    context.moveTo(254, 248);
-    context.quadraticCurveTo(273, 231, 290, 250);
-    context.moveTo(310, 250);
-    context.quadraticCurveTo(327, 231, 346, 248);
-    context.stroke();
+    context.arc(x, y, 2.3, 0, Math.PI * 2);
+    context.fill();
   }
 
   context.fillStyle = "rgba(255, 255, 255, 0.9)";
   context.strokeStyle = "rgba(77, 111, 230, 0.82)";
   context.lineWidth = 2.4;
   for (const joint of Object.values(joints)) {
-    if (side === "front" && joint === joints.head) continue;
+    if (joint === joints.head) continue;
     context.beginPath();
     context.arc(joint.x, joint.y, joint === joints.head ? 7 : 6, 0, Math.PI * 2);
     context.fill();
@@ -352,7 +336,6 @@ export function CharacterCreator({
   const importedArtworkKeyRef = useRef<string | null>(null);
   const importedArtworkRef = useRef<string | null | undefined>(undefined);
 
-  const [side, setSide] = useState<CharacterSide>("front");
   const [tool, setTool] = useState<DrawingTool>("pencil");
   const [color, setColor] = useState<string>(PALETTE[0]);
   const brushSizeInputId = useId();
@@ -365,13 +348,12 @@ export function CharacterCreator({
   const [sendingToStudio, setSendingToStudio] = useState(false);
   const [importingArtwork, setImportingArtwork] = useState(false);
   const [status, setStatus] = useState(
-    "앞면부터 자유롭게 그려 보세요. 몸 밖의 소매·치마·머리카락도 함께 움직여요.",
+    "자유롭게 그려 보세요. 몸 밖의 소매·치마·머리카락도 함께 움직여요.",
   );
-  const sideRef = useRef(side);
 
-  const paintVisibleCanvas = useCallback((whichSide: CharacterSide) => {
+  const paintVisibleCanvas = useCallback(() => {
     const displayCanvas = displayCanvasRef.current;
-    const drawingLayer = drawingLayersRef.current[whichSide];
+    const drawingLayer = drawingLayersRef.current[EDITOR_SIDE];
     if (!displayCanvas || !drawingLayer) return;
 
     const context = displayCanvas.getContext("2d");
@@ -381,12 +363,8 @@ export function CharacterCreator({
     drawWorkspace(context);
     context.drawImage(drawingLayer, 0, 0);
 
-    drawGuide(context, whichSide);
+    drawGuide(context);
   }, []);
-
-  useLayoutEffect(() => {
-    sideRef.current = side;
-  }, [side]);
 
   useLayoutEffect(() => {
     for (const whichSide of ["front", "back"] as const) {
@@ -397,7 +375,7 @@ export function CharacterCreator({
         drawingLayersRef.current[whichSide] = layer;
       }
     }
-    paintVisibleCanvas(sideRef.current);
+    paintVisibleCanvas();
 
     return () => {
       if (clearTimerRef.current !== null) {
@@ -405,10 +383,6 @@ export function CharacterCreator({
       }
     };
   }, [paintVisibleCanvas]);
-
-  useEffect(() => {
-    paintVisibleCanvas(side);
-  }, [paintVisibleCanvas, side]);
 
   useLayoutEffect(() => {
     const importKey =
@@ -451,7 +425,7 @@ export function CharacterCreator({
       back: { undo: false, redo: false },
     });
     setImportingArtwork(Boolean(initialArtwork));
-    paintVisibleCanvas(sideRef.current);
+    paintVisibleCanvas();
 
     const image = initialArtwork ? new Image() : null;
     const applyArtwork = (loadedImage: HTMLImageElement | null, failed = false) => {
@@ -473,7 +447,7 @@ export function CharacterCreator({
         front: { undo: Boolean(loadedImage), redo: false },
         back: { undo: false, redo: false },
       });
-      paintVisibleCanvas(sideRef.current);
+      paintVisibleCanvas();
       if (failed) {
         setStatus("저장된 캐릭터를 불러오지 못해 투명 캔버스로 시작했어요.");
       } else if (loadedImage) {
@@ -546,32 +520,32 @@ export function CharacterCreator({
       return;
     }
 
-    const layer = drawingLayersRef.current[side];
+    const layer = drawingLayersRef.current[EDITOR_SIDE];
     const context = layer?.getContext("2d");
     if (!layer || !context) return;
 
     event.preventDefault();
     if (tool === "fill") {
-      saveUndoSnapshot(side);
+      saveUndoSnapshot(EDITOR_SIDE);
       context.save();
       context.clip(createSilhouettePath());
       context.fillStyle = color;
       context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       context.restore();
-      paintVisibleCanvas(side);
+      paintVisibleCanvas();
       setStatus("몸 전체에 바탕색을 채웠어요. 그 위에 무늬와 얼굴을 그려 보세요.");
       return;
     }
 
     event.currentTarget.setPointerCapture(event.pointerId);
-    saveUndoSnapshot(side);
+    saveUndoSnapshot(EDITOR_SIDE);
     drawingRef.current = true;
     activePointerRef.current = event.pointerId;
 
     const point = getPoint(event);
     lastPointRef.current = point;
     drawStroke(context, point, point, tool, color, brushSize);
-    paintVisibleCanvas(side);
+    paintVisibleCanvas();
   };
 
   const handlePointerMove = (
@@ -594,7 +568,7 @@ export function CharacterCreator({
       return;
     }
 
-    const layer = drawingLayersRef.current[side];
+    const layer = drawingLayersRef.current[EDITOR_SIDE];
     const context = layer?.getContext("2d");
     if (!layer || !context) return;
 
@@ -609,7 +583,7 @@ export function CharacterCreator({
       brushSize,
     );
     lastPointRef.current = nextPoint;
-    paintVisibleCanvas(side);
+    paintVisibleCanvas();
   };
 
   const finishStroke = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -622,34 +596,20 @@ export function CharacterCreator({
     }
   };
 
-  const switchSide = (nextSide: CharacterSide) => {
-    if (disabled) return;
-    drawingRef.current = false;
-    activePointerRef.current = null;
-    lastPointRef.current = null;
-    setClearArmed(false);
-    setSide(nextSide);
-    setStatus(
-      nextSide === "front"
-        ? "앞면을 편집하고 있어요. 뒷면 그림은 그대로 보관됩니다."
-        : "뒷면을 편집하고 있어요. 앞면 그림은 그대로 보관됩니다.",
-    );
-  };
-
   const restoreSnapshot = (direction: "undo" | "redo") => {
     if (disabled || artworkImportPendingRef.current) return;
-    const layer = drawingLayersRef.current[side];
+    const layer = drawingLayersRef.current[EDITOR_SIDE];
     const context = layer?.getContext("2d");
     if (!layer || !context) return;
 
     const source =
       direction === "undo"
-        ? undoHistoryRef.current[side]
-        : redoHistoryRef.current[side];
+        ? undoHistoryRef.current[EDITOR_SIDE]
+        : redoHistoryRef.current[EDITOR_SIDE];
     const target =
       direction === "undo"
-        ? redoHistoryRef.current[side]
-        : undoHistoryRef.current[side];
+        ? redoHistoryRef.current[EDITOR_SIDE]
+        : undoHistoryRef.current[EDITOR_SIDE];
     const snapshot = source.pop();
     if (!snapshot) return;
 
@@ -657,12 +617,12 @@ export function CharacterCreator({
     context.putImageData(snapshot, 0, 0);
     setHistoryAvailability((current) => ({
       ...current,
-      [side]: {
-        undo: undoHistoryRef.current[side].length > 0,
-        redo: redoHistoryRef.current[side].length > 0,
+      [EDITOR_SIDE]: {
+        undo: undoHistoryRef.current[EDITOR_SIDE].length > 0,
+        redo: redoHistoryRef.current[EDITOR_SIDE].length > 0,
       },
     }));
-    paintVisibleCanvas(side);
+    paintVisibleCanvas();
     setClearArmed(false);
     setStatus(
       direction === "undo" ? "한 단계를 되돌렸어요." : "한 단계를 다시 적용했어요.",
@@ -680,7 +640,7 @@ export function CharacterCreator({
     }
     if (!clearArmed) {
       setClearArmed(true);
-      setStatus("한 번 더 누르면 현재 면의 그림을 지워요. 실행 취소도 가능합니다.");
+      setStatus("한 번 더 누르면 그림을 지워요. 실행 취소도 가능합니다.");
       if (clearTimerRef.current !== null) {
         window.clearTimeout(clearTimerRef.current);
       }
@@ -690,22 +650,22 @@ export function CharacterCreator({
       return;
     }
 
-    const layer = drawingLayersRef.current[side];
+    const layer = drawingLayersRef.current[EDITOR_SIDE];
     const context = layer?.getContext("2d");
     if (!layer || !context) return;
-    saveUndoSnapshot(side);
+    saveUndoSnapshot(EDITOR_SIDE);
     context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    paintVisibleCanvas(side);
+    paintVisibleCanvas();
     setClearArmed(false);
-    setStatus("현재 면을 비웠어요. 필요하면 실행 취소로 되돌릴 수 있어요.");
+    setStatus("그림을 비웠어요. 필요하면 실행 취소로 되돌릴 수 있어요.");
     if (clearTimerRef.current !== null) {
       window.clearTimeout(clearTimerRef.current);
       clearTimerRef.current = null;
     }
   };
 
-  const createExportDataUrl = (whichSide: CharacterSide) => {
-    const drawingLayer = drawingLayersRef.current[whichSide];
+  const createExportDataUrl = () => {
+    const drawingLayer = drawingLayersRef.current[EDITOR_SIDE];
     if (!drawingLayer) return null;
 
     const exportCanvas = document.createElement("canvas");
@@ -719,29 +679,6 @@ export function CharacterCreator({
     return exportCanvas.toDataURL("image/png");
   };
 
-  const downloadPng = () => {
-    if (disabled || artworkImportPendingRef.current) {
-      setStatus(
-        disabled
-          ? "캐릭터 보관함 작업이 끝난 뒤 PNG로 저장할 수 있어요."
-          : "저장된 캐릭터를 모두 불러온 뒤 PNG로 저장할 수 있어요.",
-      );
-      return;
-    }
-    const dataUrl = createExportDataUrl(side);
-    if (!dataUrl) return;
-
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = `my-character-${side}.png`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setStatus(
-      `${side === "front" ? "앞면" : "뒷면"}을 투명 PNG로 저장했어요. 스튜디오로 보내면 바로 애니메이션을 만들 수 있어요.`,
-    );
-  };
-
   const sendToStudio = async () => {
     if (disabled || artworkImportPendingRef.current) {
       setStatus(
@@ -751,7 +688,7 @@ export function CharacterCreator({
       );
       return;
     }
-    const dataUrl = createExportDataUrl("front");
+    const dataUrl = createExportDataUrl();
     if (!dataUrl || sendingToStudio) return;
     setSendingToStudio(true);
     try {
@@ -768,38 +705,14 @@ export function CharacterCreator({
     }
   };
 
-  const canUndo = historyAvailability[side].undo;
-  const canRedo = historyAvailability[side].redo;
+  const canUndo = historyAvailability[EDITOR_SIDE].undo;
+  const canRedo = historyAvailability[EDITOR_SIDE].redo;
   const editorDisabled = disabled || importingArtwork;
 
   return (
     <section className={styles.creator} aria-label="캐릭터 만들기">
       <div className={styles.editorGrid}>
         <aside className={styles.controlPanel} aria-label="그리기 도구">
-          <div className={styles.controlGroup}>
-            <div className={styles.groupLabel}>보이는 면</div>
-            <div className={styles.segmented} role="group" aria-label="캐릭터 면 선택">
-              <button
-                type="button"
-                className={side === "front" ? styles.segmentActive : ""}
-                aria-pressed={side === "front"}
-                onClick={() => switchSide("front")}
-                disabled={editorDisabled}
-              >
-                앞면
-              </button>
-              <button
-                type="button"
-                className={side === "back" ? styles.segmentActive : ""}
-                aria-pressed={side === "back"}
-                onClick={() => switchSide("back")}
-                disabled={editorDisabled}
-              >
-                뒷면
-              </button>
-            </div>
-          </div>
-
           <div className={styles.controlGroup}>
             <div className={styles.groupLabel}>도구</div>
             <div className={styles.toolGrid}>
@@ -942,20 +855,11 @@ export function CharacterCreator({
               disabled={editorDisabled}
             >
               <Trash2 size={17} aria-hidden="true" />
-              {clearArmed ? "한 번 더 눌러 지우기" : "현재 면 모두 지우기"}
+              {clearArmed ? "한 번 더 눌러 지우기" : "그림 모두 지우기"}
             </button>
           </div>
 
           <div className={styles.panelActions} aria-label="캐릭터 저장">
-            <button
-              type="button"
-              className={styles.downloadButton}
-              onClick={downloadPng}
-              disabled={editorDisabled}
-            >
-              <Download size={18} aria-hidden="true" />
-              현재 면 PNG 저장
-            </button>
             <button
               type="button"
               className={styles.sendButton}
@@ -976,12 +880,10 @@ export function CharacterCreator({
         </aside>
 
         <div className={styles.stageColumn}>
-          {side === "front" ? (
-            <p id="character-face-guide-help" className={styles.srOnly}>
-              얼굴 가이드에는 좌우 눈과 눈썹, 코, 입술, 입꼬리, 턱 기준점이
-              표시됩니다.
-            </p>
-          ) : null}
+          <p id="character-face-guide-help" className={styles.srOnly}>
+            얼굴 가이드에는 좌우 눈과 눈썹, 코, 입술, 입꼬리, 턱 기준점이
+            표시됩니다.
+          </p>
 
           <div className={styles.canvasFrame}>
             <canvas
@@ -989,23 +891,16 @@ export function CharacterCreator({
               className={styles.canvas}
               width={CANVAS_WIDTH}
               height={CANVAS_HEIGHT}
-              aria-label={`${side === "front" ? "앞면" : "뒷면"} 캐릭터 그리기 영역`}
+              aria-label="앞면 캐릭터 그리기 영역"
               aria-busy={editorDisabled}
               aria-disabled={editorDisabled}
-              aria-describedby={
-                side === "front"
-                  ? "character-face-guide-help character-canvas-help"
-                  : "character-canvas-help"
-              }
+              aria-describedby="character-face-guide-help character-canvas-help"
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={finishStroke}
               onPointerCancel={finishStroke}
               onContextMenu={(event) => event.preventDefault()}
             />
-            <span className={styles.sideBadge} aria-hidden="true">
-              {side === "front" ? "FRONT" : "BACK"}
-            </span>
           </div>
 
           <p id="character-canvas-help" className={styles.srOnly}>
