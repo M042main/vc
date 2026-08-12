@@ -46,7 +46,10 @@ test("opens server-authenticated admin mode from the top-right gear and passes i
   assert.match(adminRoute, /export async function DELETE/);
   assert.match(page, /isAdmin=\{adminMode\}/);
   assert.match(page, /관리자 모드 종료/);
-  assert.match(page, /const\s+profileGateBlocking\s*=\s*!profile\s*&&\s*profileReady/);
+  assert.match(
+    page,
+    /const\s+profileGateBlocking\s*=\s*!adminMode\s*&&\s*!profile\s*&&\s*profileReady/,
+  );
   assert.match(page, /const\s+renderAdminAccessButton\s*=\s*\(gateControl\s*=\s*false\)\s*=>\s*\([\s\S]{0,220}className="admin-access-button"[\s\S]{0,320}aria-haspopup="dialog"/);
   assert.match(page, /!profileGateBlocking\s*\?\s*renderAdminAccessButton\(\)\s*:\s*null[\s\S]{0,300}blocking=\{profileGateBlocking\}[\s\S]{0,180}blockingModalControl=\{renderAdminAccessButton\(true\)\}/);
   assert.match(page, /restoreAdminTriggerFocus[\s\S]{0,150}adminButtonRef\.current\?\.focus\(\)/);

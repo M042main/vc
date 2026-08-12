@@ -130,7 +130,10 @@ test("provides a blocking, accessible first-run gate and inline admin class mana
 test("wires the active profile through onboarding, artwork restore, creator save, and gallery", async () => {
   const { page } = await sources();
   assert.match(page, /useVisitorProfile\s*\(\s*\)/);
-  assert.match(page, /const\s+profileGateBlocking\s*=\s*!profile\s*&&\s*profileReady/);
+  assert.match(
+    page,
+    /const\s+profileGateBlocking\s*=\s*!adminMode\s*&&\s*!profile\s*&&\s*profileReady/,
+  );
   assert.match(page, /blocking=\{profileGateBlocking\}/);
   assert.match(page, /onProfileChange=\{[A-Za-z_$][A-Za-z0-9_$]*\}/);
   assert.match(page, /loadSavedCharacterSlots\(profile\)/);
@@ -138,7 +141,10 @@ test("wires the active profile through onboarding, artwork restore, creator save
   assert.match(page, /characterArtworkOwnerKey\s*===\s*characterArtworkKey/);
   assert.match(page, /initialArtwork=\{activeCharacterArtwork\}/);
   assert.match(page, /initialArtworkKey=\{characterEditorKey\}/);
-  assert.match(page, /<OnlineGallery[\s\S]{0,400}profile=\{profile\}/);
+  assert.match(
+    page,
+    /<OnlineGallery[\s\S]{0,400}profile=\{adminMode\s*\?\s*null\s*:\s*profile\}/,
+  );
 });
 
 test("moves the active student profile into accessible header actions", async () => {
@@ -149,8 +155,8 @@ test("moves the active student profile into accessible header actions", async ()
   );
 
   assert.match(page, /<div className=["']header-actions["']>[\s\S]{0,500}<VisitorProfileActions/);
-  assert.match(page, /<VisitorProfileActions[\s\S]{0,180}profile=\{profile\}[\s\S]{0,180}onProfileChange=\{[A-Za-z_$][A-Za-z0-9_$]*\}/);
-  assert.match(page, /\{profileReady\s*&&\s*!profile\s*\?\s*\([\s\S]{0,120}<ClassOnboarding/);
+  assert.match(page, /<VisitorProfileActions[\s\S]{0,180}profile=\{headerProfile\}[\s\S]{0,240}onProfileChange=\{[A-Za-z_$][A-Za-z0-9_$]*\}/);
+  assert.match(page, /\{profileReady\s*&&\s*!profile\s*&&\s*!adminMode\s*\?\s*\([\s\S]{0,120}<ClassOnboarding/);
   assert.doesNotMatch(page, /className=["']profile-shell["']/);
   assert.match(
     page,

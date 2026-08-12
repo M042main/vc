@@ -293,6 +293,15 @@ export function OnlineGallery({
   }, [isAdmin]);
 
   useEffect(() => {
+    if (!isAdmin) return;
+    const timer = window.setTimeout(() => {
+      setClassFilter("all");
+      setCurrentPage(1);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isAdmin]);
+
+  useEffect(() => {
     if (!nameAction) return;
     const timer = window.setTimeout(() => {
       nameInputRef.current?.focus();

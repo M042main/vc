@@ -20,7 +20,7 @@ function loginIdentity(request: Request) {
   return ip && ip.length <= 64 ? `ip:${ip}` : `origin:${new URL(request.url).origin}`;
 }
 
-function reserveLoginAttempt(request: Request) {
+function reserveFailedLoginAttempt(request: Request) {
   const key = loginIdentity(request);
   const now = Date.now();
   const current = loginAttempts.get(key);
@@ -68,7 +68,29 @@ export async function POST(request: Request) {
       503,
     );
   }
-  const retryAfter = reserveLoginAttempt(request);
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return json({ error: "관리자 로그인 요청이 올바르지 않습니다." }, 400);
+  }
+  const code =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).code
+      : null;
+  if (typeof code !== "string" || !code.trim() || code.length > 128) {
+    return json({ error: "관리자 코드를 입력해 주세요." }, 400);
+  }
+  const cookie = await createAdminSessionCookie(code);
+  if (cookie) {
+    // Successful logins must never consume the guess limit. Clearing the
+    // bucket also lets the real administrator recover immediately after
+    // failed attempts from the same classroom network.
+    loginAttempts.delete(loginIdentity(request));
+    return json({ authenticated: true }, 200, cookie);
+  }
+
+  const retryAfter = reserveFailedLoginAttempt(request);
   if (retryAfter !== null) {
     return Response.json(
       {
@@ -85,24 +107,7 @@ export async function POST(request: Request) {
       },
     );
   }
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return json({ error: "관리자 로그인 요청이 올바르지 않습니다." }, 400);
-  }
-  const code =
-    payload && typeof payload === "object" && !Array.isArray(payload)
-      ? (payload as Record<string, unknown>).code
-      : null;
-  if (typeof code !== "string" || !code.trim() || code.length > 128) {
-    return json({ error: "관리자 코드를 입력해 주세요." }, 400);
-  }
-  const cookie = await createAdminSessionCookie(code);
-  if (!cookie) {
-    return json({ error: "관리자 코드가 일치하지 않습니다." }, 403);
-  }
-  return json({ authenticated: true }, 200, cookie);
+  return json({ error: "관리자 코드가 일치하지 않습니다." }, 403);
 }
 
 export async function DELETE() {

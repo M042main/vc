@@ -94,12 +94,14 @@ export interface VisitorProfileActionsProps {
   profile: VisitorProfile;
   onProfileChange: (profile: VisitorProfile | null) => void;
   disabled?: boolean;
+  administratorView?: boolean;
 }
 
 export function VisitorProfileActions({
   profile,
   onProfileChange,
   disabled = false,
+  administratorView = false,
 }: VisitorProfileActionsProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(profile.name);
@@ -187,7 +189,7 @@ export function VisitorProfileActions({
   return (
     <div
       className={styles.headerProfileActions}
-      aria-label="학생 프로필"
+      aria-label={administratorView ? "관리자 프로필" : "학생 프로필"}
       aria-busy={disabled}
     >
       <div className={styles.profileIdentity} title={`${profile.className} · ${profile.name}`}>
@@ -200,33 +202,37 @@ export function VisitorProfileActions({
           <strong>{profile.name}</strong>
         </span>
       </div>
-      <button
-        ref={triggerRef}
-        className={styles.headerActionButton}
-        type="button"
-        onClick={openDialog}
-        disabled={disabled}
-        aria-haspopup="dialog"
-        aria-label="학생 이름 변경"
-      >
-        <Pencil size={15} aria-hidden="true" />
-        <span>변경</span>
-      </button>
-      <button
-        className={[styles.headerActionButton, styles.logoutButton].join(" ")}
-        type="button"
-        onClick={logout}
-        disabled={disabled}
-        aria-label="학생 프로필 로그아웃"
-      >
-        <LogOut size={16} aria-hidden="true" />
-        <span>학생 로그아웃</span>
-      </button>
+      {!administratorView ? (
+        <>
+          <button
+            ref={triggerRef}
+            className={styles.headerActionButton}
+            type="button"
+            onClick={openDialog}
+            disabled={disabled}
+            aria-haspopup="dialog"
+            aria-label="학생 이름 변경"
+          >
+            <Pencil size={15} aria-hidden="true" />
+            <span>변경</span>
+          </button>
+          <button
+            className={[styles.headerActionButton, styles.logoutButton].join(" ")}
+            type="button"
+            onClick={logout}
+            disabled={disabled}
+            aria-label="학생 프로필 로그아웃"
+          >
+            <LogOut size={16} aria-hidden="true" />
+            <span>학생 로그아웃</span>
+          </button>
+        </>
+      ) : null}
       <span className={styles.srOnly} role="status" aria-live="polite">
         {status}
       </span>
 
-      {dialogOpen ? (
+      {dialogOpen && !administratorView ? (
         <div className={styles.profileDialogBackdrop}>
           <section
             ref={dialogRef}

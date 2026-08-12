@@ -67,6 +67,12 @@ const AiImageGenerator = lazy(() =>
 );
 
 type WorkspaceMode = "studio" | "creator" | "gallery" | "ai";
+const ADMINISTRATOR_UI_PROFILE: VisitorProfile = {
+  name: "관리자",
+  classId: null,
+  className: "전체",
+  guest: false,
+};
 // T-pose artwork uses a separate room from the legacy downward-arm rig. The
 // old v1 key and record remain untouched so existing drawings are preserved,
 // but they are never interpreted with incompatible T-pose joints.
@@ -488,7 +494,9 @@ export default function Home() {
         .then(async (response) => {
           const payload = (await response.json()) as { authenticated?: unknown };
           if (active && adminSessionRequestRef.current === requestId) {
-            setAdminMode(response.ok && payload.authenticated === true);
+            const authenticated = response.ok && payload.authenticated === true;
+            setAdminMode(authenticated);
+            if (authenticated) setMode("gallery");
           }
         })
         .catch(() => undefined);
@@ -787,7 +795,8 @@ export default function Home() {
     }
   };
 
-  const profileGateBlocking = !profile && profileReady;
+  const profileGateBlocking = !adminMode && !profile && profileReady;
+  const headerProfile = adminMode ? ADMINISTRATOR_UI_PROFILE : profile;
   const handleCaptureReady = useCallback(
     async (capture: VrmStudioCapture) => {
       if (!profile || profile.guest) {
@@ -906,10 +915,11 @@ export default function Home() {
         </nav>
 
         <div className="header-actions">
-          {profile ? (
+          {headerProfile ? (
             <VisitorProfileActions
-              profile={profile}
+              profile={headerProfile}
               disabled={pageBusy}
+              administratorView={adminMode}
               onProfileChange={handleProfileChange}
             />
           ) : null}
@@ -918,7 +928,7 @@ export default function Home() {
       </header>
 
       <section className="workspace" id="top">
-        {profileReady && !profile ? (
+        {profileReady && !profile && !adminMode ? (
           <ClassOnboarding
             profile={profile}
             profileReady={profileReady}
@@ -966,7 +976,7 @@ export default function Home() {
           >
             <OnlineGallery
               isAdmin={adminMode}
-              profile={profile}
+              profile={adminMode ? null : profile}
             />
           </Suspense>
         ) : (
@@ -1028,6 +1038,11 @@ export default function Home() {
                 >
                   <LogOut size={17} aria-hidden="true" /> 관리자 모드 종료
                 </button>
+                {adminError ? (
+                  <span className="admin-error" role="alert">
+                    {adminError}
+                  </span>
+                ) : null}
               </>
             ) : (
               <form onSubmit={(event) => void enterAdminMode(event)}>

@@ -164,7 +164,7 @@ test("logout clears the signed administrator cookie", async () => {
   assert.match(response.headers.get("set-cookie") ?? "", /Max-Age=0/u);
 });
 
-test("rate-limits repeated administrator login guesses before verification", async () => {
+test("rate-limits repeated incorrect administrator login guesses", async () => {
   const { route } = await loadModules("rate-limit");
   await withAdminEnvironment(
     { code: undefined, secret: undefined },
@@ -184,6 +184,51 @@ test("rate-limits repeated administrator login guesses before verification", asy
       const blocked = await route.POST(request());
       assert.equal(blocked.status, 429);
       assert.match(blocked.headers.get("retry-after") ?? "", /^\d+$/u);
+    },
+  );
+});
+
+test("does not rate-limit repeated successful m042 logins", async () => {
+  const { route } = await loadModules("successful-logins");
+  await withAdminEnvironment(
+    { code: undefined, secret: undefined },
+    async () => {
+      const request = () =>
+        new Request("https://virtual-creator.netlify.app/api/admin/session", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-nf-client-connection-ip": "203.0.113.43",
+          },
+          body: JSON.stringify({ code: "m042" }),
+        });
+      for (let index = 0; index < 8; index += 1) {
+        assert.equal((await route.POST(request())).status, 200);
+      }
+    },
+  );
+});
+
+test("a successful m042 login clears prior failed attempts", async () => {
+  const { route } = await loadModules("successful-login-reset");
+  await withAdminEnvironment(
+    { code: undefined, secret: undefined },
+    async () => {
+      const request = (code) =>
+        new Request("https://virtual-creator.netlify.app/api/admin/session", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-nf-client-connection-ip": "203.0.113.44",
+          },
+          body: JSON.stringify({ code }),
+        });
+      for (let index = 0; index < 5; index += 1) {
+        assert.equal((await route.POST(request("wrong"))).status, 403);
+      }
+
+      assert.equal((await route.POST(request("m042"))).status, 200);
+      assert.equal((await route.POST(request("wrong"))).status, 403);
     },
   );
 });
