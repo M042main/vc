@@ -77,6 +77,12 @@ function cookieValue(request: Request) {
   return null;
 }
 
+function bearerValue(request: Request) {
+  const authorization = request.headers.get("authorization") ?? "";
+  const match = authorization.match(/^Bearer ([^\s]+)$/u);
+  return match?.[1] ?? null;
+}
+
 function isTrustedSitesAdmin(request: Request) {
   return (
     new URL(request.url).hostname.toLowerCase() === TRUSTED_SITES_HOSTNAME &&
@@ -105,7 +111,7 @@ export function adminSessionConfigured() {
   return Boolean(configuredAccessCode() && sessionSecret());
 }
 
-export async function createAdminSessionCookie(accessCode: string) {
+export async function createAdminSession(accessCode: string) {
   const configuredCode = configuredAccessCode();
   const secret = sessionSecret();
   if (!configuredCode || !secret) return null;
@@ -116,7 +122,15 @@ export async function createAdminSessionCookie(accessCode: string) {
   const nonce = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
   const payload = `${expiresAt}.${nonce}`;
   const token = `${payload}.${await hmac(payload, secret)}`;
-  return `${ADMIN_COOKIE_NAME}=${token}; Path=/; Max-Age=${ADMIN_SESSION_SECONDS}; HttpOnly; Secure; SameSite=Strict`;
+  return {
+    token,
+    cookie: `${ADMIN_COOKIE_NAME}=${token}; Path=/; Max-Age=${ADMIN_SESSION_SECONDS}; HttpOnly; Secure; SameSite=Strict`,
+  };
+}
+
+export async function createAdminSessionCookie(accessCode: string) {
+  const session = await createAdminSession(accessCode);
+  return session && typeof session === "object" ? session.cookie : session;
 }
 
 export function clearAdminSessionCookie() {
@@ -124,5 +138,29 @@ export function clearAdminSessionCookie() {
 }
 
 export async function isAdminRequest(request: Request) {
-  return isTrustedSitesAdmin(request) || verifyToken(cookieValue(request));
+  return (
+    isTrustedSitesAdmin(request) ||
+    (await verifyToken(bearerValue(request))) ||
+    verifyToken(cookieValue(request))
+  );
+}
+
+export async function isAdminMutationRequest(request: Request) {
+  const contentType = request.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (contentType !== "application/json") return false;
+
+  const requestOrigin = new URL(request.url).origin;
+  const origin = request.headers.get("origin");
+  if (origin !== null && origin !== requestOrigin) return false;
+
+  const fetchSite = request.headers.get("sec-fetch-site")?.trim().toLowerCase();
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return false;
+  }
+
+  return isAdminRequest(request);
 }

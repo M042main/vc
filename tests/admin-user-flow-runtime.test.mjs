@@ -55,12 +55,13 @@ async function loadAdministratorRoutes(tag) {
   return { session, classes, galleryDelete };
 }
 
-function request(path, method, body, cookie) {
+function request(path, method, body, cookie, bearerToken) {
   return new Request(`${APP_ORIGIN}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
       ...(cookie ? { Cookie: cookie } : {}),
+      ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -90,15 +91,19 @@ test("m042 login authorizes class create/delete and gallery-wide delete without 
       request("/api/admin/session", "POST", { code: "m042" }),
     );
     assert.equal(login.status, 200);
-    assert.deepEqual(await login.json(), { authenticated: true });
+    const loginPayload = await login.json();
+    assert.equal(loginPayload.authenticated, true);
+    assert.match(
+      loginPayload.token,
+      /^\d{10}\.[A-Za-z0-9_-]{22}\.[a-f0-9]{64}$/u,
+    );
     const setCookie = login.headers.get("set-cookie") ?? "";
     assert.match(setCookie, /^__Host-vc-admin=/u);
     assert.match(setCookie, /HttpOnly; Secure; SameSite=Strict/u);
-    const cookie = setCookie.split(";", 1)[0];
 
     const status = await session.GET(
       new Request(`${APP_ORIGIN}/api/admin/session`, {
-        headers: { Cookie: cookie },
+        headers: { Authorization: `Bearer ${loginPayload.token}` },
       }),
     );
     assert.deepEqual(await status.json(), { authenticated: true });
@@ -129,7 +134,8 @@ test("m042 login authorizes class create/delete and gallery-wide delete without 
           "/api/gallery/classes",
           "POST",
           { name: "환경변수 없는 학급" },
-          cookie,
+          undefined,
+          loginPayload.token,
         ),
       );
       assert.equal(created.status, 201);
@@ -140,7 +146,8 @@ test("m042 login authorizes class create/delete and gallery-wide delete without 
           "/api/gallery/classes",
           "DELETE",
           { id: CLASS_ID },
-          cookie,
+          undefined,
+          loginPayload.token,
         ),
       );
       assert.equal(classDeleted.status, 200);
@@ -154,7 +161,8 @@ test("m042 login authorizes class create/delete and gallery-wide delete without 
           "/api/gallery/delete",
           "POST",
           { all: true, confirmation: "DELETE_ALL_GALLERY" },
-          cookie,
+          undefined,
+          loginPayload.token,
         ),
       );
       assert.equal(galleryDeleted.status, 200);

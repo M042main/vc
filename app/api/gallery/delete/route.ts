@@ -1,4 +1,4 @@
-import { isAdminRequest } from "../../../lib/adminSession";
+import { isAdminMutationRequest } from "../../../lib/adminSession";
 
 const FIREBASE_DATABASE_ORIGIN =
   "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app";
@@ -102,7 +102,7 @@ function validatedEntryId(value: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  if (!(await isAdminRequest(request))) {
+  if (!(await isAdminMutationRequest(request))) {
     return errorResponse("이 계정에는 갤러리 삭제 권한이 없습니다.", 403);
   }
 

@@ -15,6 +15,11 @@ import {
   type PaperDollMotionPresetId,
   type PaperDollMotionSample,
 } from "../lib/paperDollMotion";
+import {
+  clampStageZoom,
+  nextStageZoom,
+  stepStageZoom,
+} from "../lib/stageZoom";
 
 export type PaperDollLandmark = {
   x: number;
@@ -76,6 +81,7 @@ export type PaperDollStageHandle = {
   capturePng: (width?: number, height?: number) => Promise<Blob>;
   resetPose: () => void;
   rotate: (direction: -1 | 1) => void;
+  zoom: (direction: -1 | 1) => void;
 };
 
 export type PaperDollStageProps = {
@@ -1655,6 +1661,12 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
     );
     const manualRotationRef = useRef(0);
     const manualPanRef = useRef<Point>({ x: 0, y: 0 });
+    const manualZoomRef = useRef(1);
+    const touchPointersRef = useRef(new Map<number, Point>());
+    const pinchGestureRef = useRef<{
+      startDistance: number;
+      startZoom: number;
+    } | null>(null);
     const panGestureRef = useRef<{
       pointerId: number;
       startX: number;
@@ -1713,7 +1725,8 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
               (width * 0.72) / ARTWORK_WIDTH,
               (height * 0.84) / ARTWORK_HEIGHT,
             );
-        const scale = baseScale * (captureSafe ? 1 : pose.scale);
+        const scale =
+          baseScale * (captureSafe ? 1 : pose.scale * manualZoomRef.current);
         const centerX = captureSafe
           ? width / 2
           : width / 2 + (pose.x + manualPanRef.current.x) * width;
@@ -1926,6 +1939,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           expressionRef.current = { ...NEUTRAL_EXPRESSION };
           manualRotationRef.current = 0;
           manualPanRef.current = { x: 0, y: 0 };
+          manualZoomRef.current = 1;
           redraw();
         },
         rotate(direction) {
@@ -1936,16 +1950,43 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           );
           redraw();
         },
+        zoom(direction) {
+          manualZoomRef.current = stepStageZoom(
+            manualZoomRef.current,
+            direction,
+          );
+          redraw();
+        },
       }),
       [drawTo, redraw],
     );
 
     const beginPan = (event: ReactPointerEvent<HTMLCanvasElement>) => {
       const middleMouse = event.pointerType === "mouse" && event.button === 1;
-      const directTouch = event.pointerType === "touch" && event.isPrimary;
+      const directTouch = event.pointerType === "touch";
       if (!middleMouse && !directTouch) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
+
+      if (directTouch) {
+        touchPointersRef.current.set(event.pointerId, {
+          x: event.clientX,
+          y: event.clientY,
+        });
+        if (touchPointersRef.current.size >= 2) {
+          const [first, second] = [...touchPointersRef.current.values()];
+          pinchGestureRef.current = {
+            startDistance: Math.max(
+              1,
+              Math.hypot(second.x - first.x, second.y - first.y),
+            ),
+            startZoom: manualZoomRef.current,
+          };
+          panGestureRef.current = null;
+          return;
+        }
+      }
+
       panGestureRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
@@ -1955,6 +1996,30 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
     };
 
     const movePan = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (
+        event.pointerType === "touch" &&
+        touchPointersRef.current.has(event.pointerId)
+      ) {
+        touchPointersRef.current.set(event.pointerId, {
+          x: event.clientX,
+          y: event.clientY,
+        });
+        const pinch = pinchGestureRef.current;
+        if (pinch && touchPointersRef.current.size >= 2) {
+          event.preventDefault();
+          const [first, second] = [...touchPointersRef.current.values()];
+          const distance = Math.max(
+            1,
+            Math.hypot(second.x - first.x, second.y - first.y),
+          );
+          manualZoomRef.current = clampStageZoom(
+            pinch.startZoom * (distance / pinch.startDistance),
+          );
+          redraw();
+          return;
+        }
+      }
+
       const gesture = panGestureRef.current;
       const host = hostRef.current;
       if (!gesture || gesture.pointerId !== event.pointerId || !host) return;
@@ -1968,12 +2033,36 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
 
     const endPan = (event: ReactPointerEvent<HTMLCanvasElement>) => {
       const gesture = panGestureRef.current;
-      if (!gesture || gesture.pointerId !== event.pointerId) return;
-      panGestureRef.current = null;
+      if (event.pointerType === "touch") {
+        touchPointersRef.current.delete(event.pointerId);
+        if (touchPointersRef.current.size < 2) pinchGestureRef.current = null;
+      }
+      if (gesture?.pointerId === event.pointerId) panGestureRef.current = null;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
     };
+
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const zoomWithWheel = (event: WheelEvent) => {
+        event.preventDefault();
+        const viewportHeight =
+          hostRef.current?.clientHeight ?? window.innerHeight;
+        manualZoomRef.current = nextStageZoom(
+          manualZoomRef.current,
+          event.deltaY,
+          event.deltaMode,
+          viewportHeight,
+        );
+        redraw();
+      };
+
+      canvas.addEventListener("wheel", zoomWithWheel, { passive: false });
+      return () => canvas.removeEventListener("wheel", zoomWithWheel);
+    }, [redraw]);
 
     return (
       <div ref={hostRef} className={className} aria-label="직접 그린 관절 캐릭터 미리보기">
@@ -1986,7 +2075,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           onAuxClick={(event) => {
             if (event.button === 1) event.preventDefault();
           }}
-          aria-label="가운데 마우스 버튼 또는 한 손가락으로 이동할 수 있는 관절 캐릭터"
+          aria-label="마우스 휠로 확대·축소하고, 가운데 마우스 버튼 또는 한 손가락으로 이동할 수 있는 관절 캐릭터"
         />
       </div>
     );

@@ -87,7 +87,10 @@ test("accepts the built-in m042 administrator login without environment variable
       }),
     );
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { authenticated: true });
+    const payload = await response.json();
+    assert.equal(payload.authenticated, true);
+    assert.match(payload.token, /^\d{10}\.[A-Za-z0-9_-]{22}\.[a-f0-9]{64}$/u);
+    assert.equal(JSON.stringify(payload).includes("m042"), false);
     assert.match(response.headers.get("set-cookie") ?? "", /^__Host-vc-admin=/u);
   });
 });
@@ -152,6 +155,23 @@ test("issues and verifies a signed HttpOnly administrator cookie", async () => {
       );
       assert.equal(status.status, 200);
       assert.deepEqual(await status.json(), { authenticated: true });
+
+      const loginPayload = await login.json();
+      const bearerStatus = await route.GET(
+        new Request("https://virtual-creator.netlify.app/api/admin/session", {
+          headers: { Authorization: `Bearer ${loginPayload.token}` },
+        }),
+      );
+      assert.deepEqual(await bearerStatus.json(), { authenticated: true });
+
+      const malformedBearerStatus = await route.GET(
+        new Request("https://virtual-creator.netlify.app/api/admin/session", {
+          headers: { Authorization: `Bearer ${loginPayload.token} extra` },
+        }),
+      );
+      assert.deepEqual(await malformedBearerStatus.json(), {
+        authenticated: false,
+      });
     },
   );
 });

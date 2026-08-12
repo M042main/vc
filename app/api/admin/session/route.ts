@@ -1,7 +1,7 @@
 import {
   adminSessionConfigured,
   clearAdminSessionCookie,
-  createAdminSessionCookie,
+  createAdminSession,
   isAdminRequest,
 } from "../../../lib/adminSession";
 
@@ -81,13 +81,24 @@ export async function POST(request: Request) {
   if (typeof code !== "string" || !code.trim() || code.length > 128) {
     return json({ error: "관리자 코드를 입력해 주세요." }, 400);
   }
-  const cookie = await createAdminSessionCookie(code);
-  if (cookie) {
+  const session = await createAdminSession(code);
+  if (session) {
     // Successful logins must never consume the guess limit. Clearing the
     // bucket also lets the real administrator recover immediately after
     // failed attempts from the same classroom network.
     loginAttempts.delete(loginIdentity(request));
-    return json({ authenticated: true }, 200, cookie);
+    return json(
+      {
+        authenticated: true,
+        // The signed session value lets an embedded app authorize its own
+        // same-origin API calls even when the top-level browser blocks this
+        // origin's third-party cookie. The submitted administrator code is
+        // never returned to the browser.
+        token: session.token,
+      },
+      200,
+      session.cookie,
+    );
   }
 
   const retryAfter = reserveFailedLoginAttempt(request);

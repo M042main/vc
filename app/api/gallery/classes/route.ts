@@ -1,4 +1,4 @@
-import { isAdminRequest } from "../../../lib/adminSession";
+import { isAdminMutationRequest } from "../../../lib/adminSession";
 
 const FIREBASE_DATABASE_ORIGIN =
   "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app";
@@ -136,7 +136,7 @@ function firebaseFailureResponse(
 }
 
 export async function POST(request: Request) {
-  if (!(await isAdminRequest(request))) {
+  if (!(await isAdminMutationRequest(request))) {
     return errorResponse("학급 관리 권한이 없습니다.", 403);
   }
   const payload = await requestPayload(request);
@@ -197,7 +197,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!(await isAdminRequest(request))) {
+  if (!(await isAdminMutationRequest(request))) {
     return errorResponse("학급 관리 권한이 없습니다.", 403);
   }
   const payload = await requestPayload(request);
@@ -303,7 +303,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!(await isAdminRequest(request))) {
+  if (!(await isAdminMutationRequest(request))) {
     return errorResponse("학급 관리 권한이 없습니다.", 403);
   }
   const payload = await requestPayload(request);

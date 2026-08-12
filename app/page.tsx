@@ -54,6 +54,11 @@ import {
   visitorArtworkKey,
   type VisitorProfile,
 } from "./lib/visitorProfile";
+import {
+  adminRequestHeaders,
+  clearAdminSessionToken,
+  storeAdminSessionToken,
+} from "./lib/adminSessionClient";
 
 const OnlineGallery = lazy(() =>
   import("./components/OnlineGallery").then((module) => ({
@@ -488,7 +493,7 @@ export default function Home() {
       void fetch("/api/admin/session", {
         method: "GET",
         credentials: "same-origin",
-        headers: { Accept: "application/json" },
+        headers: adminRequestHeaders({ Accept: "application/json" }),
         signal: controller.signal,
       })
         .then(async (response) => {
@@ -497,6 +502,7 @@ export default function Home() {
             const authenticated = response.ok && payload.authenticated === true;
             setAdminMode(authenticated);
             if (authenticated) setMode("gallery");
+            else clearAdminSessionToken();
           }
         })
         .catch(() => undefined);
@@ -580,9 +586,14 @@ export default function Home() {
         body: JSON.stringify({ code }),
       });
       const payload = (await response.json().catch(() => null)) as
-        | { authenticated?: unknown; error?: unknown }
+        | { authenticated?: unknown; error?: unknown; token?: unknown }
         | null;
-      if (!response.ok || payload?.authenticated !== true) {
+      if (
+        !response.ok ||
+        payload?.authenticated !== true ||
+        typeof payload.token !== "string" ||
+        !storeAdminSessionToken(payload.token)
+      ) {
         throw new Error(
           typeof payload?.error === "string"
             ? payload.error
@@ -613,10 +624,11 @@ export default function Home() {
       const response = await fetch("/api/admin/session", {
         method: "DELETE",
         credentials: "same-origin",
-        headers: { Accept: "application/json" },
+        headers: adminRequestHeaders({ Accept: "application/json" }),
       });
       if (!response.ok) throw new Error("관리자 로그아웃을 완료하지 못했습니다.");
       if (adminSessionRequestRef.current !== requestId) return;
+      clearAdminSessionToken();
       setAdminMode(false);
       closeAdminDialog();
     } catch (error) {

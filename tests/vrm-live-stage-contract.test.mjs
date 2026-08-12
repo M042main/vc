@@ -752,24 +752,37 @@ test("keeps stage settings visible on mobile and restores speed-control focus", 
     "the responsive settings panel must own the leg-lock control",
   );
 
-  for (const [pattern, label] of [
-    [/@media\s*\(max-width:\s*1120px\)/, "tablet settings media query"],
-    [/@media\s*\(max-width:\s*760px\)/, "mobile settings media query"],
-  ]) {
-    const media = balancedBlockFromPattern(cssSource, pattern, label);
-    const panelRule = media.match(/\.panel:last-child\s*\{([^}]*)\}/);
-    assert.ok(panelRule, `${label} must explicitly lay out the settings panel`);
-    assert.doesNotMatch(
-      panelRule[1],
-      /display\s*:\s*none/,
-      `${label} must not hide chroma-key or leg-lock controls`,
-    );
-    assert.match(
-      panelRule[1],
-      /display\s*:\s*(?:flex|grid|block)/,
-      `${label} must keep the settings panel visible`,
-    );
-  }
+  const tabletMedia = balancedBlockFromPattern(
+    cssSource,
+    /@media\s*\(max-width:\s*1120px\)/,
+    "tablet settings media query",
+  );
+  assert.match(
+    tabletMedia,
+    /\.studio\s*\{[^}]*grid-template-columns\s*:/,
+    "the tablet layout must retain the stage and its settings column",
+  );
+
+  const mobileMedia = balancedBlockFromPattern(
+    cssSource,
+    /@media\s*\(max-width:\s*760px\)/,
+    "mobile settings media query",
+  );
+  assert.match(
+    mobileMedia,
+    /\.studio\s*\{[^}]*flex-direction\s*:\s*column/,
+    "the mobile layout must stack the stage and settings panel",
+  );
+  assert.match(
+    mobileMedia,
+    /\.studio\s*>\s*\.panel\s*\{[^}]*overflow-y\s*:\s*visible/,
+    "the mobile settings panel must remain visible and scroll with the page",
+  );
+  assert.doesNotMatch(
+    `${tabletMedia}\n${mobileMedia}`,
+    /\.panel(?:\s*:last-child)?\s*\{[^}]*display\s*:\s*none/,
+    "responsive layouts must not hide chroma-key or leg-lock controls",
+  );
 
   assert.match(
     cssSource,

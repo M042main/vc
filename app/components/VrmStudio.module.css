@@ -1,7 +1,8 @@
 .studio {
   display: grid;
-  grid-template-columns: 246px minmax(380px, 1fr) 246px;
-  min-height: 670px;
+  grid-template-columns: minmax(0, 1fr) 288px;
+  height: clamp(720px, 82dvh, 940px);
+  min-height: 720px;
   overflow: hidden;
   border: 1px solid rgba(23, 23, 19, 0.2);
   border-radius: 28px;
@@ -15,17 +16,16 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   padding: 22px 18px;
   background: #fffdf8;
   color: #171713;
 }
 
-.panel:first-child {
-  border-right: 1px solid rgba(23, 23, 19, 0.12);
-}
-
-.panel:last-child {
+.studio > .panel {
   border-left: 1px solid rgba(23, 23, 19, 0.12);
+  scrollbar-gutter: stable;
 }
 
 .panelHeader {
@@ -66,71 +66,6 @@
   box-shadow: 0 0 0 4px rgba(150, 217, 0, 0.14);
 }
 
-.stepList {
-  display: grid;
-  gap: 10px;
-}
-
-.step {
-  position: relative;
-  padding: 13px;
-  border: 1px solid rgba(23, 23, 19, 0.11);
-  border-radius: 16px;
-  background: #f7f3eb;
-  transition: 160ms ease;
-}
-
-.step[data-state="ready"] {
-  border-color: rgba(23, 23, 19, 0.2);
-  background: #fff;
-}
-
-.step[data-state="active"] {
-  border-color: #171713;
-  background: #dfff45;
-  box-shadow: 3px 3px 0 #171713;
-  transform: translate(-2px, -2px);
-}
-
-.stepTop {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.stepNumber {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 50%;
-  background: #e8e3d9;
-  font-size: 9px;
-  font-weight: 950;
-}
-
-.step[data-state="active"] .stepNumber {
-  background: #171713;
-  color: #dfff45;
-}
-
-.step strong {
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.step p {
-  margin: 0;
-  color: #69675f;
-  font-size: 10px;
-  line-height: 1.45;
-}
-
-.step[data-state="active"] p {
-  color: rgba(23, 23, 19, 0.7);
-}
-
 .hiddenInput {
   position: absolute;
   width: 1px;
@@ -144,7 +79,7 @@
 .actionStack {
   display: grid;
   gap: 9px;
-  margin-top: 18px;
+  margin-top: 0;
 }
 
 .animationLab {
@@ -342,7 +277,7 @@
 .stage {
   position: relative;
   min-width: 0;
-  min-height: 670px;
+  min-height: 720px;
   overflow: hidden;
   background:
     radial-gradient(circle at 50% 32%, rgba(116, 92, 255, 0.32), transparent 37%),
@@ -516,9 +451,9 @@
 .cameraPreview {
   position: absolute;
   z-index: 5;
-  right: 18px;
-  bottom: 76px;
-  width: 142px;
+  bottom: 18px;
+  left: 18px;
+  width: clamp(142px, 18vw, 210px);
   aspect-ratio: 4 / 3;
   overflow: hidden;
   border: 2px solid rgba(255, 255, 255, 0.75);
@@ -568,16 +503,17 @@
 .stageTools {
   position: absolute;
   z-index: 5;
-  bottom: 18px;
-  left: 50%;
+  top: 50%;
+  right: 18px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 5px;
   padding: 5px;
   border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 999px;
+  border-radius: 22px;
   background: rgba(17, 17, 18, 0.7);
-  transform: translateX(-50%);
+  transform: translateY(-50%);
   backdrop-filter: blur(12px);
 }
 
@@ -600,9 +536,22 @@
 }
 
 .stageToolDivider {
-  width: 1px;
-  height: 20px;
+  width: 20px;
+  height: 1px;
   background: rgba(255, 255, 255, 0.14);
+}
+
+.settingsHeading {
+  margin: 24px -18px 0;
+  padding: 20px 18px 0;
+  border-top: 1px solid rgba(23, 23, 19, 0.12);
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.settingsHeading + .sectionLabel {
+  margin-top: 16px;
 }
 
 .toast {
@@ -1141,14 +1090,7 @@
 
 @media (max-width: 1120px) {
   .studio {
-    grid-template-columns: 220px minmax(360px, 1fr);
-  }
-
-  .panel:last-child {
-    display: flex;
-    grid-column: 1 / -1;
-    border-top: 1px solid rgba(23, 23, 19, 0.12);
-    border-left: 0;
+    grid-template-columns: minmax(0, 1fr) 270px;
   }
 
   .characterChoices {
@@ -1159,35 +1101,20 @@
 @media (max-width: 760px) {
   .studio {
     display: flex;
+    height: auto;
     min-height: 0;
     flex-direction: column;
     border-radius: 22px;
   }
 
   .stage {
-    min-height: 520px;
-    order: 1;
+    min-height: clamp(540px, 76dvh, 720px);
   }
 
-  .panel:first-child {
-    order: 2;
-    border-top: 1px solid rgba(23, 23, 19, 0.12);
-    border-right: 0;
-  }
-
-  .panel:last-child {
-    display: flex;
-    order: 3;
+  .studio > .panel {
+    overflow-y: visible;
     border-top: 1px solid rgba(23, 23, 19, 0.12);
     border-left: 0;
-  }
-
-  .stepList {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  .step p {
-    display: none;
   }
 
   .actionStack {
@@ -1201,7 +1128,7 @@
 
 @media (max-width: 480px) {
   .stage {
-    min-height: 460px;
+    min-height: 520px;
   }
 
   .panel {
@@ -1212,24 +1139,15 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .stepList {
-    gap: 6px;
-  }
-
-  .step {
-    padding: 10px 8px;
-  }
-
-  .stepTop {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .cameraPreview {
-    right: 12px;
-    bottom: 70px;
+    bottom: 12px;
+    left: 12px;
     width: 106px;
     border-radius: 13px;
+  }
+
+  .stageTools {
+    right: 10px;
   }
 
   .emptyState {

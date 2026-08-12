@@ -40,7 +40,8 @@ test("opens server-authenticated admin mode from the top-right gear and passes i
   assert.match(adminSession, /HttpOnly; Secure; SameSite=Strict/);
   assert.match(adminSession, /ADMIN_ACCESS_CODE/);
   assert.match(adminSession, /ADMIN_SESSION_SECRET/);
-  assert.match(adminRoute, /createAdminSessionCookie/);
+  assert.match(adminRoute, /createAdminSession/);
+  assert.match(adminRoute, /token:\s*session\.token/u);
   assert.match(adminRoute, /export async function GET/);
   assert.match(adminRoute, /export async function POST/);
   assert.match(adminRoute, /export async function DELETE/);

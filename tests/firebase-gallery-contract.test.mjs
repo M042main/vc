@@ -129,8 +129,8 @@ test("routes deletion through shared authenticated server code to isolated galle
     "the client must send only a validated ID to the same-origin POST route",
   );
 
-  assert.match(route, /import\s*\{\s*isAdminRequest\s*\}\s*from\s*["'][^"']*adminSession["']/u);
-  assert.match(route, /await\s+isAdminRequest\s*\(\s*request\s*\)/u);
+  assert.match(route, /import\s*\{\s*isAdminMutationRequest\s*\}\s*from\s*["'][^"']*adminSession["']/u);
+  assert.match(route, /await\s+isAdminMutationRequest\s*\(\s*request\s*\)/u);
   assert.match(adminSession, /oai-authenticated-user-email/);
   assert.match(adminSession, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
   assert.match(adminSession, /TRUSTED_SITES_HOSTNAME\s*=\s*["']motion-ink-vrm-studio\.m042\.chatgpt\.site["']/);
@@ -156,7 +156,7 @@ test("routes deletion through shared authenticated server code to isolated galle
     "the route must never target the database origin",
   );
   assert.ok(
-    route.indexOf("isAdminRequest") < route.indexOf("firebaseEntryUrl"),
+    route.indexOf("isAdminMutationRequest") < route.indexOf("firebaseEntryUrl"),
     "authorization must happen before constructing or issuing the delete request",
   );
 });

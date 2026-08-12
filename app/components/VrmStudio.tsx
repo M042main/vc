@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
-  Check,
   CircleUserRound,
   Download,
+  Eye,
+  EyeOff,
   FileUp,
   Film,
   Focus,
@@ -25,6 +26,8 @@ import {
   Video,
   VideoOff,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import type { HolisticLandmarkerResult } from "@mediapipe/tasks-vision";
 import * as THREE from "three";
@@ -49,6 +52,13 @@ import {
   saveStudioSettings,
   type StudioBackgroundFit,
 } from "../lib/studioPersistence";
+import {
+  STAGE_CAMERA_FAR_PLANE,
+  STAGE_CAMERA_MAX_DISTANCE,
+  STAGE_CAMERA_MIN_DISTANCE,
+  STAGE_CAMERA_NEAR_PLANE,
+  STAGE_ZOOM_BUTTON_FACTOR,
+} from "../lib/stageZoom";
 import {
   getPaperDollMotionPreset,
 } from "../lib/paperDollMotion";
@@ -206,8 +216,8 @@ function fitObject(
     ) * 1.28;
 
   camera.position.set(center.x, center.y + size.y * 0.025, center.z + distance);
-  camera.near = Math.max(0.01, distance / 100);
-  camera.far = Math.max(100, distance * 20);
+  camera.near = STAGE_CAMERA_NEAR_PLANE;
+  camera.far = Math.max(STAGE_CAMERA_FAR_PLANE, distance * 20);
   camera.updateProjectionMatrix();
   controls.target.copy(center);
   controls.update();
@@ -473,6 +483,7 @@ export function VrmStudio({
     useState<StudioBackgroundFit>("cover");
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
+  const [cameraPreviewVisible, setCameraPreviewVisible] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [captureDialogOpen, setCaptureDialogOpen] = useState(false);
@@ -779,7 +790,12 @@ export function VrmStudio({
     backgroundTexture.minFilter = THREE.LinearFilter;
     backgroundTexture.magFilter = THREE.LinearFilter;
 
-    const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
+    const camera = new THREE.PerspectiveCamera(
+      32,
+      1,
+      STAGE_CAMERA_NEAR_PLANE,
+      STAGE_CAMERA_FAR_PLANE,
+    );
     camera.position.set(0, 1.05, 4.1);
     cameraRef.current = camera;
 
@@ -827,8 +843,8 @@ export function VrmStudio({
     controls.enablePan = true;
     controls.screenSpacePanning = true;
     controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
-    controls.minDistance = 1;
-    controls.maxDistance = 8;
+    controls.minDistance = STAGE_CAMERA_MIN_DISTANCE;
+    controls.maxDistance = STAGE_CAMERA_MAX_DISTANCE;
     controls.target.set(0, 0.9, 0);
     controlsRef.current = controls;
 
@@ -1677,6 +1693,18 @@ export function VrmStudio({
     if (object) object.rotateY(direction * 0.28);
   }, [paperDollActive]);
 
+  const zoomModel = useCallback((direction: -1 | 1) => {
+    if (paperDollActive) {
+      paperDollRef.current?.zoom(direction);
+      return;
+    }
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const dollyScale = 1 / STAGE_ZOOM_BUTTON_FACTOR;
+    if (direction > 0) controls.dollyIn(dollyScale);
+    else controls.dollyOut(dollyScale);
+  }, [paperDollActive]);
+
   const selectMotionPreset = useCallback(
     (preset: VrmMotionPresetId) => {
       if (!paperDollActive && !modelReady) return;
@@ -1991,186 +2019,6 @@ export function VrmStudio({
 
   return (
     <section className={styles.studio} aria-label="캐릭터 트래킹 스튜디오">
-      <aside className={styles.panel} aria-label="시작 단계">
-        <div className={styles.panelHeader}>
-          <h2>빠른 시작</h2>
-          <span className={styles.statusDot} data-ready={characterReady}>
-            {characterReady ? "준비됨" : "대기 중"}
-          </span>
-        </div>
-
-        <div className={styles.stepList}>
-          <div
-            className={styles.step}
-            data-state={characterReady ? "ready" : "active"}
-          >
-            <div className={styles.stepTop}>
-              <span className={styles.stepNumber}>{characterReady ? <Check size={11} /> : "01"}</span>
-              <strong>캐릭터 준비</strong>
-            </div>
-            <p>VRM을 올리거나 캐릭터 만들기에서 완성한 도안을 보내세요.</p>
-          </div>
-          <div
-            className={styles.step}
-            data-state={
-              trackingRunning ? "ready" : characterReady ? "active" : "waiting"
-            }
-          >
-            <div className={styles.stepTop}>
-              <span className={styles.stepNumber}>
-                {trackingRunning ? <Check size={11} /> : "02"}
-              </span>
-              <strong>카메라 연결</strong>
-            </div>
-            <p>권한을 허용하면 얼굴과 전신 움직임을 기기 안에서 분석해요.</p>
-          </div>
-          <div
-            className={styles.step}
-            data-state={trackingRunning ? "active" : characterReady ? "ready" : "waiting"}
-          >
-            <div className={styles.stepTop}>
-              <span className={styles.stepNumber}>03</span>
-              <strong>포즈·애니메이션 저장</strong>
-            </div>
-            <p>현재 포즈는 PNG로, 선택한 움직임은 WebM으로 저장할 수 있어요.</p>
-          </div>
-        </div>
-
-        <input
-          ref={fileInputRef}
-          className={styles.hiddenInput}
-          type="file"
-          accept=".vrm,model/gltf-binary"
-          onChange={(event) => handleModelFile(event.target.files?.[0])}
-          aria-label="VRM 파일 선택"
-        />
-        <input
-          ref={backgroundInputRef}
-          className={styles.hiddenInput}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          onChange={(event) => {
-            void handleBackgroundFile(event.target.files?.[0]);
-            event.currentTarget.value = "";
-          }}
-          aria-label="무대 사진 배경 선택"
-        />
-
-        <div className={styles.actionStack}>
-          <button
-            className={styles.primaryButton}
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={modelState === "loading" || isRecording}
-          >
-            {modelState === "loading" ? (
-              <LoaderCircle size={16} className="spin" />
-            ) : (
-              <FileUp size={16} />
-            )}
-            {vrmAvailable ? "다른 VRM 선택" : "VRM 파일 선택"}
-          </button>
-          <button
-            className={styles.secondaryButton}
-            type="button"
-            onClick={trackingRunning ? stopTracking : startTracking}
-            disabled={
-              !characterReady ||
-              trackingState === "loading" ||
-              modelState === "loading" ||
-              isRecording
-            }
-          >
-            {trackingState === "loading" ? (
-              <LoaderCircle size={16} />
-            ) : trackingRunning ? (
-              <VideoOff size={16} />
-            ) : (
-              <Video size={16} />
-            )}
-            {trackingState === "loading"
-              ? "엔진 준비 중"
-              : trackingRunning
-                ? "트래킹 멈추기"
-                : "카메라 시작"}
-          </button>
-          <button
-            className={styles.captureButton}
-            type="button"
-            onClick={(event) => openCaptureDialog(event.currentTarget)}
-            disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
-            aria-haspopup="dialog"
-          >
-            {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
-            {isCapturing ? "전신 맞추는 중" : "전신 PNG 자동 저장"}
-          </button>
-        </div>
-
-        {paperDollActive || modelReady ? (
-          <section className={styles.animationLab} aria-label="캐릭터 애니메이션 만들기">
-            <div className={styles.animationHeading}>
-              <span>ANIMATION LAB</span>
-              <strong>
-                {paperDollActive
-                  ? "저장한 그림을 움직여 보세요"
-                  : "VRM에 프리셋 움직임을 더해 보세요"}
-              </strong>
-            </div>
-            <div className={styles.motionGrid}>
-              {DOLL_MOTION_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      className={styles.motionPresetButton}
-                  data-selected={selectedMotion === preset.id}
-                  aria-pressed={selectedMotion === preset.id}
-                  onClick={() => selectMotionPreset(preset.id)}
-                  disabled={isRecording || trackingState === "loading"}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <div className={styles.motionControls}>
-              <button
-                type="button"
-                className={styles.playButton}
-                onClick={toggleAnimation}
-                disabled={isRecording || trackingState === "loading"}
-              >
-                {animationPlaying ? <Pause size={14} /> : <Play size={14} />}
-                {animationPlaying ? "일시정지" : "애니메이션 재생"}
-              </button>
-              <label className={styles.speedControl}>
-                <span>속도</span>
-                <select
-                  value={animationSpeed}
-                  onChange={(event) => changeAnimationSpeed(Number(event.target.value))}
-                  disabled={isRecording}
-                  aria-label="애니메이션 재생 속도"
-                >
-                  <option value={0.75}>0.75×</option>
-                  <option value={1}>1×</option>
-                  <option value={1.25}>1.25×</option>
-                  <option value={1.5}>1.5×</option>
-                </select>
-              </label>
-            </div>
-            <button
-              type="button"
-              className={styles.recordButton}
-              onClick={recordAnimation}
-              disabled={isRecording || trackingState === "loading"}
-            >
-              {isRecording ? <LoaderCircle size={15} /> : <Film size={15} />}
-              {isRecording ? "애니메이션 녹화 중" : "애니메이션 WebM 저장"}
-            </button>
-          </section>
-        ) : null}
-
-        {error ? <div className={styles.errorBox}>{error}</div> : null}
-      </aside>
-
       <div
         className={styles.stage}
         data-dragging={isDragging}
@@ -2256,8 +2104,14 @@ export function VrmStudio({
 
         <div
           className={styles.cameraPreview}
-          data-visible={trackingState === "loading" || trackingRunning}
-          aria-hidden={trackingState !== "loading" && !trackingRunning}
+          data-visible={
+            cameraPreviewVisible &&
+            (trackingState === "loading" || trackingRunning)
+          }
+          aria-hidden={
+            !cameraPreviewVisible ||
+            (trackingState !== "loading" && !trackingRunning)
+          }
         >
           <video ref={videoRef} playsInline muted />
           <TrackingLandmarkOverlay
@@ -2279,6 +2133,49 @@ export function VrmStudio({
         />
 
         <div className={styles.stageTools} aria-label="캐릭터 화면 도구">
+          <button
+            className={styles.iconButton}
+            type="button"
+            onClick={() => setCameraPreviewVisible((visible) => !visible)}
+            disabled={trackingState !== "loading" && !trackingRunning}
+            data-active={
+              cameraPreviewVisible &&
+              (trackingState === "loading" || trackingRunning)
+            }
+            aria-pressed={cameraPreviewVisible}
+            aria-label={
+              cameraPreviewVisible
+                ? "웹캠 화면 숨기기"
+                : "웹캠 화면 보이기"
+            }
+            title={
+              cameraPreviewVisible
+                ? "웹캠 화면 숨기기"
+                : "웹캠 화면 보이기"
+            }
+          >
+            {cameraPreviewVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+          </button>
+          <span className={styles.stageToolDivider} />
+          <button
+            className={styles.iconButton}
+            type="button"
+            onClick={() => zoomModel(-1)}
+            aria-label="캐릭터 화면 축소"
+            title="축소"
+          >
+            <ZoomOut size={17} aria-hidden="true" />
+          </button>
+          <button
+            className={styles.iconButton}
+            type="button"
+            onClick={() => zoomModel(1)}
+            aria-label="캐릭터 화면 확대"
+            title="확대"
+          >
+            <ZoomIn size={17} aria-hidden="true" />
+          </button>
+          <span className={styles.stageToolDivider} />
           <button
             className={styles.iconButton}
             type="button"
@@ -2358,12 +2255,149 @@ export function VrmStudio({
         ) : null}
       </div>
 
-      <aside className={styles.panel} aria-label="무대 설정">
+      <aside className={styles.panel} aria-label="스튜디오 도구 및 무대 설정">
         <div className={styles.panelHeader}>
-          <h3>무대 설정</h3>
-          <CircleUserRound size={17} aria-hidden="true" />
+          <h2>스튜디오 도구</h2>
+          <span className={styles.statusDot} data-ready={characterReady}>
+            {trackingRunning ? "트래킹 중" : characterReady ? "준비됨" : "대기 중"}
+          </span>
         </div>
 
+        <input
+          ref={fileInputRef}
+          className={styles.hiddenInput}
+          type="file"
+          accept=".vrm,model/gltf-binary"
+          onChange={(event) => handleModelFile(event.target.files?.[0])}
+          aria-label="VRM 파일 선택"
+        />
+        <input
+          ref={backgroundInputRef}
+          className={styles.hiddenInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(event) => {
+            void handleBackgroundFile(event.target.files?.[0]);
+            event.currentTarget.value = "";
+          }}
+          aria-label="무대 사진 배경 선택"
+        />
+
+        <div className={styles.actionStack}>
+          <button
+            className={styles.primaryButton}
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={modelState === "loading" || isRecording}
+          >
+            {modelState === "loading" ? (
+              <LoaderCircle size={16} className="spin" />
+            ) : (
+              <FileUp size={16} />
+            )}
+            {vrmAvailable ? "다른 VRM 선택" : "VRM 파일 선택"}
+          </button>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={trackingRunning ? stopTracking : startTracking}
+            disabled={
+              !characterReady ||
+              trackingState === "loading" ||
+              modelState === "loading" ||
+              isRecording
+            }
+          >
+            {trackingState === "loading" ? (
+              <LoaderCircle size={16} />
+            ) : trackingRunning ? (
+              <VideoOff size={16} />
+            ) : (
+              <Video size={16} />
+            )}
+            {trackingState === "loading"
+              ? "엔진 준비 중"
+              : trackingRunning
+                ? "트래킹 멈추기"
+                : "카메라 시작"}
+          </button>
+          <button
+            className={styles.captureButton}
+            type="button"
+            onClick={(event) => openCaptureDialog(event.currentTarget)}
+            disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
+            aria-haspopup="dialog"
+          >
+            {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
+            {isCapturing ? "전신 맞추는 중" : "전신 PNG 자동 저장"}
+          </button>
+        </div>
+
+        {paperDollActive || modelReady ? (
+          <section className={styles.animationLab} aria-label="캐릭터 애니메이션 만들기">
+            <div className={styles.animationHeading}>
+              <span>ANIMATION LAB</span>
+              <strong>
+                {paperDollActive
+                  ? "저장한 그림을 움직여 보세요"
+                  : "VRM에 프리셋 움직임을 더해 보세요"}
+              </strong>
+            </div>
+            <div className={styles.motionGrid}>
+              {DOLL_MOTION_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={styles.motionPresetButton}
+                  data-selected={selectedMotion === preset.id}
+                  aria-pressed={selectedMotion === preset.id}
+                  onClick={() => selectMotionPreset(preset.id)}
+                  disabled={isRecording || trackingState === "loading"}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className={styles.motionControls}>
+              <button
+                type="button"
+                className={styles.playButton}
+                onClick={toggleAnimation}
+                disabled={isRecording || trackingState === "loading"}
+              >
+                {animationPlaying ? <Pause size={14} /> : <Play size={14} />}
+                {animationPlaying ? "일시정지" : "애니메이션 재생"}
+              </button>
+              <label className={styles.speedControl}>
+                <span>속도</span>
+                <select
+                  value={animationSpeed}
+                  onChange={(event) => changeAnimationSpeed(Number(event.target.value))}
+                  disabled={isRecording}
+                  aria-label="애니메이션 재생 속도"
+                >
+                  <option value={0.75}>0.75×</option>
+                  <option value={1}>1×</option>
+                  <option value={1.25}>1.25×</option>
+                  <option value={1.5}>1.5×</option>
+                </select>
+              </label>
+            </div>
+            <button
+              type="button"
+              className={styles.recordButton}
+              onClick={recordAnimation}
+              disabled={isRecording || trackingState === "loading"}
+            >
+              {isRecording ? <LoaderCircle size={15} /> : <Film size={15} />}
+              {isRecording ? "애니메이션 녹화 중" : "애니메이션 WebM 저장"}
+            </button>
+          </section>
+        ) : null}
+
+        {error ? <div className={styles.errorBox}>{error}</div> : null}
+
+        <h3 className={styles.settingsHeading}>무대 설정</h3>
         <span className={styles.sectionLabel}>캐릭터 선택</span>
         {vrmAvailable || selectableCreatedCharacters.length > 0 ? (
           <div className={styles.characterChoices} role="group" aria-label="무대 캐릭터 선택">

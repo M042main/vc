@@ -26,7 +26,7 @@ test("removes technical tracking and export info panels without removing save ac
   assert.doesNotMatch(studio, /\bsetDelegate\b|\bsetInferenceMs\b|\blastStatsRef\b/);
   assert.match(studio, /전신 PNG 자동 저장/);
   assert.match(studio, /애니메이션 WebM 저장/);
-  assert.match(studio, /현재 포즈는 PNG로, 선택한 움직임은 WebM으로 저장할 수 있어요\./);
+  assert.doesNotMatch(studio, /현재 포즈는 PNG로, 선택한 움직임은 WebM으로 저장할 수 있어요\./);
   assert.match(studio, /paperDoll\.capturePng\(1600, 2000\)/);
   assert.match(studio, /new\s+MediaRecorder\s*\(/);
 });

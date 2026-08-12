@@ -21,6 +21,7 @@ import {
   visitorArtworkKey,
   type VisitorProfile,
 } from "./visitorProfile";
+import { adminRequestHeaders } from "./adminSessionClient";
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDbqMEThRW9pXEbi-HuTpAgUzTcnCO_Luo",
@@ -642,10 +643,10 @@ export async function deleteGalleryEntry(id: string): Promise<void> {
     response = await fetch(GALLERY_DELETE_API_PATH, {
       method: "POST",
       credentials: "same-origin",
-      headers: {
+      headers: adminRequestHeaders({
         Accept: "application/json",
         "Content-Type": "application/json; charset=utf-8",
-      },
+      }),
       body: JSON.stringify({ id: validatedId }),
     });
   } catch (error) {
@@ -674,10 +675,10 @@ export async function deleteAllGalleryEntries(): Promise<void> {
     response = await fetch(GALLERY_DELETE_API_PATH, {
       method: "POST",
       credentials: "same-origin",
-      headers: {
+      headers: adminRequestHeaders({
         Accept: "application/json",
         "Content-Type": "application/json; charset=utf-8",
-      },
+      }),
       body: JSON.stringify({
         all: true,
         confirmation: "DELETE_ALL_GALLERY",
@@ -742,10 +743,10 @@ async function classManagementRequest(
     response = await fetch(GALLERY_CLASSES_API_PATH, {
       method,
       credentials: "same-origin",
-      headers: {
+      headers: adminRequestHeaders({
         Accept: "application/json",
         "Content-Type": "application/json; charset=utf-8",
-      },
+      }),
       body: JSON.stringify(payload),
     });
   } catch (error) {

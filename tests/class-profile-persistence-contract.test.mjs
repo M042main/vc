@@ -38,14 +38,14 @@ test("keeps class create and delete behind server-verified administrator authori
   const { firebase, classesRoute, adminSession } = await sources();
   assert.match(
     classesRoute,
-    /import\s*\{\s*isAdminRequest\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/lib\/adminSession["']/,
+    /import\s*\{\s*isAdminMutationRequest\s*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/lib\/adminSession["']/,
   );
   assert.match(adminSession, /oai-authenticated-user-email/);
   assert.match(adminSession, /ADMIN_EMAIL\s*=\s*["']m042@m042\.kr["']/);
   assert.match(classesRoute, /export\s+async\s+function\s+POST/);
   assert.match(classesRoute, /export\s+async\s+function\s+DELETE/);
   assert.ok(
-    [...classesRoute.matchAll(/if\s*\(\s*!\(await\s+isAdminRequest\(request\)\)\s*\)[\s\S]{0,120}403/gu)]
+    [...classesRoute.matchAll(/if\s*\(\s*!\(await\s+isAdminMutationRequest\(request\)\)\s*\)[\s\S]{0,120}403/gu)]
       .length >= 2,
     "class creation and deletion must await the server-side administrator check",
   );
