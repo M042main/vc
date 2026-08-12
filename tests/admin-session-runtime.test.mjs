@@ -67,14 +67,39 @@ test("trusts the Sites identity header only on the exact Sites hostname", async 
   );
 });
 
-test("fails closed when the server-side administrator secrets are absent or weak", async () => {
-  const { route } = await loadModules("not-configured");
+test("accepts the built-in m042 administrator login without environment variables", async () => {
+  const { route } = await loadModules("built-in-login");
   await withAdminEnvironment({ code: undefined, secret: undefined }, async () => {
+    const wrong = await route.POST(
+      new Request(`${SITES_URL}/api/admin/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "not-m042" }),
+      }),
+    );
+    assert.equal(wrong.status, 403);
+
     const response = await route.POST(
       new Request(`${SITES_URL}/api/admin/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: "m042" }),
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { authenticated: true });
+    assert.match(response.headers.get("set-cookie") ?? "", /^__Host-vc-admin=/u);
+  });
+});
+
+test("fails closed when a custom administrator code lacks a strong session secret", async () => {
+  const { route } = await loadModules("unsafe-custom-configuration");
+  await withAdminEnvironment({ code: "custom-code", secret: undefined }, async () => {
+    const response = await route.POST(
+      new Request(`${SITES_URL}/api/admin/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "custom-code" }),
       }),
     );
     assert.equal(response.status, 503);
@@ -94,7 +119,7 @@ test("fails closed when the server-side administrator secrets are absent or weak
 test("issues and verifies a signed HttpOnly administrator cookie", async () => {
   const { route } = await loadModules("signed-cookie");
   await withAdminEnvironment(
-    { code: "m042", secret: "0123456789abcdef0123456789abcdef" },
+    { code: undefined, secret: undefined },
     async () => {
       const wrong = await route.POST(
         new Request("https://virtual-creator.netlify.app/api/admin/session", {
@@ -142,7 +167,7 @@ test("logout clears the signed administrator cookie", async () => {
 test("rate-limits repeated administrator login guesses before verification", async () => {
   const { route } = await loadModules("rate-limit");
   await withAdminEnvironment(
-    { code: "m042", secret: "0123456789abcdef0123456789abcdef" },
+    { code: undefined, secret: undefined },
     async () => {
       const request = () =>
         new Request("https://virtual-creator.netlify.app/api/admin/session", {

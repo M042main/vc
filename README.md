@@ -104,21 +104,25 @@ uses Vinext's Nitro adapter only for Netlify builds.
 1. Import the repository into Netlify. The committed `netlify.toml` selects
    `npm run build:netlify`; Nitro generates Netlify's publish and function
    output automatically.
-2. In **Project configuration → Environment variables**, add
-   `GEMINI_API_KEY`, `ADMIN_ACCESS_CODE`, and `ADMIN_SESSION_SECRET` as secrets
-   that are available to Functions. Use an independent random value of at
-   least 32 characters for `ADMIN_SESSION_SECRET`. Do not put these values in
+2. In **Project configuration → Environment variables**, add `GEMINI_API_KEY`
+   as a secret available to Functions. Administrator login works immediately
+   with the classroom code `m042`, so no administrator environment variables
+   are required. To replace that code for a hardened deployment, add both
+   `ADMIN_ACCESS_CODE` and an independent random `ADMIN_SESSION_SECRET` of at
+   least 32 characters as secrets. Do not put override values in
    `netlify.toml` or commit them to the repository.
 3. Deploy. Nitro generates the Netlify server function and routing metadata,
    while static `_next` assets, MediaPipe worker files, and WASM are served from
    `dist`.
 
 Netlify does not provide the Sites-only `oai-authenticated-user-email` header.
-This app therefore verifies `ADMIN_ACCESS_CODE` on the server and issues a
-short-lived, HMAC-signed HttpOnly administrator session using
-`ADMIN_SESSION_SECRET`. Administrator class and gallery write actions reject
-requests without that server-issued session. Never expose either value to
-browser code or replace the session check with a browser-supplied header.
+This app therefore checks the administrator code on the server and issues a
+short-lived, HMAC-signed HttpOnly administrator session. The built-in `m042`
+mode is for this classroom's simple access requirement; use both administrator
+environment overrides when stronger production separation is needed.
+Administrator class and gallery write actions reject requests without that
+server-issued session. Never expose override values to browser code or replace
+the session check with a browser-supplied header.
 
 ## Learn More
 
