@@ -94,6 +94,8 @@ async function loadWorkerHarness({ gpuCloseThrows = false } = {}) {
     close() {},
   };
   const bitmap = {
+    width: 480,
+    height: 270,
     close() {
       bitmapCloseCalls += 1;
     },
@@ -178,6 +180,10 @@ for (const gpuCloseThrows of [false, true]) {
       assert.equal(harness.messages[0].type, "DELEGATE");
       assert.equal(harness.messages[0].delegate, "CPU");
       assert.deepEqual(harness.messages[1].result, harness.cpuResult);
+      assert.deepEqual(harness.messages[1].imageSize, {
+        width: 480,
+        height: 270,
+      });
       assert.equal(
         harness.messages.some(({ type }) => type === "ERROR"),
         false,

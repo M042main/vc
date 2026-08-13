@@ -88,6 +88,7 @@ type TrackerMessage =
       type: "RESULT";
       result: HolisticLandmarkerResult;
       inferenceMs: number;
+      imageSize: { width: number; height: number };
     }
   | { type: "ERROR"; message: string; fatal: boolean };
 
@@ -1634,6 +1635,7 @@ export function VrmStudio({
             poseWorldLandmarks: result.poseWorldLandmarks?.[0],
             leftHandLandmarks: result.leftHandLandmarks?.[0],
             rightHandLandmarks: result.rightHandLandmarks?.[0],
+            imageSize: message.imageSize,
           }, {
             enableLegs: !legsLockedRef.current,
             applyHipsPosition: !legsLockedRef.current,

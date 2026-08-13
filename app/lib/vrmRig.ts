@@ -104,6 +104,8 @@ export interface VrmTrackingFrame {
   poseWorldLandmarks?: MediaPipeLandmarkList | null;
   leftHandLandmarks?: MediaPipeLandmarkList | null;
   rightHandLandmarks?: MediaPipeLandmarkList | null;
+  /** Exact bitmap dimensions used to infer `faceLandmarks`. */
+  imageSize?: { width: number; height: number } | null;
 }
 
 /** Minimal structural types matching MediaPipe Tasks Vision result objects. */
@@ -409,6 +411,11 @@ export function trackingFrameFromTasks(results: MediaPipeTaskResultsLike): VrmTr
   return frame;
 }
 
+/**
+ * Validate and clone a landmark list. Kalidokit rescales face landmarks in
+ * place when `imageSize` is supplied, so the worker/result-owned objects must
+ * never be passed through directly.
+ */
 function finiteLandmarks(
   landmarks: MediaPipeLandmarkList | null | undefined,
   minimumLength: number,
@@ -427,6 +434,22 @@ function finiteLandmarks(
   }
 
   return converted;
+}
+
+function finiteImageSize(
+  imageSize: VrmTrackingFrame["imageSize"],
+): { width: number; height: number } | undefined {
+  if (
+    !imageSize ||
+    !Number.isFinite(imageSize.width) ||
+    !Number.isFinite(imageSize.height) ||
+    imageSize.width <= 0 ||
+    imageSize.height <= 0
+  ) {
+    return undefined;
+  }
+
+  return { width: imageSize.width, height: imageSize.height };
 }
 
 /** Quaternion-slerp an Euler solution into a modern normalized VRM bone. */
@@ -701,11 +724,13 @@ export function applyVrmTracking(
   const poseWorldLandmarks = finiteLandmarks(frame.poseWorldLandmarks, 33);
   const leftHandLandmarks = finiteLandmarks(frame.leftHandLandmarks, 21);
   const rightHandLandmarks = finiteLandmarks(frame.rightHandLandmarks, 21);
+  const faceImageSize = finiteImageSize(frame.imageSize);
 
   const solvedFace = faceLandmarks
     ? Face.solve(faceLandmarks as Parameters<typeof Face.solve>[0], {
         runtime: "mediapipe",
         smoothBlink: true,
+        ...(faceImageSize ? { imageSize: faceImageSize } : {}),
       })
     : undefined;
   const solvedPose =

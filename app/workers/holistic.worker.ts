@@ -31,6 +31,7 @@ type WorkerOutput =
       type: "RESULT";
       result: HolisticLandmarkerResult;
       inferenceMs: number;
+      imageSize: { width: number; height: number };
     }
   | { type: "ERROR"; message: string; fatal: true };
 
@@ -201,6 +202,10 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
   }
 
   const startedAt = performance.now();
+  const imageSize = {
+    width: message.bitmap.width,
+    height: message.bitmap.height,
+  };
   try {
     let result: HolisticLandmarkerResult;
 
@@ -228,6 +233,7 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
       type: "RESULT",
       result,
       inferenceMs: performance.now() - startedAt,
+      imageSize,
     });
   } catch (error) {
     reply({
