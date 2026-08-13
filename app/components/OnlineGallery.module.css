@@ -350,6 +350,22 @@
   pointer-events: none;
 }
 
+.cardImage[data-loading-original="true"]::before {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    rgba(255, 255, 255, 0.18) 20%,
+    rgba(255, 255, 255, 0.76) 42%,
+    rgba(255, 255, 255, 0.18) 64%
+  );
+  background-size: 220% 100%;
+  content: "";
+  animation: thumbnailShimmer 1.15s linear infinite;
+  pointer-events: none;
+}
+
 .cardImage img {
   width: 100%;
   height: 100%;
@@ -372,6 +388,21 @@
   font-weight: 900;
   line-height: 1;
   pointer-events: none;
+}
+
+.cardOriginalLoading {
+  position: absolute;
+  z-index: 2;
+  inset: auto auto 10px 10px;
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(23, 23, 19, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #171713;
+  box-shadow: 0 4px 12px rgba(23, 23, 19, 0.12);
 }
 
 .cardBody {
@@ -657,6 +688,44 @@
   object-fit: contain;
 }
 
+.previewLoadState {
+  display: grid;
+  max-width: 420px;
+  place-items: center;
+  gap: 8px;
+  padding: 30px;
+  color: #282720;
+  text-align: center;
+}
+
+.previewLoadState strong {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.previewLoadState span {
+  color: #68665e;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.previewLoadState button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 0 14px;
+  border: 1px solid #171713;
+  border-radius: 12px;
+  background: #dfff45;
+  color: #171713;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .previewFigure figcaption {
   display: flex;
   flex-wrap: wrap;
@@ -762,6 +831,12 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes thumbnailShimmer {
+  to {
+    background-position: -220% 0;
   }
 }
 

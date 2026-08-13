@@ -83,11 +83,15 @@ test("isolates every Realtime Database operation inside the assigned room", asyn
   }
 });
 
-test("publishes with push plus set and tears down the realtime listener", async () => {
+test("publishes with push plus an isolated multi-location update and tears down the realtime listener", async () => {
   const { firebase, ui } = await gallerySources();
 
   assert.match(firebase, /\bpush\s*\(/, "gallery writes must allocate unique child keys");
-  assert.match(firebase, /\bset\s*\(/, "gallery entries must be written through set");
+  assert.match(
+    firebase,
+    /update\s*\(\s*ref\s*\(\s*database\s*,\s*GALLERY_DATABASE_PATH\s*\)[\s\S]{0,300}\[`entries\/\$\{id\}`\][\s\S]{0,180}\[`galleryImages\/\$\{id\}\/imageDataUrl`\]/u,
+    "metadata and the full PNG must be saved atomically under separate private-room children",
+  );
   assert.match(firebase, /\bonValue\s*\(/, "gallery must update in realtime");
   assert.ok(
     /(?:const|let)\s+unsubscribe\s*=\s*onValue\s*\(/.test(firebase) ||
@@ -141,23 +145,26 @@ test("routes deletion through shared authenticated server code to isolated galle
   );
   assert.match(route, /FIREBASE_PUSH_KEY_PATTERN\s*=\s*\/\^\[-_A-Za-z0-9\]\{20\}\$\/u/);
   assert.match(route, new RegExp(REQUIRED_BASE_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(
-    route,
-    /new URL\s*\(\s*`\$\{GALLERY_ENTRIES_PATH\}\/\$\{id\}\.json`\s*,\s*FIREBASE_DATABASE_ORIGIN\s*,?\s*\)/,
-    "the outbound Firebase URL must append only the validated push key child",
-  );
-  assert.match(
-    route,
-    /fetch\s*\(\s*firebaseEntryUrl\s*,\s*\{[\s\S]{0,240}method:\s*["']DELETE["']/,
-  );
+  assert.match(route, /new URL\s*\(\s*`\$\{GALLERY_DATABASE_PATH\}\.json`/u);
+  assert.match(route, /method:\s*["']PATCH["']/u);
+  assert.match(route, /\[`entries\/\$\{id\}`\]:\s*null/u);
+  assert.match(route, /\[`galleryImages\/\$\{id\}`\]:\s*null/u);
   assert.doesNotMatch(
     route,
     /fetch\s*\(\s*FIREBASE_DATABASE_ORIGIN\s*,/,
     "the route must never target the database origin",
   );
+  const postHandler = route.indexOf("export async function POST");
+  const authorizationCheck = route.indexOf(
+    "await isAdminMutationRequest(request)",
+    postHandler,
+  );
+  const outboundDelete = route.indexOf("await patchGalleryRoom", postHandler);
   assert.ok(
-    route.indexOf("isAdminMutationRequest") < route.indexOf("firebaseEntryUrl"),
-    "authorization must happen before constructing or issuing the delete request",
+    postHandler >= 0 &&
+      authorizationCheck > postHandler &&
+      outboundDelete > authorizationCheck,
+    "authorization must happen before issuing the Firebase delete mutation",
   );
 });
 

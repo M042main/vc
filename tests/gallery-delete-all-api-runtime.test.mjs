@@ -6,8 +6,8 @@ import ts from "typescript";
 const ADMIN_EMAIL = "m042@m042.kr";
 const API_URL =
   "https://motion-ink-vrm-studio.m042.chatgpt.site/api/gallery/delete";
-const PRIVATE_ENTRIES_PATH =
-  "/000000/박근석_t7/motion_ink_gallery_a7f3c9/entries.json";
+const PRIVATE_ROOM_PATH =
+  "/000000/박근석_t7/motion_ink_gallery_a7f3c9.json";
 
 async function loadRoute(tag) {
   const source = await readFile(
@@ -91,17 +91,24 @@ test("bulk deletion requires the exact strong confirmation before Firebase", asy
   assert.equal(called, false);
 });
 
-test("confirmed bulk deletion targets only the exact isolated entries collection", async () => {
+test("confirmed bulk deletion atomically clears metadata and original images in the isolated room", async () => {
   const route = await loadRoute("bulk-success");
   let calls = 0;
   const response = await withFetch(async (input, init) => {
     calls += 1;
     const url = new URL(input);
-    assert.equal(decodeURIComponent(url.pathname), PRIVATE_ENTRIES_PATH);
+    assert.equal(decodeURIComponent(url.pathname), PRIVATE_ROOM_PATH);
     assert.equal(url.search, "");
-    assert.equal(init.method, "DELETE");
+    assert.equal(init.method, "PATCH");
     assert.equal(init.redirect, "follow");
-    assert.deepEqual(init.headers, { Accept: "application/json" });
+    assert.deepEqual(init.headers, {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+    });
+    assert.deepEqual(JSON.parse(init.body), {
+      entries: null,
+      galleryImages: null,
+    });
     return Response.json(null);
   }, () =>
     route.POST(

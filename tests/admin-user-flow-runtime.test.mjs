@@ -122,7 +122,11 @@ test("m042 login authorizes class create/delete and gallery-wide delete without 
       ) {
         return Response.json(null);
       }
-      if (path === `${PRIVATE_ROOM}/entries.json` && init?.method === "DELETE") {
+      if (path === `${PRIVATE_ROOM}.json` && init?.method === "PATCH") {
+        assert.deepEqual(JSON.parse(init.body), {
+          entries: null,
+          galleryImages: null,
+        });
         return Response.json(null);
       }
       throw new Error(`Unexpected Firebase call: ${init?.method} ${path}`);
@@ -174,7 +178,7 @@ test("m042 login authorizes class create/delete and gallery-wide delete without 
     assert.deepEqual(firebaseCalls, [
       { path: `${PRIVATE_ROOM}/classes.json`, method: "POST" },
       { path: `${PRIVATE_ROOM}/classes/${CLASS_ID}.json`, method: "DELETE" },
-      { path: `${PRIVATE_ROOM}/entries.json`, method: "DELETE" },
+      { path: `${PRIVATE_ROOM}.json`, method: "PATCH" },
     ]);
   });
 });

@@ -3,8 +3,8 @@ import { isAdminMutationRequest } from "../../../lib/adminSession";
 const FIREBASE_DATABASE_ORIGIN =
   "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app";
 // 이 부분은 우리 반 공용 데이터베이스에서 내 방을 만드는 주소입니다
-const GALLERY_ENTRIES_PATH =
-  "/000000/박근석_t7/motion_ink_gallery_a7f3c9/entries";
+const GALLERY_DATABASE_PATH =
+  "/000000/박근석_t7/motion_ink_gallery_a7f3c9";
 const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
 const DELETE_ALL_CONFIRMATION = "DELETE_ALL_GALLERY";
 
@@ -17,6 +17,22 @@ type ApiErrorCode =
   | "firebase_unavailable";
 
 export const dynamic = "force-dynamic";
+
+async function patchGalleryRoom(changes: Record<string, null>) {
+  const firebaseGalleryRoomUrl = new URL(
+    `${GALLERY_DATABASE_PATH}.json`,
+    FIREBASE_DATABASE_ORIGIN,
+  );
+  return fetch(firebaseGalleryRoomUrl, {
+    method: "PATCH",
+    redirect: "follow",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(changes),
+  });
+}
 
 function errorResponse(
   error: string,
@@ -126,16 +142,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const firebaseEntriesUrl = new URL(
-      `${GALLERY_ENTRIES_PATH}.json`,
-      FIREBASE_DATABASE_ORIGIN,
-    );
     let firebaseResponse: Response;
     try {
-      firebaseResponse = await fetch(firebaseEntriesUrl, {
-        method: "DELETE",
-        redirect: "follow",
-        headers: { Accept: "application/json" },
+      firebaseResponse = await patchGalleryRoom({
+        entries: null,
+        galleryImages: null,
       });
     } catch {
       return errorResponse(
@@ -156,19 +167,11 @@ export async function POST(request: Request) {
     return errorResponse("삭제할 갤러리 항목 ID가 올바르지 않습니다.", 400);
   }
 
-  const firebaseEntryUrl = new URL(
-    `${GALLERY_ENTRIES_PATH}/${id}.json`,
-    FIREBASE_DATABASE_ORIGIN,
-  );
-
   let firebaseResponse: Response;
   try {
-    firebaseResponse = await fetch(firebaseEntryUrl, {
-      method: "DELETE",
-      // Firebase can redirect REST traffic to its database region.
-      // No credential is sent with this request, so following is safe.
-      redirect: "follow",
-      headers: { Accept: "application/json" },
+    firebaseResponse = await patchGalleryRoom({
+      [`entries/${id}`]: null,
+      [`galleryImages/${id}`]: null,
     });
   } catch {
     return errorResponse(

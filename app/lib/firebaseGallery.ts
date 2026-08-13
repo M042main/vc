@@ -1,11 +1,11 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import {
-  equalTo,
+  endBefore,
   get,
   getDatabase,
   limitToLast,
   onValue,
-  orderByChild,
+  orderByKey,
   push,
   query,
   ref,
@@ -22,6 +22,13 @@ import {
   type VisitorProfile,
 } from "./visitorProfile";
 import { adminRequestHeaders } from "./adminSessionClient";
+import {
+  applyLegacyGalleryMigration,
+  matchesGalleryClassFilter,
+  matchesGalleryOwner,
+  selectGalleryPageChildren,
+  shouldCleanupStagedLegacyImage,
+} from "./galleryPagingCore.mjs";
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDbqMEThRW9pXEbi-HuTpAgUzTcnCO_Luo",
@@ -40,17 +47,24 @@ const FIREBASE_APP_NAME = "motion-ink-gallery-a7f3c9";
 export const GALLERY_DATABASE_PATH =
   "/000000/박근석_t7/motion_ink_gallery_a7f3c9";
 const GALLERY_ENTRIES_PATH = `${GALLERY_DATABASE_PATH}/entries`;
+const GALLERY_IMAGES_PATH = `${GALLERY_DATABASE_PATH}/galleryImages`;
 const GALLERY_CLASSES_PATH = `${GALLERY_DATABASE_PATH}/classes`;
 const GALLERY_ARTWORKS_PATH = `${GALLERY_DATABASE_PATH}/artworks`;
 
-// Keep three numbered pages available while bounding Firebase Data URL memory.
-const MAX_GALLERY_ENTRIES = 90;
+export const GALLERY_PAGE_SIZE = 20;
+const GALLERY_PAGE_QUERY_SIZE = GALLERY_PAGE_SIZE + 1;
+const GALLERY_SCAN_CHUNK_SIZE = GALLERY_PAGE_QUERY_SIZE;
+const MAX_GALLERY_SCAN_CHUNKS = 250;
 const MAX_AI_SOURCE_ENTRIES = 12;
 const MAX_GALLERY_NAME_LENGTH = 60;
 const MAX_PNG_DATA_URL_SIZE = 6 * 1024 * 1024;
-const MAX_GALLERY_RECORD_BYTES = MAX_PNG_DATA_URL_SIZE + 4 * 1024;
+const MAX_GALLERY_METADATA_BYTES = 640 * 1024;
+const MAX_THUMBNAIL_DATA_URL_SIZE = 512 * 1024;
+const MAX_THUMBNAIL_DIMENSION = 384;
 const PNG_DATA_URL_PREFIX = "data:image/png;base64,";
 const PNG_BASE64_SIGNATURE = "iVBORw0KGgo";
+const THUMBNAIL_DATA_URL_PATTERN =
+  /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/u;
 const FIREBASE_PUSH_KEY_PATTERN = /^[-_A-Za-z0-9]{20}$/u;
 const GALLERY_DELETE_API_PATH = "/api/gallery/delete";
 const GALLERY_CLASSES_API_PATH = "/api/gallery/classes";
@@ -69,16 +83,35 @@ export type GalleryEntry = {
   name: string;
   classId: string | null;
   className: string | null;
-  imageDataUrl: string;
+  thumbnailDataUrl: string;
+  /** Present only while an older unsplit record is being lazily migrated. */
+  imageDataUrl?: string;
   createdAt: number;
   likeCount: number;
   likeActorKeys: readonly string[];
 };
 
-type GalleryRecord = Omit<
+type GalleryRecord = Pick<
   GalleryEntry,
-  "id" | "likeCount" | "likeActorKeys"
+  "name" | "classId" | "className" | "thumbnailDataUrl" | "createdAt"
 >;
+
+export type GalleryPageCursor = {
+  id: string;
+};
+
+export type GalleryPageResult = {
+  entries: GalleryEntry[];
+  hasNextPage: boolean;
+  nextCursor: GalleryPageCursor | null;
+};
+
+export type GalleryPageSubscription = {
+  classFilter: "all" | "unclassified" | string;
+  cursor?: GalleryPageCursor | null;
+  onData: (page: GalleryPageResult) => void;
+  onError: (error: Error) => void;
+};
 
 export type ClassRecord = {
   id: string;
@@ -241,6 +274,64 @@ function validatePngDataUrl(value: unknown): string {
   return value;
 }
 
+function validateThumbnailDataUrl(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_THUMBNAIL_DATA_URL_SIZE ||
+    !THUMBNAIL_DATA_URL_PATTERN.test(value)
+  ) {
+    throw new Error("갤러리 썸네일 형식 또는 크기가 올바르지 않습니다.");
+  }
+  return value;
+}
+
+function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
+  if (typeof Image === "undefined") {
+    throw new Error("이미지 썸네일은 브라우저에서만 만들 수 있습니다.");
+  }
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("PNG 이미지를 읽지 못했습니다."));
+    image.src = dataUrl;
+  });
+}
+
+async function createGalleryThumbnailDataUrl(
+  originalDataUrl: string,
+): Promise<string> {
+  const imageDataUrl = validatePngDataUrl(originalDataUrl);
+  const image = await loadImageElement(imageDataUrl);
+  const naturalWidth = Math.max(1, image.naturalWidth || image.width);
+  const naturalHeight = Math.max(1, image.naturalHeight || image.height);
+  const dimensions = [MAX_THUMBNAIL_DIMENSION, 320, 256, 192];
+  const qualities = [0.8, 0.68, 0.56];
+
+  for (const maxDimension of dimensions) {
+    const scale = Math.min(1, maxDimension / Math.max(naturalWidth, naturalHeight));
+    const width = Math.max(1, Math.round(naturalWidth * scale));
+    const height = Math.max(1, Math.round(naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: true });
+    if (!context) throw new Error("썸네일 캔버스를 준비하지 못했습니다.");
+    context.clearRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+
+    for (const quality of qualities) {
+      const thumbnailDataUrl = canvas.toDataURL("image/webp", quality);
+      try {
+        return validateThumbnailDataUrl(thumbnailDataUrl);
+      } catch {
+        // Retry at a lower quality or smaller dimension.
+      }
+    }
+  }
+  throw new Error("갤러리 썸네일을 512KB 이하로 만들지 못했습니다.");
+}
+
 function validateCreatedAt(value: unknown): number {
   if (
     typeof value !== "number" ||
@@ -348,8 +439,8 @@ function parseSavedCharacterArtwork(
 
 function validateRecordSize(record: GalleryRecord) {
   const byteLength = new TextEncoder().encode(JSON.stringify(record)).byteLength;
-  if (byteLength > MAX_GALLERY_RECORD_BYTES) {
-    throw new Error("갤러리 레코드 크기가 허용 범위를 초과했습니다.");
+  if (byteLength > MAX_GALLERY_METADATA_BYTES) {
+    throw new Error("갤러리 메타데이터 크기가 허용 범위를 초과했습니다.");
   }
 }
 
@@ -384,43 +475,133 @@ function parseGalleryEntry(id: string, value: unknown): GalleryEntry {
     typeof candidate.classId === "string" &&
     FIREBASE_PUSH_KEY_PATTERN.test(candidate.classId) &&
     typeof candidate.className === "string";
+  const legacyImageDataUrl =
+    candidate.imageDataUrl === undefined || candidate.imageDataUrl === null
+      ? undefined
+      : validatePngDataUrl(candidate.imageDataUrl);
+  const storedThumbnailDataUrl =
+    candidate.thumbnailDataUrl === undefined || candidate.thumbnailDataUrl === null
+      ? undefined
+      : validateThumbnailDataUrl(candidate.thumbnailDataUrl);
+  const thumbnailDataUrl = storedThumbnailDataUrl ?? legacyImageDataUrl;
+  if (!thumbnailDataUrl) {
+    throw new Error("갤러리 썸네일이 없습니다.");
+  }
   const record: GalleryRecord = {
     name: validateName(candidate.name),
     classId: hasClassMetadata ? candidate.classId as string : null,
     className: hasClassMetadata ? validateClassName(candidate.className) : null,
-    imageDataUrl: validatePngDataUrl(candidate.imageDataUrl),
+    thumbnailDataUrl,
     createdAt: validateCreatedAt(candidate.createdAt),
   };
-  validateRecordSize(record);
+  // A legacy record temporarily uses its full original as the card image.
+  // Do not reject that record against the new lightweight metadata limit;
+  // the sequential migration below replaces it with a bounded thumbnail.
+  if (storedThumbnailDataUrl) validateRecordSize(record);
   const likeActorKeys = parseGalleryLikeActorKeys(candidate.likes);
   return {
     id: validatedId,
     ...record,
+    ...(legacyImageDataUrl ? { imageDataUrl: legacyImageDataUrl } : {}),
     likeCount: likeActorKeys.length,
     likeActorKeys,
   };
 }
 
-function entriesFromSnapshot(snapshot: DataSnapshot) {
-  const entries: GalleryEntry[] = [];
-  const errors: Error[] = [];
+const legacyMigrationPromises = new Map<string, Promise<void>>();
+let legacyMigrationQueue: Promise<void> = Promise.resolve();
+const MAX_PENDING_LEGACY_MIGRATIONS = 2;
 
-  snapshot.forEach((child) => {
-    if (!child.key) return;
-    try {
-      entries.push(parseGalleryEntry(child.key, child.val()));
-    } catch (error) {
-      errors.push(
-        toError(error, `갤러리 항목 ${child.key}을(를) 읽지 못했습니다.`),
+function migrateLegacyGalleryEntry(entry: GalleryEntry): Promise<void> | null {
+  if (!entry.imageDataUrl) return null;
+  const existing = legacyMigrationPromises.get(entry.id);
+  if (existing) return existing;
+  // A visited legacy page can contain multi-megabyte embedded PNGs. Keeping at
+  // most two pending jobs prevents queued closures from retaining an entire
+  // browsing session's originals in memory.
+  if (legacyMigrationPromises.size >= MAX_PENDING_LEGACY_MIGRATIONS) return null;
+
+  const originalDataUrl = entry.imageDataUrl;
+  const migration = legacyMigrationQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const thumbnailDataUrl = await createGalleryThumbnailDataUrl(
+        originalDataUrl,
+      );
+      const database = getGalleryDatabase();
+      const imageRef = ref(
+        database,
+        `${GALLERY_IMAGES_PATH}/${entry.id}/imageDataUrl`,
+      );
+      // Stage the original first, then conditionally rewrite the legacy entry.
+      // A concurrent administrator delete makes the transaction abort, so a
+      // queued migration can never resurrect a deleted metadata record.
+      await set(imageRef, originalDataUrl);
+      const entryRef = ref(database, `${GALLERY_ENTRIES_PATH}/${entry.id}`);
+      const cleanupStagedImageIfEntryMissing = async () => {
+        try {
+          const marker = await get(entryRef);
+          if (shouldCleanupStagedLegacyImage(marker.exists())) {
+            await set(imageRef, null);
+          }
+        } catch {
+          // Keeping the staged copy is safer than deleting an original another
+          // browser may have completed migrating at the same time.
+        }
+      };
+      let transactionResult;
+      try {
+        transactionResult = await runTransaction(
+          entryRef,
+          (currentValue) =>
+            applyLegacyGalleryMigration(
+              currentValue,
+              originalDataUrl,
+              thumbnailDataUrl,
+            ),
+          { applyLocally: false },
+        );
+      } catch (error) {
+        await cleanupStagedImageIfEntryMissing();
+        throw error;
+      }
+      if (!transactionResult.committed) {
+        // Another browser may already have committed the same migration. Only
+        // clean the staged image when the entry itself was truly deleted.
+        await cleanupStagedImageIfEntryMissing();
+      }
+    })
+    .finally(() => {
+      legacyMigrationPromises.delete(entry.id);
+    });
+  legacyMigrationQueue = migration.catch(() => undefined);
+  legacyMigrationPromises.set(entry.id, migration);
+  return migration;
+}
+
+function scheduleLegacyGalleryMigrations(
+  entries: readonly GalleryEntry[],
+  onError: (error: Error) => void,
+) {
+  const migrations = entries
+    .map((entry) => migrateLegacyGalleryEntry(entry))
+    .filter((migration): migration is Promise<void> => migration !== null);
+  if (migrations.length === 0) return;
+  void Promise.allSettled(migrations).then((results) => {
+    const errors = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) =>
+        toError(result.reason, "기존 갤러리 사진을 최적화하지 못했습니다."),
+      );
+    if (errors.length > 0) {
+      onError(
+        new AggregateError(
+          errors,
+          `기존 갤러리 사진 ${errors.length}개의 썸네일 변환을 다음 접속 때 다시 시도합니다.`,
+        ),
       );
     }
   });
-
-  entries.sort(
-    (left, right) =>
-      right.createdAt - left.createdAt || right.id.localeCompare(left.id),
-  );
-  return { entries, errors };
 }
 
 function classesFromSnapshot(snapshot: DataSnapshot): ClassRecord[] {
@@ -447,32 +628,208 @@ function classesFromSnapshot(snapshot: DataSnapshot): ClassRecord[] {
   );
 }
 
+function galleryKeyQuery(
+  database: Database,
+  cursor?: GalleryPageCursor | null,
+) {
+  const validatedCursor = cursor
+    ? { id: validateGalleryEntryId(cursor.id) }
+    : null;
+  const entriesRef = ref(database, GALLERY_ENTRIES_PATH);
+  return validatedCursor
+    ? query(
+        entriesRef,
+        orderByKey(),
+        endBefore(validatedCursor.id),
+        limitToLast(GALLERY_SCAN_CHUNK_SIZE),
+      )
+    : query(
+        entriesRef,
+        orderByKey(),
+        limitToLast(GALLERY_SCAN_CHUNK_SIZE),
+      );
+}
+
+function pageFromSnapshot(snapshot: DataSnapshot): {
+  page: GalleryPageResult;
+  errors: Error[];
+} {
+  const children: Array<{ id: string; value: unknown }> = [];
+  snapshot.forEach((child) => {
+    if (child.key) children.push({ id: child.key, value: child.val() });
+  });
+
+  const selection = selectGalleryPageChildren(children, GALLERY_PAGE_SIZE);
+  const { selected, hasNextPage, nextCursor } = selection;
+  const entries: GalleryEntry[] = [];
+  const errors: Error[] = [];
+  for (let index = selected.length - 1; index >= 0; index -= 1) {
+    const child = selected[index];
+    try {
+      entries.push(parseGalleryEntry(child.id, child.value));
+    } catch (error) {
+      errors.push(
+        toError(error, `갤러리 항목 ${child.id}을(를) 읽지 못했습니다.`),
+      );
+    }
+  }
+
+  return {
+    page: {
+      entries,
+      hasNextPage,
+      nextCursor,
+    },
+    errors,
+  };
+}
+
+type ScannedGalleryChildren = Array<{ id: string; value: unknown }>;
+
+async function scanGalleryChildrenByKey({
+  database,
+  cursor,
+  matches,
+  isCancelled,
+  targetSize,
+}: {
+  database: Database;
+  cursor: GalleryPageCursor | null;
+  matches: (value: unknown) => boolean;
+  isCancelled: () => boolean;
+  targetSize: number;
+}): Promise<ScannedGalleryChildren> {
+  const matchesNewestFirst: ScannedGalleryChildren = [];
+  let scanCursor = cursor;
+  let chunksScanned = 0;
+
+  while (
+    !isCancelled() &&
+    matchesNewestFirst.length < targetSize &&
+    chunksScanned < MAX_GALLERY_SCAN_CHUNKS
+  ) {
+    const snapshot = await get(galleryKeyQuery(database, scanCursor));
+    if (isCancelled()) return [];
+    const chunk: ScannedGalleryChildren = [];
+    snapshot.forEach((child) => {
+      if (child.key) chunk.push({ id: child.key, value: child.val() });
+    });
+    if (chunk.length === 0) break;
+
+    for (let index = chunk.length - 1; index >= 0; index -= 1) {
+      const child = chunk[index];
+      if (matches(child.value)) matchesNewestFirst.push(child);
+      if (matchesNewestFirst.length >= targetSize) break;
+    }
+
+    const oldestId = chunk[0]?.id;
+    if (!oldestId || chunk.length < GALLERY_SCAN_CHUNK_SIZE) break;
+    scanCursor = { id: oldestId };
+    chunksScanned += 1;
+  }
+
+  return matchesNewestFirst.reverse();
+}
+
+function scannedPageFromChildren(children: ScannedGalleryChildren) {
+  return pageFromSnapshotLike(children);
+}
+
+function pageFromSnapshotLike(children: ScannedGalleryChildren): {
+  page: GalleryPageResult;
+  errors: Error[];
+} {
+  const selection = selectGalleryPageChildren(children, GALLERY_PAGE_SIZE);
+  const entries: GalleryEntry[] = [];
+  const errors: Error[] = [];
+  for (let index = selection.selected.length - 1; index >= 0; index -= 1) {
+    const child = selection.selected[index];
+    try {
+      entries.push(parseGalleryEntry(child.id, child.value));
+    } catch (error) {
+      errors.push(toError(error, `갤러리 항목 ${child.id}을(를) 읽지 못했습니다.`));
+    }
+  }
+  return {
+    page: {
+      entries,
+      hasNextPage: selection.hasNextPage,
+      nextCursor: selection.nextCursor,
+    },
+    errors,
+  };
+}
+
+export function subscribeGalleryPage({
+  classFilter,
+  cursor = null,
+  onData,
+  onError,
+}: GalleryPageSubscription): Unsubscribe {
+  const database = getGalleryDatabase();
+  const validatedClassFilter =
+    classFilter === "all" || classFilter === "unclassified"
+      ? classFilter
+      : validateGalleryEntryId(classFilter);
+
+  const publishPage = (page: GalleryPageResult, errors: Error[]) => {
+    onData(page);
+    scheduleLegacyGalleryMigrations(page.entries, onError);
+    if (errors.length > 0) {
+      onError(
+        new AggregateError(
+          errors,
+          `유효하지 않은 갤러리 항목 ${errors.length}개를 제외했습니다.`,
+        ),
+      );
+    }
+  };
+
+  if (validatedClassFilter === "all") {
+    return onValue(
+      galleryKeyQuery(database, cursor),
+      (snapshot) => {
+        const { page, errors } = pageFromSnapshot(snapshot);
+        publishPage(page, errors);
+      },
+      (error) => onError(toError(error, "온라인 갤러리를 불러오지 못했습니다.")),
+    );
+  }
+
+  let cancelled = false;
+  void scanGalleryChildrenByKey({
+    database,
+    cursor,
+    matches: (value) =>
+      matchesGalleryClassFilter(value, validatedClassFilter),
+    isCancelled: () => cancelled,
+    targetSize: GALLERY_PAGE_QUERY_SIZE,
+  })
+    .then((children) => {
+      if (cancelled) return;
+      const { page, errors } = scannedPageFromChildren(children);
+      publishPage(page, errors);
+    })
+    .catch((error) => {
+      if (!cancelled) {
+        onError(toError(error, "온라인 갤러리를 불러오지 못했습니다."));
+      }
+    });
+  return () => {
+    cancelled = true;
+  };
+}
+
+/** @deprecated Use subscribeGalleryPage for bounded server-side pagination. */
 export function subscribeGalleryEntries({
   onData,
   onError,
 }: GallerySubscription): Unsubscribe {
-  const database = getGalleryDatabase();
-  const entriesQuery = query(
-    ref(database, GALLERY_ENTRIES_PATH),
-    limitToLast(MAX_GALLERY_ENTRIES),
-  );
-
-  return onValue(
-    entriesQuery,
-    (snapshot) => {
-      const { entries, errors } = entriesFromSnapshot(snapshot);
-      onData(entries);
-      if (errors.length > 0) {
-        onError(
-          new AggregateError(
-            errors,
-            `유효하지 않은 갤러리 항목 ${errors.length}개를 제외했습니다.`,
-          ),
-        );
-      }
-    },
-    (error) => onError(toError(error, "온라인 갤러리를 불러오지 못했습니다.")),
-  );
+  return subscribeGalleryPage({
+    classFilter: "all",
+    onData: (page) => onData(page.entries),
+    onError,
+  });
 }
 
 export function subscribeGalleryEntriesForProfile(
@@ -485,22 +842,30 @@ export function subscribeGalleryEntriesForProfile(
   }
 
   const database = getGalleryDatabase();
-  const entriesQuery = query(
-    ref(database, GALLERY_ENTRIES_PATH),
-    orderByChild("name"),
-    equalTo(activeProfile.name),
-    limitToLast(MAX_AI_SOURCE_ENTRIES),
-  );
-
-  return onValue(
-    entriesQuery,
-    (snapshot) => {
-      const { entries, errors } = entriesFromSnapshot(snapshot);
-      onData(
-        entries.filter(
-          (entry) => entry.classId === activeProfile.classId,
-        ),
-      );
+  let cancelled = false;
+  void scanGalleryChildrenByKey({
+    database,
+    cursor: null,
+    matches: (value) =>
+      matchesGalleryOwner(value, activeProfile.classId as string, activeProfile.name),
+    isCancelled: () => cancelled,
+    targetSize: MAX_AI_SOURCE_ENTRIES,
+  })
+    .then((children) => {
+      if (cancelled) return;
+      const entries: GalleryEntry[] = [];
+      const errors: Error[] = [];
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        try {
+          entries.push(parseGalleryEntry(child.id, child.value));
+        } catch (error) {
+          errors.push(toError(error, `갤러리 항목 ${child.id}을(를) 읽지 못했습니다.`));
+        }
+      }
+      const profileEntries = entries.slice(0, MAX_AI_SOURCE_ENTRIES);
+      onData(profileEntries);
+      scheduleLegacyGalleryMigrations(profileEntries, onError);
       if (errors.length > 0) {
         onError(
           new AggregateError(
@@ -509,10 +874,15 @@ export function subscribeGalleryEntriesForProfile(
           ),
         );
       }
-    },
-    (error) =>
-      onError(toError(error, "내 갤러리 사진을 불러오지 못했습니다.")),
-  );
+    })
+    .catch((error) => {
+      if (!cancelled) {
+        onError(toError(error, "내 갤러리 사진을 불러오지 못했습니다."));
+      }
+    });
+  return () => {
+    cancelled = true;
+  };
 }
 
 export function subscribeClassRecords({
@@ -565,11 +935,15 @@ export async function publishGalleryEntry({
     throw new Error("게스트는 온라인 갤러리에 저장할 수 없습니다.");
   }
   const activeClass = await requireActiveClass(activeProfile);
+  const originalImageDataUrl = validatePngDataUrl(imageDataUrl);
+  const thumbnailDataUrl = await createGalleryThumbnailDataUrl(
+    originalImageDataUrl,
+  );
   const record: GalleryRecord = {
     name: validateName(activeProfile.name),
     classId: activeProfile.classId,
     className: activeClass.name,
-    imageDataUrl: validatePngDataUrl(imageDataUrl),
+    thumbnailDataUrl,
     createdAt: Date.now(),
   };
   validateRecordSize(record);
@@ -578,8 +952,59 @@ export async function publishGalleryEntry({
   const entriesRef = ref(database, GALLERY_ENTRIES_PATH);
   const entryRef = push(entriesRef);
   const id = validateGalleryEntryId(entryRef.key);
-  await set(entryRef, record);
+  // This atomic multi-location write keeps lightweight list data separate from
+  // the full Base64 PNG while remaining inside our assigned Firebase room.
+  await update(ref(database, GALLERY_DATABASE_PATH), {
+    [`entries/${id}`]: record,
+    [`galleryImages/${id}/imageDataUrl`]: originalImageDataUrl,
+  });
   return { id, ...record, likeCount: 0, likeActorKeys: [] };
+}
+
+const originalImageLoads = new Map<string, Promise<string>>();
+
+export function loadGalleryEntryImage(entryId: string): Promise<string> {
+  const id = validateGalleryEntryId(entryId);
+  const existing = originalImageLoads.get(id);
+  if (existing) return existing;
+
+  const loading = (async () => {
+    const database = getGalleryDatabase();
+    const splitSnapshot = await get(
+      ref(database, `${GALLERY_IMAGES_PATH}/${id}/imageDataUrl`),
+    );
+    if (splitSnapshot.exists()) {
+      return validatePngDataUrl(splitSnapshot.val());
+    }
+
+    // Entries saved by earlier deployments keep the PNG beside metadata until
+    // the page/profile subscriber completes its lazy split migration.
+    const legacySnapshot = await get(
+      ref(database, `${GALLERY_ENTRIES_PATH}/${id}/imageDataUrl`),
+    );
+    if (legacySnapshot.exists()) {
+      return validatePngDataUrl(legacySnapshot.val());
+    }
+    // Migration can move the PNG between the two reads above. Recheck the
+    // destination (and await this entry's in-flight migration) before treating
+    // the original as missing.
+    await legacyMigrationPromises.get(id)?.catch(() => undefined);
+    const migratedSnapshot = await get(
+      ref(database, `${GALLERY_IMAGES_PATH}/${id}/imageDataUrl`),
+    );
+    if (migratedSnapshot.exists()) {
+      return validatePngDataUrl(migratedSnapshot.val());
+    }
+    throw new GalleryServiceError("원본 갤러리 이미지를 찾지 못했습니다.", {
+      code: "gallery_image_missing",
+      retryable: false,
+      status: null,
+    });
+  })().finally(() => {
+    originalImageLoads.delete(id);
+  });
+  originalImageLoads.set(id, loading);
+  return loading;
 }
 
 export async function toggleGalleryEntryLike({

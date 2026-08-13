@@ -21,6 +21,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  loadGalleryEntryImage,
   publishGalleryEntry,
   subscribeGalleryEntriesForProfile,
   type GalleryEntry,
@@ -450,9 +451,24 @@ export function AiImageGenerator({
     setGenerationMessage("입력한 상황과 자세로 이미지를 생성하고 있습니다.");
 
     try {
+      const originalImageDataUrl = await loadGalleryEntryImage(selectedEntry.id);
+      if (
+        generationRef.current !== generationToken ||
+        profileKeyRef.current !== profileKey ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
       const sourceImageDataUrl = await prepareGalleryPngDataUrl(
-        selectedEntry.imageDataUrl,
+        originalImageDataUrl,
       );
+      if (
+        generationRef.current !== generationToken ||
+        profileKeyRef.current !== profileKey ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
       const generatedImage = await generateImage({
         imageDataUrl: sourceImageDataUrl,
         prompt: normalizedPrompt,
@@ -887,7 +903,7 @@ export function AiImageGenerator({
                     >
                       {/* Firebase Data URLs cannot use an image optimization loader. */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={entry.imageDataUrl} alt="" />
+                      <img src={entry.thumbnailDataUrl} alt="" />
                       <span>{new Date(entry.createdAt).toLocaleDateString("ko-KR")}</span>
                     </button>
                   ))}

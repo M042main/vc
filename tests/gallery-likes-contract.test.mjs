@@ -93,7 +93,7 @@ test("aggregates only bounded true votes and keeps legacy entries at zero", asyn
   assert.match(likes, /MAX_GALLERY_LIKE_CHILDREN_INSPECTED/u);
   assert.match(likes, /MAX_GALLERY_LIKES/u);
 
-  const parser = block(firebase, "function parseGalleryEntry", "function entriesFromSnapshot");
+  const parser = block(firebase, "function parseGalleryEntry", "function classesFromSnapshot");
   assert.match(parser, /validateGalleryEntryId\(id\)/u);
   assert.match(parser, /parseGalleryLikeActorKeys\(candidate\.likes\)/u);
   assert.match(parser, /likeCount:\s*likeActorKeys\.length/u);

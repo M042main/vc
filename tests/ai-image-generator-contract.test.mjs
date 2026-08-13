@@ -25,22 +25,22 @@ async function sources() {
   return { component, css, page, firebase, history };
 }
 
-test("selects only the active profile's realtime Firebase gallery photos", async () => {
+test("selects only the active profile's gallery photos with bounded key scans", async () => {
   const { component, firebase } = await sources();
   assert.match(component, /subscribeGalleryEntriesForProfile\(profile, \{/u);
   assert.doesNotMatch(component, /\bsubscribeGalleryEntries\(\{/u);
-  assert.match(firebase, /\bequalTo\b/u);
-  assert.match(firebase, /\borderByChild\b/u);
+  assert.doesNotMatch(firebase, /\bequalTo\b|\borderByChild\b/u);
   assert.match(
     firebase,
     /export function subscribeGalleryEntriesForProfile\([\s\S]{0,220}createVisitorProfile\(profile\)/u,
   );
   assert.match(
     firebase,
-    /orderByChild\("name"\)[\s\S]{0,100}equalTo\(activeProfile\.name\)[\s\S]{0,100}limitToLast\(MAX_AI_SOURCE_ENTRIES\)/u,
+    /scanGalleryChildrenByKey\(\{[\s\S]{0,250}matchesGalleryOwner\(value, activeProfile\.classId as string, activeProfile\.name\)[\s\S]{0,180}targetSize: MAX_AI_SOURCE_ENTRIES/u,
   );
   assert.match(firebase, /const MAX_AI_SOURCE_ENTRIES = 12/u);
-  assert.match(firebase, /entry\.classId === activeProfile\.classId/u);
+  assert.match(firebase, /orderByKey\(\)/u);
+  assert.match(firebase, /limitToLast\(GALLERY_SCAN_CHUNK_SIZE\)/u);
   assert.match(firebase, /activeProfile\.guest \|\| !activeProfile\.classId/u);
   assert.match(component, /\.sort\([\s\S]{0,100}right\.createdAt - left\.createdAt/u);
   assert.match(component, /aria-pressed=\{entry\.id === selectedEntryId\}/u);
@@ -49,7 +49,7 @@ test("selects only the active profile's realtime Firebase gallery photos", async
   assert.match(component, /게스트는 AI 생성과 온라인 저장을 사용할 수 없습니다/u);
 });
 
-test("keeps the generic gallery subscription unchanged for legacy entries", async () => {
+test("keeps the legacy generic subscription bounded by the server page API", async () => {
   const { firebase } = await sources();
   const genericStart = firebase.indexOf("export function subscribeGalleryEntries({");
   const scopedStart = firebase.indexOf(
@@ -57,9 +57,11 @@ test("keeps the generic gallery subscription unchanged for legacy entries", asyn
   );
   assert.ok(genericStart >= 0 && scopedStart > genericStart);
   const genericSubscription = firebase.slice(genericStart, scopedStart);
-  assert.match(genericSubscription, /ref\(database, GALLERY_ENTRIES_PATH\)/u);
-  assert.match(genericSubscription, /onData\(entries\)/u);
+  assert.match(genericSubscription, /return subscribeGalleryPage\(\{/u);
+  assert.match(genericSubscription, /classFilter: "all"/u);
+  assert.match(genericSubscription, /onData: \(page\) => onData\(page\.entries\)/u);
   assert.doesNotMatch(genericSubscription, /orderByChild|equalTo|activeProfile/u);
+  assert.match(firebase, /export const GALLERY_PAGE_SIZE = 20/u);
   assert.match(
     firebase,
     /\/000000\/박근석_t7\/motion_ink_gallery_a7f3c9/u,
@@ -72,8 +74,10 @@ test("makes exactly one image request from one source photo and the user's promp
   assert.equal((component.match(/await generateImage\(\{/gu) ?? []).length, 1);
   assert.match(
     component,
-    /sourceImageDataUrl\s*=\s*await prepareGalleryPngDataUrl\([\s\S]{0,120}selectedEntry\.imageDataUrl[\s\S]{0,220}imageDataUrl:\s*sourceImageDataUrl,[\s\S]{0,120}prompt:\s*normalizedPrompt/u,
+    /originalImageDataUrl\s*=\s*await loadGalleryEntryImage\(selectedEntry\.id\)[\s\S]{0,360}sourceImageDataUrl\s*=\s*await prepareGalleryPngDataUrl\([\s\S]{0,80}originalImageDataUrl[\s\S]{0,360}imageDataUrl:\s*sourceImageDataUrl,[\s\S]{0,120}prompt:\s*normalizedPrompt/u,
   );
+  assert.match(component, /<img src=\{entry\.thumbnailDataUrl\} alt="" \/>/u);
+  assert.doesNotMatch(component, /<img src=\{entry\.imageDataUrl\} alt="" \/>/u);
   assert.match(component, /classId: profile\.classId/u);
   assert.match(component, /setResults\(\[result\]\)/u);
   assert.match(
@@ -82,6 +86,10 @@ test("makes exactly one image request from one source photo and the user's promp
   );
   assert.match(component, /generationRef\.current !== generationToken/u);
   assert.match(component, /profileKeyRef\.current !== profileKey/u);
+  assert.equal(
+    (component.match(/profileKeyRef\.current !== profileKey/gu) ?? []).length >= 3,
+    true,
+  );
 });
 
 test("keeps the Gemini key server-side and follows the generation route contract", async () => {

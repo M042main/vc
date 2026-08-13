@@ -27,12 +27,16 @@ import {
 import {
   deleteGalleryEntry,
   deleteAllGalleryEntries,
+  GALLERY_PAGE_SIZE,
   getGalleryLikeActorKey,
+  loadGalleryEntryImage,
   subscribeClassRecords,
-  subscribeGalleryEntries,
+  subscribeGalleryPage,
   toggleGalleryEntryLike,
   type ClassRecord,
   type GalleryEntry,
+  type GalleryPageCursor,
+  type GalleryPageResult,
 } from "../lib/firebaseGallery";
 import type { VisitorProfile } from "../lib/visitorProfile";
 import styles from "./OnlineGallery.module.css";
@@ -40,11 +44,16 @@ import styles from "./OnlineGallery.module.css";
 const GALLERY_NAME_COOKIE = "motion_ink_gallery_name";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const NAME_MAX_LENGTH = 24;
-const GALLERY_PAGE_SIZE = 30;
+const MAX_CACHED_ORIGINALS = 3;
+const MAX_CACHED_PAGES = 3;
 
 type NameAction =
   | { kind: "download"; entry: GalleryEntry }
   | { kind: "edit" };
+
+type CachedGalleryPage = GalleryPageResult & {
+  cursor: GalleryPageCursor | null;
+};
 
 export interface OnlineGalleryProps {
   className?: string;
@@ -125,7 +134,13 @@ export function OnlineGallery({
   const nameHeadingId = useId();
   const nameDescriptionId = useId();
   const previewHeadingId = useId();
-  const [entries, setEntries] = useState<GalleryEntry[]>([]);
+  const [pageCache, setPageCache] = useState<Record<number, CachedGalleryPage>>(
+    {},
+  );
+  const [pageCursors, setPageCursors] = useState<
+    Record<number, GalleryPageCursor | null>
+  >({ 1: null });
+  const [pageScopeKey, setPageScopeKey] = useState("");
   const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [galleryError, setGalleryError] = useState<string | null>(null);
@@ -155,6 +170,11 @@ export function OnlineGallery({
   const [classFilter, setClassFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
+  const [previewImageDataUrl, setPreviewImageDataUrl] = useState<string | null>(
+    null,
+  );
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -170,6 +190,10 @@ export function OnlineGallery({
   const downloadInFlightRef = useRef(false);
   const deleteInFlightRef = useRef<string | null>(null);
   const deleteAllInFlightRef = useRef(false);
+  const pageRequestGenerationRef = useRef(0);
+  const previewRequestGenerationRef = useRef(0);
+  const originalImagesRef = useRef(new Map<string, string>());
+  const originalImageRequestsRef = useRef(new Map<string, Promise<string>>());
   const likeOwner =
     profile && !profile.guest
       ? `${profile.classId ?? ""}:${profile.name}`
@@ -207,52 +231,6 @@ export function OnlineGallery({
   useEffect(() => {
     let active = true;
     let unsubscribe: () => void = () => undefined;
-    const connectTimer = window.setTimeout(() => {
-      if (!active) return;
-      try {
-        unsubscribe = subscribeGalleryEntries({
-          onData: (nextEntries) => {
-            if (!active) return;
-            setEntries(
-              [...nextEntries].sort(
-                (left, right) => right.createdAt - left.createdAt,
-              ),
-            );
-            setGalleryLoading(false);
-            setGalleryError(null);
-          },
-          onError: (error) => {
-            if (!active) return;
-            setGalleryLoading(false);
-            if (error instanceof AggregateError) {
-              setActionMessage(error.message);
-              return;
-            }
-            setGalleryError(
-              errorMessage(error, "온라인 갤러리를 불러오지 못했습니다."),
-            );
-          },
-        });
-      } catch (error) {
-        if (active) {
-          setGalleryLoading(false);
-          setGalleryError(
-            errorMessage(error, "온라인 갤러리를 연결하지 못했습니다."),
-          );
-        }
-      }
-    }, 0);
-
-    return () => {
-      active = false;
-      window.clearTimeout(connectTimer);
-      unsubscribe();
-    };
-  }, [subscriptionVersion]);
-
-  useEffect(() => {
-    let active = true;
-    let unsubscribe: () => void = () => undefined;
     const timer = window.setTimeout(() => {
       if (!active) return;
       unsubscribe = subscribeClassRecords({
@@ -274,11 +252,17 @@ export function OnlineGallery({
   useEffect(() => {
     const urls = objectUrlsRef.current;
     const timers = revokeTimersRef.current;
+    const originalImages = originalImagesRef.current;
+    const originalImageRequests = originalImageRequestsRef.current;
     return () => {
+      pageRequestGenerationRef.current += 1;
+      previewRequestGenerationRef.current += 1;
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
       urls.forEach((url) => URL.revokeObjectURL(url));
       urls.clear();
+      originalImages.clear();
+      originalImageRequests.clear();
     };
   }, []);
 
@@ -321,40 +305,137 @@ export function OnlineGallery({
     activeClassIds.has(classFilter)
       ? classFilter
       : "unclassified";
-  const visibleEntries = useMemo(
-    () =>
-      entries.filter((entry) => {
-        if (effectiveClassFilter === "all") return true;
-        if (effectiveClassFilter === "unclassified") {
-          return !entry.classId || !activeClassIds.has(entry.classId);
-        }
-        return entry.classId === effectiveClassFilter;
-      }),
-    [activeClassIds, effectiveClassFilter, entries],
-  );
-  const totalPages = Math.max(
-    1,
-    Math.ceil(visibleEntries.length / GALLERY_PAGE_SIZE),
-  );
-  const activePage = Math.min(currentPage, totalPages);
-  const paginatedEntries = useMemo(() => {
-    const firstEntryIndex = (activePage - 1) * GALLERY_PAGE_SIZE;
-    return visibleEntries.slice(
-      firstEntryIndex,
-      firstEntryIndex + GALLERY_PAGE_SIZE,
+  const activePage = currentPage;
+  const requestedPageScopeKey = `${isAdmin ? "admin" : "viewer"}:${effectiveClassFilter}`;
+  const activePageData = pageCache[activePage];
+  const entries = activePageData?.entries ?? [];
+  const activeCursor = pageCursors[activePage];
+  const activeCursorId = activeCursor?.id ?? null;
+  const activeCursorKnown =
+    activePage === 1 || Object.prototype.hasOwnProperty.call(pageCursors, activePage);
+  const visitedPageNumbers = useMemo(() => {
+    const pages = new Set(
+      Object.keys(pageCache)
+        .map(Number)
+        .filter((pageNumber) => Number.isInteger(pageNumber) && pageNumber > 0),
     );
-  }, [activePage, visibleEntries]);
+    pages.add(activePage);
+    return [...pages].sort((left, right) => left - right);
+  }, [activePage, pageCache]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setCurrentPage(1), 0);
-    return () => window.clearTimeout(timer);
-  }, [effectiveClassFilter]);
+    pageRequestGenerationRef.current += 1;
+    const resetTimer = window.setTimeout(() => {
+      setPageCache({});
+      setPageCursors({ 1: null });
+      setCurrentPage(1);
+      setGalleryLoading(true);
+      setGalleryError(null);
+      setDeleteCandidateId(null);
+      setDeleteError(null);
+      setPageScopeKey(requestedPageScopeKey);
+    }, 0);
+    return () => window.clearTimeout(resetTimer);
+  }, [effectiveClassFilter, isAdmin, requestedPageScopeKey]);
 
   useEffect(() => {
-    if (currentPage <= totalPages) return;
-    const timer = window.setTimeout(() => setCurrentPage(totalPages), 0);
-    return () => window.clearTimeout(timer);
-  }, [currentPage, totalPages]);
+    if (!activeCursorKnown || pageScopeKey !== requestedPageScopeKey) return;
+
+    let active = true;
+    let unsubscribe: () => void = () => undefined;
+    const generation = ++pageRequestGenerationRef.current;
+    const cursorForRequest = activeCursorId
+      ? ({ id: activeCursorId } satisfies GalleryPageCursor)
+      : undefined;
+
+    const connectTimer = window.setTimeout(() => {
+      if (!active || generation !== pageRequestGenerationRef.current) return;
+      setGalleryError(null);
+      try {
+        unsubscribe = subscribeGalleryPage({
+          classFilter: effectiveClassFilter,
+          cursor: cursorForRequest,
+          onData: (result) => {
+            if (!active || generation !== pageRequestGenerationRef.current) return;
+            setPageCache((current) => {
+              const previousNextCursor = current[activePage]?.nextCursor?.id ?? null;
+              const nextCursorId = result.nextCursor?.id ?? null;
+              const next: Record<number, CachedGalleryPage> = {
+                ...current,
+                [activePage]: {
+                  ...result,
+                  cursor: cursorForRequest ?? null,
+                },
+              };
+              if (previousNextCursor !== null && previousNextCursor !== nextCursorId) {
+                Object.keys(next).forEach((pageKey) => {
+                  if (Number(pageKey) > activePage) delete next[Number(pageKey)];
+                });
+              }
+              Object.keys(next)
+                .map(Number)
+                .sort(
+                  (left, right) =>
+                    Math.abs(left - activePage) - Math.abs(right - activePage) ||
+                    right - left,
+                )
+                .slice(MAX_CACHED_PAGES)
+                .forEach((pageNumber) => delete next[pageNumber]);
+              return next;
+            });
+            setPageCursors((current) => {
+              const next = { ...current };
+              if (result.hasNextPage && result.nextCursor) {
+                next[activePage + 1] = result.nextCursor;
+              } else {
+                Object.keys(next).forEach((pageKey) => {
+                  if (Number(pageKey) > activePage) delete next[Number(pageKey)];
+                });
+              }
+              return next;
+            });
+            setGalleryLoading(false);
+            setGalleryError(null);
+            if (result.entries.length === 0 && activePage > 1) {
+              setCurrentPage(activePage - 1);
+            }
+          },
+          onError: (error) => {
+            if (!active || generation !== pageRequestGenerationRef.current) return;
+            setGalleryLoading(false);
+            if (error instanceof AggregateError) {
+              setActionMessage(error.message);
+              return;
+            }
+            setGalleryError(
+              errorMessage(error, "온라인 갤러리를 불러오지 못했습니다."),
+            );
+          },
+        });
+      } catch (error) {
+        if (active && generation === pageRequestGenerationRef.current) {
+          setGalleryLoading(false);
+          setGalleryError(
+            errorMessage(error, "온라인 갤러리를 연결하지 못했습니다."),
+          );
+        }
+      }
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(connectTimer);
+      unsubscribe();
+    };
+  }, [
+    activeCursorId,
+    activeCursorKnown,
+    activePage,
+    effectiveClassFilter,
+    pageScopeKey,
+    requestedPageScopeKey,
+    subscriptionVersion,
+  ]);
 
   useEffect(() => {
     if (!deleteAllConfirming) return;
@@ -368,10 +449,43 @@ export function OnlineGallery({
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   }, []);
 
+  const getOriginalImage = useCallback(async (entryId: string) => {
+    const cached = originalImagesRef.current.get(entryId);
+    if (cached) {
+      originalImagesRef.current.delete(entryId);
+      originalImagesRef.current.set(entryId, cached);
+      return cached;
+    }
+    const inFlight = originalImageRequestsRef.current.get(entryId);
+    if (inFlight) return inFlight;
+
+    const request = loadGalleryEntryImage(entryId)
+      .then((imageDataUrl) => {
+        originalImagesRef.current.set(entryId, imageDataUrl);
+        while (originalImagesRef.current.size > MAX_CACHED_ORIGINALS) {
+          const oldestId = originalImagesRef.current.keys().next().value;
+          if (typeof oldestId !== "string") break;
+          originalImagesRef.current.delete(oldestId);
+        }
+        return imageDataUrl;
+      })
+      .finally(() => {
+        if (originalImageRequestsRef.current.get(entryId) === request) {
+          originalImageRequestsRef.current.delete(entryId);
+        }
+      });
+    originalImageRequestsRef.current.set(entryId, request);
+    return request;
+  }, []);
+
   const closePreview = useCallback(() => {
     const trigger = previewTriggerRef.current;
+    previewRequestGenerationRef.current += 1;
     previewTriggerRef.current = null;
     setPreviewEntry(null);
+    setPreviewImageDataUrl(null);
+    setPreviewLoading(false);
+    setPreviewError(null);
     window.setTimeout(() => trigger?.focus(), 0);
   }, []);
 
@@ -382,14 +496,55 @@ export function OnlineGallery({
       setNameError(null);
       previewTriggerRef.current = trigger;
       setPreviewEntry(entry);
+      setPreviewImageDataUrl(null);
+      setPreviewError(null);
+      setPreviewLoading(true);
+      const generation = ++previewRequestGenerationRef.current;
+      void getOriginalImage(entry.id)
+        .then((imageDataUrl) => {
+          if (generation !== previewRequestGenerationRef.current) return;
+          setPreviewImageDataUrl(imageDataUrl);
+          setPreviewLoading(false);
+        })
+        .catch((error) => {
+          if (generation !== previewRequestGenerationRef.current) return;
+          setPreviewLoading(false);
+          setPreviewError(
+            errorMessage(error, "원본 이미지를 불러오지 못했습니다."),
+          );
+        });
     },
-    [],
+    [getOriginalImage],
   );
+
+  const retryPreview = useCallback(() => {
+    if (!previewEntry || previewLoading) return;
+    setPreviewError(null);
+    setPreviewLoading(true);
+    const generation = ++previewRequestGenerationRef.current;
+    void getOriginalImage(previewEntry.id)
+      .then((imageDataUrl) => {
+        if (generation !== previewRequestGenerationRef.current) return;
+        setPreviewImageDataUrl(imageDataUrl);
+        setPreviewLoading(false);
+      })
+      .catch((error) => {
+        if (generation !== previewRequestGenerationRef.current) return;
+        setPreviewLoading(false);
+        setPreviewError(
+          errorMessage(error, "원본 이미지를 불러오지 못했습니다."),
+        );
+      });
+  }, [getOriginalImage, previewEntry, previewLoading]);
 
   const openNameDialog = useCallback(
     (action: NameAction, trigger?: HTMLElement | null) => {
+      previewRequestGenerationRef.current += 1;
       previewTriggerRef.current = null;
       setPreviewEntry(null);
+      setPreviewImageDataUrl(null);
+      setPreviewLoading(false);
+      setPreviewError(null);
       returnFocusRef.current = trigger ?? null;
       setNameDraft(viewerName);
       setNameError(null);
@@ -411,7 +566,8 @@ export function OnlineGallery({
       setDownloadingId(entry.id);
       setActionMessage(`${entry.name}님의 캐릭터를 준비하고 있습니다.`);
       try {
-        const response = await fetch(entry.imageDataUrl);
+        const imageDataUrl = await getOriginalImage(entry.id);
+        const response = await fetch(imageDataUrl);
         if (!response.ok) throw new Error("이미지 파일을 읽지 못했습니다.");
         const blob = await response.blob();
         const objectUrl = URL.createObjectURL(blob);
@@ -437,7 +593,7 @@ export function OnlineGallery({
         setDownloadingId(null);
       }
     },
-    [downloadingId],
+    [downloadingId, getOriginalImage],
   );
 
   const requestDownload = useCallback(
@@ -492,25 +648,33 @@ export function OnlineGallery({
           actorKey: likeActorKey,
           liked: nextLiked,
         });
-        setEntries((currentEntries) =>
-          currentEntries.map((currentEntry) => {
-            if (currentEntry.id !== entry.id) return currentEntry;
-            const alreadyIncluded =
-              currentEntry.likeActorKeys.includes(likeActorKey);
-            const likeActorKeys = savedLiked
-              ? alreadyIncluded
-                ? currentEntry.likeActorKeys
-                : [...currentEntry.likeActorKeys, likeActorKey].sort()
-              : currentEntry.likeActorKeys.filter(
-                  (actorKey) => actorKey !== likeActorKey,
-                );
-            return {
-              ...currentEntry,
-              likeActorKeys,
-              likeCount: likeActorKeys.length,
-            };
-          }),
-        );
+        setPageCache((current) => {
+          const page = current[activePage];
+          if (!page) return current;
+          return {
+            ...current,
+            [activePage]: {
+              ...page,
+              entries: page.entries.map((currentEntry) => {
+                if (currentEntry.id !== entry.id) return currentEntry;
+                const alreadyIncluded =
+                  currentEntry.likeActorKeys.includes(likeActorKey);
+                const likeActorKeys = savedLiked
+                  ? alreadyIncluded
+                    ? currentEntry.likeActorKeys
+                    : [...currentEntry.likeActorKeys, likeActorKey].sort()
+                  : currentEntry.likeActorKeys.filter(
+                      (actorKey) => actorKey !== likeActorKey,
+                    );
+                return {
+                  ...currentEntry,
+                  likeActorKeys,
+                  likeCount: likeActorKeys.length,
+                };
+              }),
+            },
+          };
+        });
         setActionMessage(
           savedLiked ? `${entry.name}님의 캐릭터를 좋아합니다.` : "좋아요를 취소했습니다.",
         );
@@ -532,7 +696,7 @@ export function OnlineGallery({
         });
       }
     },
-    [likeActorKey, profile],
+    [activePage, likeActorKey, profile],
   );
 
   const requestDelete = useCallback(
@@ -575,10 +739,21 @@ export function OnlineGallery({
       setActionMessage(`${entry.name}님의 캐릭터를 갤러리에서 삭제하는 중입니다.`);
       try {
         await deleteGalleryEntry(entry.id);
-        setEntries((currentEntries) =>
-          currentEntries.filter((currentEntry) => currentEntry.id !== entry.id),
-        );
+        originalImagesRef.current.delete(entry.id);
+        setPageCache((current) => {
+          const next: Record<number, CachedGalleryPage> = {};
+          Object.entries(current).forEach(([pageKey, page]) => {
+            next[Number(pageKey)] = {
+              ...page,
+              entries: page.entries.filter(
+                (currentEntry) => currentEntry.id !== entry.id,
+              ),
+            };
+          });
+          return next;
+        });
         setDeleteCandidateId(null);
+        setSubscriptionVersion((version) => version + 1);
         setActionMessage(`${entry.name}님의 캐릭터를 갤러리에서 삭제했습니다.`);
       } catch (error) {
         const message = errorMessage(
@@ -618,8 +793,11 @@ export function OnlineGallery({
     setActionMessage("온라인 갤러리의 모든 사진을 삭제하는 중입니다.");
     try {
       await deleteAllGalleryEntries();
+      originalImagesRef.current.clear();
       setDeleteAllConfirming(false);
       setDeleteCandidateId(null);
+      setPageCache({});
+      setPageCursors({ 1: null });
       setCurrentPage(1);
       setGalleryLoading(true);
       setSubscriptionVersion((version) => version + 1);
@@ -753,7 +931,7 @@ export function OnlineGallery({
           {classOptions.map((item) => (
             <option key={item.id} value={item.id}>{item.name}</option>
           ))}
-          <option value="unclassified">미분류 · 이전 갤러리</option>
+          <option value="unclassified">학급 정보 없음</option>
         </select>
       </header>
 
@@ -865,7 +1043,7 @@ export function OnlineGallery({
               <RefreshCw size={16} aria-hidden="true" /> 다시 시도
             </button>
           </div>
-        ) : visibleEntries.length === 0 ? (
+        ) : entries.length === 0 ? (
           <div className={styles.emptyState} role="status">
             <Images size={34} aria-hidden="true" />
             <strong>아직 올라온 캐릭터가 없습니다.</strong>
@@ -874,7 +1052,7 @@ export function OnlineGallery({
         ) : (
           <>
           <div className={styles.grid} role="list" aria-label="온라인 캐릭터 목록">
-            {paginatedEntries.map((entry) => {
+            {entries.map((entry) => {
               const serverLiked = Boolean(
                 likeActorKey && entry.likeActorKeys.includes(likeActorKey),
               );
@@ -904,26 +1082,35 @@ export function OnlineGallery({
                   aria-label={`${entry.name}님의 캐릭터 전체보기`}
                   title={`${entry.name}님의 캐릭터 전체보기`}
                   disabled={deletingAll}
+                  data-loading-original={
+                    downloadingId === entry.id ||
+                    (previewEntry?.id === entry.id && previewLoading)
+                  }
                 >
-                  {/* Firebase entries contain PNG Data URLs created by this app. */}
+                  {/* Cards receive only a small thumbnail; the original is fetched on demand. */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={entry.imageDataUrl}
+                    src={entry.thumbnailDataUrl}
                     alt={`${entry.name}님이 올린 캐릭터`}
                     loading="lazy"
                     decoding="async"
                   />
-                  <span className={styles.cardImageHint} aria-hidden="true">
-                    <Maximize2 size={14} /> 전체보기
-                  </span>
+                  {downloadingId === entry.id ||
+                  (previewEntry?.id === entry.id && previewLoading) ? (
+                    <span className={styles.cardOriginalLoading} aria-hidden="true">
+                      <LoaderCircle className={styles.spinner} size={16} />
+                    </span>
+                  ) : (
+                    <span className={styles.cardImageHint} aria-hidden="true">
+                      <Maximize2 size={14} /> 전체보기
+                    </span>
+                  )}
                 </button>
                 <div className={styles.cardBody}>
                   <div>
                     <h3>{entry.name}</h3>
                     <span className={styles.cardClass}>
-                      {entry.classId && activeClassIds.has(entry.classId)
-                        ? entry.className
-                        : "미분류 · 이전 기록"}
+                      {entry.className || "학급 정보 없음"}
                     </span>
                     <time dateTime={dateTimeValue(entry.createdAt)}>
                       {formatDate(entry.createdAt)}
@@ -1053,7 +1240,7 @@ export function OnlineGallery({
               );
             })}
           </div>
-          {totalPages > 1 ? (
+          {activePage > 1 || activePageData?.hasNextPage ? (
             <nav className={styles.pagination} aria-label="온라인 갤러리 페이지">
               <span
                 className={styles.paginationStatus}
@@ -1061,25 +1248,27 @@ export function OnlineGallery({
                 aria-live="polite"
                 aria-atomic="true"
               >
-                총 {visibleEntries.length}개 중 {activePage}페이지, 전체 {totalPages}페이지
+                페이지당 최대 {GALLERY_PAGE_SIZE}개, 현재 {activePage}페이지
               </span>
               <button
                 type="button"
                 className={styles.paginationArrow}
-                onClick={() => setCurrentPage(activePage - 1)}
-                disabled={activePage === 1}
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={activePage === 1 || galleryLoading}
                 aria-label="이전 갤러리 페이지"
               >
                 <ChevronLeft size={18} aria-hidden="true" />
               </button>
               <div className={styles.paginationPages}>
-                {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-                  (pageNumber) => (
+                {visitedPageNumbers.map((pageNumber) => (
                     <button
                       type="button"
                       className={styles.paginationNumber}
                       key={pageNumber}
-                      onClick={() => setCurrentPage(pageNumber)}
+                      onClick={() => {
+                        setCurrentPage(pageNumber);
+                      }}
+                      disabled={galleryLoading && pageNumber !== activePage}
                       aria-current={pageNumber === activePage ? "page" : undefined}
                       aria-label={`${pageNumber}페이지${
                         pageNumber === activePage ? ", 현재 페이지" : "로 이동"
@@ -1087,14 +1276,25 @@ export function OnlineGallery({
                     >
                       {pageNumber}
                     </button>
-                  ),
-                )}
+                  ))}
               </div>
               <button
                 type="button"
                 className={styles.paginationArrow}
-                onClick={() => setCurrentPage(activePage + 1)}
-                disabled={activePage === totalPages}
+                onClick={() => {
+                  if (!activePageData?.hasNextPage || !activePageData.nextCursor) return;
+                  setPageCursors((current) => ({
+                    ...current,
+                    [activePage + 1]: activePageData.nextCursor,
+                  }));
+                  setGalleryLoading(true);
+                  setCurrentPage(activePage + 1);
+                }}
+                disabled={
+                  galleryLoading ||
+                  !activePageData?.hasNextPage ||
+                  !activePageData.nextCursor
+                }
                 aria-label="다음 갤러리 페이지"
               >
                 <ChevronRight size={18} aria-hidden="true" />
@@ -1199,19 +1399,42 @@ export function OnlineGallery({
             </header>
             <figure className={styles.previewFigure}>
               <div className={styles.previewImage}>
-                {/* Firebase entries contain PNG Data URLs created by this app. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={previewEntry.imageDataUrl}
-                  alt={`${previewEntry.name}님이 올린 캐릭터 전체보기`}
-                  decoding="async"
-                />
+                {previewImageDataUrl ? (
+                  // The large Base64 original is requested only after this dialog opens.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewImageDataUrl}
+                    alt={`${previewEntry.name}님이 올린 캐릭터 전체보기`}
+                    decoding="async"
+                  />
+                ) : previewError ? (
+                  <div className={styles.previewLoadState} role="alert">
+                    <CircleAlert size={28} aria-hidden="true" />
+                    <strong>원본 이미지를 불러오지 못했습니다.</strong>
+                    <span>{previewError}</span>
+                    <button type="button" onClick={retryPreview}>
+                      <RefreshCw size={16} aria-hidden="true" /> 다시 시도
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    className={styles.previewLoadState}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <LoaderCircle
+                      className={styles.spinner}
+                      size={28}
+                      aria-hidden="true"
+                    />
+                    <strong>원본 이미지를 불러오는 중입니다.</strong>
+                    <span>썸네일보다 선명한 이미지를 준비하고 있어요.</span>
+                  </div>
+                )}
               </div>
               <figcaption>
                 <span>
-                  {previewEntry.classId && activeClassIds.has(previewEntry.classId)
-                    ? previewEntry.className
-                    : "미분류 · 이전 기록"}
+                  {previewEntry.className || "학급 정보 없음"}
                 </span>
                 <time dateTime={dateTimeValue(previewEntry.createdAt)}>
                   {formatDate(previewEntry.createdAt)}

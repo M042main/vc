@@ -25,7 +25,11 @@ test("gallery thumbnails open one labelled full-view dialog", async () => {
   );
   assert.match(source, /<span>전체보기<\/span>/u);
   assert.match(source, /aria-label="전체보기 닫기"/u);
-  assert.match(source, /previewEntry\.imageDataUrl/u);
+  assert.match(source, /loadGalleryEntryImage\(entryId\)/u);
+  assert.match(source, /setPreviewImageDataUrl\(imageDataUrl\)/u);
+  assert.match(source, /src=\{previewImageDataUrl\}/u);
+  assert.match(source, /원본 이미지를 불러오는 중입니다/u);
+  assert.match(source, /원본 이미지를 불러오지 못했습니다/u);
 });
 
 test("full-view dialog closes accessibly and restores the thumbnail focus", async () => {
@@ -33,6 +37,8 @@ test("full-view dialog closes accessibly and restores the thumbnail focus", asyn
 
   assert.match(source, /previewTriggerRef\.current = trigger/u);
   assert.match(source, /setPreviewEntry\(null\)/u);
+  assert.match(source, /previewRequestGenerationRef\.current \+= 1/u);
+  assert.match(source, /setPreviewImageDataUrl\(null\)/u);
   assert.match(source, /window\.setTimeout\(\(\) => trigger\?\.focus\(\), 0\)/u);
   assert.match(source, /event\.key === "Escape"[\s\S]{0,100}closePreview\(\)/u);
   assert.match(source, /event\.key !== "Tab"/u);
@@ -54,11 +60,11 @@ test("keeps image preview and the download-name dialog mutually exclusive", asyn
   const source = await readFile(galleryUrl, "utf8");
   assert.match(
     source,
-    /const openPreview = useCallback\([\s\S]{0,240}setNameAction\(null\)[\s\S]{0,180}setPreviewEntry\(entry\)/u,
+    /const openPreview = useCallback\([\s\S]{0,300}setNameAction\(null\)[\s\S]{0,180}setPreviewEntry\(entry\)/u,
   );
   assert.match(
     source,
-    /const openNameDialog = useCallback\([\s\S]{0,220}setPreviewEntry\(null\)[\s\S]{0,180}setNameAction\(action\)/u,
+    /const openNameDialog = useCallback\([\s\S]{0,320}setPreviewEntry\(null\)[\s\S]{0,220}setNameAction\(action\)/u,
   );
 });
 

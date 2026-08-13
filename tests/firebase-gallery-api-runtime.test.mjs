@@ -196,16 +196,16 @@ test("Firebase permission and availability failures remain distinguishable", asy
   assert.equal(unavailablePayload.upstreamStatus, 503);
 });
 
-test("class and gallery deletion target only their validated isolated child", async () => {
+test("class deletion targets one child and gallery deletion atomically clears metadata plus original", async () => {
   const [classesRoute, galleryRoute] = await Promise.all([
     loadRoute("../app/api/gallery/classes/route.ts", "class-delete"),
     loadRoute("../app/api/gallery/delete/route.ts", "gallery-delete"),
   ]);
-  const paths = [];
+  const calls = [];
 
   await withFetch(async (input, init) => {
-    paths.push(decodeURIComponent(new URL(input).pathname));
-    assert.equal(init.method, "DELETE");
+    const path = decodeURIComponent(new URL(input).pathname);
+    calls.push({ path, method: init.method, body: init.body });
     assert.equal(init.redirect, "follow");
     assert.equal(Object.hasOwn(init, "cache"), false);
     return new Response("null", {
@@ -230,9 +230,20 @@ test("class and gallery deletion target only their validated isolated child", as
     assert.equal(galleryResponse.status, 200);
   });
 
-  assert.deepEqual(paths, [
-    `${PRIVATE_ROOM}/classes/${PUSH_KEY}.json`,
-    `${PRIVATE_ROOM}/entries/${PUSH_KEY}.json`,
+  assert.deepEqual(calls, [
+    {
+      path: `${PRIVATE_ROOM}/classes/${PUSH_KEY}.json`,
+      method: "DELETE",
+      body: undefined,
+    },
+    {
+      path: `${PRIVATE_ROOM}.json`,
+      method: "PATCH",
+      body: JSON.stringify({
+        [`entries/${PUSH_KEY}`]: null,
+        [`galleryImages/${PUSH_KEY}`]: null,
+      }),
+    },
   ]);
 });
 

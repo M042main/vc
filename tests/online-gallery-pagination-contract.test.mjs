@@ -12,38 +12,57 @@ const galleryCssUrl = new URL(
 );
 const firebaseGalleryUrl = new URL("../app/lib/firebaseGallery.ts", import.meta.url);
 
-test("shows at most 30 filtered gallery entries on each numbered page", async () => {
+test("loads at most 20 thumbnail records per Firebase page instead of all originals", async () => {
   const [source, firebaseSource] = await Promise.all([
     readFile(galleryUrl, "utf8"),
     readFile(firebaseGalleryUrl, "utf8"),
   ]);
 
-  assert.match(source, /const GALLERY_PAGE_SIZE = 30/u);
-  assert.match(source, /Math\.ceil\(visibleEntries\.length \/ GALLERY_PAGE_SIZE\)/u);
-  assert.match(
-    source,
-    /visibleEntries\.slice\([\s\S]{0,180}firstEntryIndex \+ GALLERY_PAGE_SIZE/u,
-  );
-  assert.match(source, /paginatedEntries\.map\(\(entry\) =>/u);
-  assert.match(firebaseSource, /const MAX_GALLERY_ENTRIES = 90/u);
+  assert.match(firebaseSource, /export const GALLERY_PAGE_SIZE = 20/u);
   assert.match(
     firebaseSource,
-    /subscribeGalleryEntries[\s\S]{0,500}limitToLast\(MAX_GALLERY_ENTRIES\)/u,
+    /GALLERY_PAGE_QUERY_SIZE\s*=\s*GALLERY_PAGE_SIZE\s*\+\s*1/u,
   );
+  assert.match(
+    firebaseSource,
+    /function galleryKeyQuery[\s\S]{0,700}orderByKey\(\)[\s\S]{0,500}limitToLast\(GALLERY_SCAN_CHUNK_SIZE\)/u,
+  );
+  assert.match(firebaseSource, /endBefore\(validatedCursor\.id\)/u);
+  assert.doesNotMatch(firebaseSource, /orderByChild\(|equalTo\(/u);
+  assert.match(source, /subscribeGalleryPage\s*\(\{/u);
+  assert.match(source, /entries\.map\(\(entry\) =>/u);
+  assert.match(source, /src=\{entry\.thumbnailDataUrl\}/u);
+  assert.doesNotMatch(source, /src=\{entry\.imageDataUrl\}/u);
 });
 
-test("resets to page one after a class filter change and clamps a removed last page", async () => {
+test("resets cursor and page caches when filters or administrator state change", async () => {
   const source = await readFile(galleryUrl, "utf8");
 
   assert.match(
     source,
-    /setCurrentPage\(1\)[\s\S]{0,120}\[effectiveClassFilter\]/u,
+    /setPageCache\(\{\}\)[\s\S]{0,120}setPageCursors\(\{ 1: null \}\)[\s\S]{0,120}setCurrentPage\(1\)/u,
   );
   assert.match(
     source,
-    /currentPage <= totalPages[\s\S]{0,120}setCurrentPage\(totalPages\)/u,
+    /\[effectiveClassFilter, isAdmin, requestedPageScopeKey\]/u,
   );
-  assert.match(source, /const activePage = Math\.min\(currentPage, totalPages\)/u);
+  assert.match(source, /generation !== pageRequestGenerationRef\.current/u);
+  assert.match(source, /pageScopeKey !== requestedPageScopeKey/u);
+  assert.match(source, /const MAX_CACHED_PAGES = 3/u);
+  assert.match(source, /\.slice\(MAX_CACHED_PAGES\)/u);
+  assert.match(source, /return\s*\(\)\s*=>\s*\{[\s\S]{0,180}unsubscribe\(\)/u);
+});
+
+test("uses bounded key scans for class and unclassified filters", async () => {
+  const [source, firebaseSource] = await Promise.all([
+    readFile(galleryUrl, "utf8"),
+    readFile(firebaseGalleryUrl, "utf8"),
+  ]);
+
+  assert.match(firebaseSource, /scanGalleryChildrenByKey\(\{[\s\S]{0,240}matchesGalleryClassFilter/u);
+  assert.match(source, /<option value="unclassified">학급 정보 없음<\/option>/u);
+  assert.match(source, /entry\.className \|\| "학급 정보 없음"/u);
+  assert.match(source, /previewEntry\.className \|\| "학급 정보 없음"/u);
 });
 
 test("provides keyboard-sized, labelled numbered navigation on desktop and mobile", async () => {
@@ -60,6 +79,9 @@ test("provides keyboard-sized, labelled numbered navigation on desktop and mobil
   assert.match(source, /aria-label="이전 갤러리 페이지"/u);
   assert.match(source, /aria-label="다음 갤러리 페이지"/u);
   assert.match(source, /aria-current=\{pageNumber === activePage \? "page" : undefined\}/u);
+  assert.match(source, /visitedPageNumbers\.map\(\(pageNumber\) =>/u);
+  assert.match(source, /activePageData\?\.hasNextPage/u);
+  assert.match(source, /activePageData\.nextCursor/u);
   assert.match(
     css,
     /\.paginationPages\s*\{[\s\S]{0,220}overflow-x:\s*auto/u,
