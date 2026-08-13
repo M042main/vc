@@ -95,3 +95,48 @@ test("provides keyboard-sized, labelled numbered navigation on desktop and mobil
     /@media\s*\(max-width:\s*590px\)[\s\S]*?\.pagination\s*\{/u,
   );
 });
+
+test("refreshes the selected filter from page one with a fresh cursor chain", async () => {
+  const [source, css] = await Promise.all([
+    readFile(galleryUrl, "utf8"),
+    readFile(galleryCssUrl, "utf8"),
+  ]);
+
+  assert.match(source, /const\s+refreshGallery\s*=\s*useCallback\(\(\)\s*=>\s*\{/u);
+  assert.match(
+    source,
+    /galleryRefreshInFlightRef\.current[\s\S]{0,180}galleryLoading[\s\S]{0,220}pageScopeKey\s*!==\s*requestedPageScopeKey/u,
+  );
+  assert.match(
+    source,
+    /galleryRefreshInFlightRef\.current\s*=\s*true[\s\S]{0,100}pageRequestGenerationRef\.current\s*\+=\s*1[\s\S]{0,100}setGalleryRefreshing\(true\)[\s\S]{0,100}setGalleryLoading\(true\)[\s\S]{0,100}setGalleryError\(null\)/u,
+  );
+  assert.match(
+    source,
+    /setPageCache\(\{\}\)[\s\S]{0,100}setPageCursors\(\{ 1: null \}\)[\s\S]{0,100}setCurrentPage\(1\)[\s\S]{0,100}setSubscriptionVersion\(\(version\)\s*=>\s*version\s*\+\s*1\)/u,
+  );
+  assert.match(source, /generation\s*!==\s*pageRequestGenerationRef\.current/u);
+  assert.match(source, /className=\{styles\.filterActions\}[\s\S]{0,800}className=\{styles\.refreshButton\}/u);
+  assert.match(source, /aria-label=\{[\s\S]{0,180}온라인 갤러리 새로고침/u);
+  assert.match(source, /aria-busy=\{galleryRefreshing\}/u);
+  assert.match(source, /title="온라인 갤러리 새로고침"/u);
+  assert.match(source, /galleryRefreshing\s*\?\s*styles\.spinner\s*:\s*undefined/u);
+  assert.match(
+    source,
+    /disabled=\{[\s\S]{0,180}galleryLoading[\s\S]{0,120}galleryRefreshing[\s\S]{0,120}deletingId\s*!==\s*null[\s\S]{0,80}deletingAll[\s\S]{0,220}pageScopeKey\s*!==\s*requestedPageScopeKey/u,
+  );
+  const refreshBlock = source.slice(
+    source.indexOf("const refreshGallery"),
+    source.indexOf("useEffect(() => {", source.indexOf("const refreshGallery")),
+  );
+  assert.doesNotMatch(refreshBlock, /setClassFilter\(/u);
+  assert.match(
+    css,
+    /\.refreshButton\s*\{[\s\S]{0,160}width:\s*44px[\s\S]{0,100}min-width:\s*44px[\s\S]{0,100}min-height:\s*44px/u,
+  );
+  assert.match(css, /\.galleryFilter\s*\{[\s\S]{0,160}min-height:\s*44px/u);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*590px\)[\s\S]*?\.filterActions\s*\{[\s\S]{0,120}width:\s*100%/u,
+  );
+});

@@ -143,6 +143,7 @@ export function OnlineGallery({
   const [pageScopeKey, setPageScopeKey] = useState("");
   const [classes, setClasses] = useState<ClassRecord[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(true);
+  const [galleryRefreshing, setGalleryRefreshing] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
   const [subscriptionVersion, setSubscriptionVersion] = useState(0);
   const [viewerName, setViewerName] = useState("");
@@ -190,6 +191,7 @@ export function OnlineGallery({
   const downloadInFlightRef = useRef(false);
   const deleteInFlightRef = useRef<string | null>(null);
   const deleteAllInFlightRef = useRef(false);
+  const galleryRefreshInFlightRef = useRef(false);
   const pageRequestGenerationRef = useRef(0);
   const previewRequestGenerationRef = useRef(0);
   const originalImagesRef = useRef(new Map<string, string>());
@@ -257,6 +259,7 @@ export function OnlineGallery({
     return () => {
       pageRequestGenerationRef.current += 1;
       previewRequestGenerationRef.current += 1;
+      galleryRefreshInFlightRef.current = false;
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
       urls.forEach((url) => URL.revokeObjectURL(url));
@@ -330,6 +333,8 @@ export function OnlineGallery({
       setPageCursors({ 1: null });
       setCurrentPage(1);
       setGalleryLoading(true);
+      setGalleryRefreshing(false);
+      galleryRefreshInFlightRef.current = false;
       setGalleryError(null);
       setDeleteCandidateId(null);
       setDeleteError(null);
@@ -395,6 +400,8 @@ export function OnlineGallery({
               return next;
             });
             setGalleryLoading(false);
+            setGalleryRefreshing(false);
+            galleryRefreshInFlightRef.current = false;
             setGalleryError(null);
             if (result.entries.length === 0 && activePage > 1) {
               setCurrentPage(activePage - 1);
@@ -403,6 +410,8 @@ export function OnlineGallery({
           onError: (error) => {
             if (!active || generation !== pageRequestGenerationRef.current) return;
             setGalleryLoading(false);
+            setGalleryRefreshing(false);
+            galleryRefreshInFlightRef.current = false;
             if (error instanceof AggregateError) {
               setActionMessage(error.message);
               return;
@@ -415,6 +424,8 @@ export function OnlineGallery({
       } catch (error) {
         if (active && generation === pageRequestGenerationRef.current) {
           setGalleryLoading(false);
+          setGalleryRefreshing(false);
+          galleryRefreshInFlightRef.current = false;
           setGalleryError(
             errorMessage(error, "온라인 갤러리를 연결하지 못했습니다."),
           );
@@ -435,6 +446,35 @@ export function OnlineGallery({
     pageScopeKey,
     requestedPageScopeKey,
     subscriptionVersion,
+  ]);
+
+  const refreshGallery = useCallback(() => {
+    if (
+      galleryRefreshInFlightRef.current ||
+      galleryLoading ||
+      deletingId !== null ||
+      deletingAll ||
+      !activeCursorKnown ||
+      pageScopeKey !== requestedPageScopeKey
+    ) {
+      return;
+    }
+    galleryRefreshInFlightRef.current = true;
+    pageRequestGenerationRef.current += 1;
+    setGalleryRefreshing(true);
+    setGalleryLoading(true);
+    setGalleryError(null);
+    setPageCache({});
+    setPageCursors({ 1: null });
+    setCurrentPage(1);
+    setSubscriptionVersion((version) => version + 1);
+  }, [
+    activeCursorKnown,
+    deletingAll,
+    deletingId,
+    galleryLoading,
+    pageScopeKey,
+    requestedPageScopeKey,
   ]);
 
   useEffect(() => {
@@ -919,20 +959,48 @@ export function OnlineGallery({
         <div>
           <h2 id={headingId}>함께 만든 캐릭터를 둘러보세요</h2>
         </div>
-        <select
-          ref={galleryFilterRef}
-          id={`${headingId}-class-filter`}
-          className={styles.galleryFilter}
-          value={effectiveClassFilter}
-          onChange={(event) => setClassFilter(event.target.value)}
-          aria-label="학급별 갤러리 필터"
-        >
-          <option value="all">전체 학급</option>
-          {classOptions.map((item) => (
-            <option key={item.id} value={item.id}>{item.name}</option>
-          ))}
-          <option value="unclassified">학급 정보 없음</option>
-        </select>
+        <div className={styles.filterActions}>
+          <select
+            ref={galleryFilterRef}
+            id={`${headingId}-class-filter`}
+            className={styles.galleryFilter}
+            value={effectiveClassFilter}
+            onChange={(event) => setClassFilter(event.target.value)}
+            aria-label="학급별 갤러리 필터"
+          >
+            <option value="all">전체 학급</option>
+            {classOptions.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}</option>
+            ))}
+            <option value="unclassified">학급 정보 없음</option>
+          </select>
+          <button
+            type="button"
+            className={styles.refreshButton}
+            onClick={refreshGallery}
+            disabled={
+              galleryLoading ||
+              galleryRefreshing ||
+              deletingId !== null ||
+              deletingAll ||
+              !activeCursorKnown ||
+              pageScopeKey !== requestedPageScopeKey
+            }
+            aria-label={
+              galleryRefreshing
+                ? "온라인 갤러리 새로고침 중"
+                : "온라인 갤러리 새로고침"
+            }
+            aria-busy={galleryRefreshing}
+            title="온라인 갤러리 새로고침"
+          >
+            <RefreshCw
+              className={galleryRefreshing ? styles.spinner : undefined}
+              size={18}
+              aria-hidden="true"
+            />
+          </button>
+        </div>
       </header>
 
       {profile?.guest ? (

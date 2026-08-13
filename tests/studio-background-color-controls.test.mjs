@@ -87,14 +87,14 @@ test("renders only the accessible gallery class filter select", async () => {
   );
   assert.match(
     gallery,
-    /<header className=\{styles\.header\}>[\s\S]{0,1800}<select[\s\S]{0,240}className=\{styles\.galleryFilter\}[\s\S]{0,240}value=\{effectiveClassFilter\}[\s\S]{0,240}onChange=\{\(event\) => setClassFilter\(event\.target\.value\)\}[\s\S]{0,180}aria-label=["']학급별 갤러리 필터["'][\s\S]{0,700}<\/header>/,
+    /<header className=\{styles\.header\}>[\s\S]{0,1800}<select[\s\S]{0,240}className=\{styles\.galleryFilter\}[\s\S]{0,240}value=\{effectiveClassFilter\}[\s\S]{0,240}onChange=\{\(event\) => setClassFilter\(event\.target\.value\)\}[\s\S]{0,180}aria-label=["']학급별 갤러리 필터["'][\s\S]{0,1400}<\/header>/,
   );
   assert.doesNotMatch(gallery, /<label[^>]*>학급별 보기<\/label>/);
   assert.doesNotMatch(gallery, /개 표시<\/span>/);
   assert.doesNotMatch(css, /\.galleryFilter\s+(?:label|span|select)/);
-  assert.match(css, /\.galleryFilter\s*\{[\s\S]{0,180}min-height:\s*38px/);
+  assert.match(css, /\.galleryFilter\s*\{[\s\S]{0,180}min-height:\s*44px/);
   assert.match(
     css,
-    /@media\s*\(max-width:\s*590px\)[\s\S]{0,700}\.galleryFilter\s*\{[\s\S]{0,120}width:\s*100%;/,
+    /@media\s*\(max-width:\s*590px\)[\s\S]{0,700}\.filterActions\s*\{[\s\S]{0,120}width:\s*100%;[\s\S]{0,240}\.galleryFilter\s*\{[\s\S]{0,120}flex:\s*1\s+1\s+auto;/,
   );
 });
