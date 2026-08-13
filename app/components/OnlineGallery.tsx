@@ -1197,7 +1197,7 @@ export function OnlineGallery({
                     id={`delete-confirm-${entry.id}`}
                     className={styles.deleteConfirm}
                     role="group"
-                    aria-label={`${entry.name}님의 캐릭터 삭제 확인`}
+                    aria-label={`${entry.name}님의 캐릭터 삭제`}
                   >
                     <p>
                       <strong>{entry.name}</strong>님의 캐릭터를 정말 삭제할까요?
@@ -1218,7 +1218,7 @@ export function OnlineGallery({
                         ) : (
                           <Trash2 size={16} aria-hidden="true" />
                         )}
-                        {deletingId === entry.id ? "삭제 중" : "삭제 확인"}
+                        {deletingId === entry.id ? "삭제 중" : "삭제"}
                       </button>
                       <button
                         type="button"

@@ -154,7 +154,8 @@ test("renders load, new, maximum-three, and two-step delete library controls", a
   assert.match(library, /deleteCandidate\s*===\s*character\.id/u);
   assert.match(library, /setDeleteCandidate\(character\.id\)/u);
   assert.match(library, /confirmDelete\(character\.id\)/u);
-  assert.match(library, /삭제 확인/u);
+  assert.match(library, /onClick=\{\(\)\s*=>\s*void\s+confirmDelete\(character\.id\)\}[\s\S]{0,180}aria-label=\{`\$\{character\.name\} 삭제`\}[\s\S]{0,260}삭제\s*</u);
+  assert.doesNotMatch(library, />\s*삭제 확인\s*</u);
   assert.match(library, /setDeleteCandidate\(null\)[\s\S]{0,160}취소/u);
   assert.match(library, /await\s+onDelete\(id\)/u);
   assert.match(library, /deleteError[\s\S]{0,100}role=["']alert["']/u);

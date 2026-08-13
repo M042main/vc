@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   CircleUserRound,
-  Download,
   Eye,
   EyeOff,
   FileUp,
@@ -1944,7 +1943,6 @@ export function VrmStudio({
     restoreCaptureDialogFocus();
     setIsCapturing(true);
     setError(null);
-    let downloaded = false;
     try {
       let transparentBlob: Blob;
       if (paperDollActive) {
@@ -1988,23 +1986,18 @@ export function VrmStudio({
       const fileName = `${cleanFilename(displayModelName)}-fullbody${
         includeBackground ? "-background" : ""
       }-${stamp}.png`;
-      downloadBlob(blob, fileName);
-      downloaded = true;
-      if (onCaptureReady) {
-        const imageDataUrl = await pngBlobToDataUrl(blob);
-        await onCaptureReady({ imageDataUrl, fileName });
+      if (!onCaptureReady) {
+        throw new Error("온라인 갤러리 저장 기능을 사용할 수 없습니다.");
       }
-      showToast("캐릭터 전신 PNG를 저장했어요.");
+      const imageDataUrl = await pngBlobToDataUrl(blob);
+      await onCaptureReady({ imageDataUrl, fileName });
+      showToast("캐릭터 사진을 온라인 갤러리에 저장했어요.");
     } catch (captureError) {
       const message =
         captureError instanceof Error
           ? captureError.message
           : "전신 이미지를 저장하지 못했습니다.";
-      setError(
-        downloaded
-          ? `PNG 다운로드는 완료됐지만 온라인 갤러리 등록에 실패했습니다. ${message}`
-          : message,
-      );
+      setError(message);
     } finally {
       captureBusyRef.current = false;
       setIsCapturing(false);
@@ -2236,10 +2229,10 @@ export function VrmStudio({
             type="button"
             onClick={(event) => openCaptureDialog(event.currentTarget)}
             disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
-            aria-label="전신 PNG 저장"
+            aria-label="캐릭터 사진을 온라인 갤러리에 저장"
             aria-haspopup="dialog"
           >
-            <Download size={16} />
+            <Camera size={16} />
           </button>
         </div>
 
@@ -2325,7 +2318,7 @@ export function VrmStudio({
             aria-haspopup="dialog"
           >
             {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
-            {isCapturing ? "전신 맞추는 중" : "캐릭터 사진찍기"}
+            {isCapturing ? "갤러리에 저장 중" : "캐릭터 사진찍기"}
           </button>
         </div>
 
@@ -2578,14 +2571,14 @@ export function VrmStudio({
               type="button"
               className={styles.captureDialogClose}
               onClick={closeCaptureDialog}
-              aria-label="PNG 저장 창 닫기"
+              aria-label="갤러리 저장 창 닫기"
             >
               <X size={18} aria-hidden="true" />
             </button>
-            <span className={styles.captureDialogEyebrow}>FULL-BODY PNG</span>
+            <span className={styles.captureDialogEyebrow}>온라인 갤러리</span>
             <h2 id="capture-dialog-title">배경을 함께 저장할까요?</h2>
             <p id="capture-dialog-description">
-              현재 포즈의 전신을 자동으로 맞춘 뒤 선택한 방식으로 저장합니다.
+              현재 포즈의 전신을 자동으로 맞춘 뒤 선택한 방식으로 갤러리에 저장합니다.
             </p>
             <div className={styles.captureDialogChoices}>
               <button
@@ -2603,7 +2596,7 @@ export function VrmStudio({
                 </span>
                 <span>
                   <strong>배경 미포함</strong>
-                  <small>캐릭터만 투명 PNG로 저장</small>
+                  <small>캐릭터만 투명 PNG로 갤러리에 저장</small>
                 </span>
               </button>
               <button
@@ -2623,8 +2616,8 @@ export function VrmStudio({
                   <strong>배경 포함</strong>
                   <small>
                     {stageBackgroundImage
-                      ? "현재 사진 배경과 함께 저장"
-                      : "현재 무대 배경색과 함께 저장"}
+                      ? "현재 사진 배경과 함께 갤러리에 저장"
+                      : "현재 무대 배경색과 함께 갤러리에 저장"}
                   </small>
                 </span>
               </button>

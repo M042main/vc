@@ -672,8 +672,9 @@ export function ClassOnboarding({
                         type="button"
                         onClick={() => void deleteClass(item)}
                         disabled={classBusy}
+                        aria-label={`${item.name} 학급 삭제`}
                       >
-                        삭제 확인
+                        삭제
                       </button>
                       <button
                         type="button"

@@ -813,7 +813,11 @@ export default function Home() {
     async (capture: VrmStudioCapture) => {
       if (!profile || profile.guest) {
         setLatestCapture(null);
-        return;
+        throw new Error(
+          profile?.guest
+            ? "게스트 체험에서는 온라인 갤러리에 사진을 저장할 수 없습니다."
+            : "이름과 학급을 선택한 뒤 갤러리에 저장해 주세요.",
+        );
       }
 
       const mutationToken = beginLibraryMutation(libraryMutationRef, profile);

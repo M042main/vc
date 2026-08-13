@@ -126,6 +126,8 @@ test("provides a blocking, accessible first-run gate and inline admin class mana
   assert.match(onboarding, /className=\{styles\.guestExperience\}[\s\S]{0,700}type=["']button["'][\s\S]{0,200}aria-describedby=["']guest-experience-note["'][\s\S]{0,200}onClick=\{\(\)\s*=>\s*saveProfile\(true\)\}[\s\S]{0,200}게스트로 체험하기/);
   assert.match(onboarding, /!isBlocking\s*\|\|\s*!isAdmin[\s\S]{0,180}newClassInputRef\.current\?\.focus\s*\(\)/);
   assert.match(onboarding, /\{isAdmin\s*\?\s*\([\s\S]{0,500}학급 관리/);
+  assert.match(onboarding, /onClick=\{\(\)\s*=>\s*void\s+deleteClass\(item\)\}[\s\S]{0,180}aria-label=\{`\$\{item\.name\} 학급 삭제`\}[\s\S]{0,80}>\s*삭제\s*</u);
+  assert.doesNotMatch(onboarding, />\s*삭제 확인\s*</u);
 });
 
 test("wires the active profile through onboarding, artwork restore, creator save, and gallery", async () => {

@@ -167,7 +167,7 @@ test("records and downloads a browser-local animation file", async () => {
   );
 });
 
-test("preserves live tracking and transparent PNG export without upload APIs", async () => {
+test("preserves live tracking and sends transparent PNG capture through the gallery callback", async () => {
   const [paperDollSource, studioSource, creatorSource] = await Promise.all([
     readFile(paperDollUrl, "utf8"),
     readFile(studioUrl, "utf8"),
@@ -178,7 +178,7 @@ test("preserves live tracking and transparent PNG export without upload APIs", a
   assert.match(studioSource, /paperDollRef\.current\?\.(?:applyPose|applyTracking)\s*\(/);
   assert.match(paperDollSource, /capturePng\s*\(/);
   assert.match(studioSource, /paperDoll\.capturePng\(\s*1600\s*,\s*2000\s*\)/);
-  assert.match(studioSource, /downloadBlob\s*\(/);
+  assert.match(studioSource, /await\s+onCaptureReady\(\{\s*imageDataUrl,\s*fileName\s*\}\)/);
   assert.match(paperDollSource, /["']image\/png["']/);
 
   const browserOnlySource = [paperDollSource, studioSource, creatorSource].join(

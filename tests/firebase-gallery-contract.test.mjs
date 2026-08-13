@@ -250,7 +250,8 @@ test("shows two-step deletion controls only behind the administrator UI gate", a
   assert.match(ui, /isAdmin\s*=\s*false/);
   assert.match(ui, /\{isAdmin\s*\?\s*\([\s\S]{0,900}삭제 선택/);
   assert.match(ui, /deleteCandidateId\s*===\s*entry\.id/);
-  assert.match(ui, /삭제 확인/);
+  assert.match(ui, /aria-label=\{`\$\{entry\.name\}님의 캐릭터 삭제`\}/);
+  assert.match(ui, /deletingId\s*===\s*entry\.id\s*\?\s*["']삭제 중["']\s*:\s*["']삭제["']/);
   assert.match(ui, /취소/);
   assert.match(ui, /deleteGalleryEntry\s*\(entry\.id\)/);
   assert.match(ui, /deletingId\s*===\s*entry\.id[\s\S]{0,220}삭제 중/);

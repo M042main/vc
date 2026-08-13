@@ -94,11 +94,12 @@ export function SavedCharacterLibrary({
                     type="button"
                     onClick={() => void confirmDelete(character.id)}
                     disabled={deletingId !== null}
+                    aria-label={`${character.name} 삭제`}
                   >
                     {deletingId === character.id ? (
                       <LoaderCircle className={styles.spinner} size={15} aria-hidden="true" />
                     ) : null}
-                    삭제 확인
+                    삭제
                   </button>
                   <button
                     type="button"

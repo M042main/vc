@@ -42,19 +42,37 @@ test("background capture composites the current photo or stage color after trans
   assert.match(source, /includeBackground\s*\?[\s\S]{0,180}includeStageBackgroundInCapture/);
 });
 
-test("one capture downloads once and awaits immediate gallery publication", async () => {
+test("one capture skips PC download and awaits immediate gallery publication", async () => {
   const [studio, page] = await Promise.all([
     readFile(studioUrl, "utf8"),
     readFile(pageUrl, "utf8"),
   ]);
 
-  assert.match(studio, /downloadBlob\(blob,\s*fileName\)/);
+  const captureStart = studio.indexOf("const capture = useCallback");
+  const captureEnd = studio.indexOf("\n\n  return (", captureStart);
+  assert.ok(captureStart >= 0 && captureEnd > captureStart);
+  const captureFlow = studio.slice(captureStart, captureEnd);
+  assert.doesNotMatch(captureFlow, /downloadBlob\s*\(/);
+  assert.match(captureFlow, /if\s*\(!onCaptureReady\)/);
   assert.match(studio, /await\s+onCaptureReady\(\{\s*imageDataUrl,\s*fileName\s*\}\)/);
+  assert.match(studio, /캐릭터 사진을 온라인 갤러리에 저장했어요/u);
   assert.match(page, /const\s+handleCaptureReady\s*=\s*useCallback/);
   assert.match(page, /await\s+prepareGalleryImageDataUrl\(\s*capture\.imageDataUrl/);
   assert.match(page, /await\s+publishGalleryEntry\(\{[\s\S]{0,120}imageDataUrl:\s*galleryImageDataUrl/);
   assert.match(page, /onCaptureReady=\{handleCaptureReady\}/);
   assert.doesNotMatch(page, /onCaptureReady=\{setLatestCapture\}/);
+});
+
+test("gallery-only capture reports unavailable guest storage instead of false success", async () => {
+  const [studio, page] = await Promise.all([
+    readFile(studioUrl, "utf8"),
+    readFile(pageUrl, "utf8"),
+  ]);
+
+  assert.match(page, /if\s*\(!profile\s*\|\|\s*profile\.guest\)[\s\S]{0,260}throw new Error/u);
+  assert.match(page, /게스트 체험에서는 온라인 갤러리에 사진을 저장할 수 없습니다/u);
+  assert.match(studio, /catch\s*\(captureError\)[\s\S]{0,220}setError\(message\)/u);
+  assert.doesNotMatch(studio, /PNG 다운로드는 완료됐지만/u);
 });
 
 test("gallery publication resizes oversized PNG copies and locks the active profile", async () => {

@@ -190,6 +190,24 @@ const targetQuaternion = new Quaternion();
 const targetEuler = new Euler();
 const targetPosition = new Vector3();
 const hipsOffset = new Vector3();
+// Kalidokit's Euler solutions were authored against VRM 0.x's -Z-forward
+// humanoid space. `rotateVRM0()` turns that model 180 degrees for rendering,
+// while a VRM 1.x avatar is +Z-forward already. Conjugating the solved local
+// rotation by the same Y half-turn makes both versions produce the same
+// camera-facing motion without changing the known-good VRM 0.x path.
+const VRM0_TO_VRM1_BASIS = new Quaternion().setFromAxisAngle(
+  new Vector3(0, 1, 0),
+  Math.PI,
+);
+const VRM1_TO_VRM0_BASIS = VRM0_TO_VRM1_BASIS.clone().invert();
+
+/** Mutate a VRM-0-space tracking vector into the loaded avatar's local basis. */
+export function transformVrmTrackingVector(vrm: VRM, vector: Vector3): Vector3 {
+  if (vrm.meta?.metaVersion === "1") {
+    vector.applyQuaternion(VRM0_TO_VRM1_BASIS);
+  }
+  return vector;
+}
 
 function isFileLike(input: VrmLoadInput): input is File {
   const candidate = input as Partial<FileLike>;
@@ -431,6 +449,11 @@ export function slerpVrmBoneRotation(
     rotation.rotationOrder ?? "XYZ",
   );
   targetQuaternion.setFromEuler(targetEuler);
+  if (vrm.meta?.metaVersion === "1") {
+    targetQuaternion
+      .premultiply(VRM0_TO_VRM1_BASIS)
+      .multiply(VRM1_TO_VRM0_BASIS);
+  }
   node.quaternion.slerp(targetQuaternion, amount);
   return true;
 }
@@ -569,9 +592,12 @@ function applyPose(vrm: VRM, pose: TPose, options: Required<VrmRigOptions>, miss
 
   if (options.applyHipsPosition) {
     const hips = pose.Hips.position;
-    hipsOffset
-      .set(-hips.x, hips.y, -hips.z)
-      .multiplyScalar(options.hipsPositionScale);
+    transformVrmTrackingVector(
+      vrm,
+      hipsOffset
+        .set(-hips.x, hips.y, -hips.z)
+        .multiplyScalar(options.hipsPositionScale),
+    );
     if (!lerpVrmBonePosition(vrm, VRMHumanBoneName.Hips, hipsOffset, options.positionLerp)) {
       missing.add(VRMHumanBoneName.Hips);
     }
