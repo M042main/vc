@@ -125,5 +125,15 @@ the session check with a browser-supplied header.
 
 ## Learn More
 
+### Netlify secret scanning
+
+Keep Netlify secret scanning enabled. `GEMINI_API_KEY`, `ADMIN_ACCESS_CODE`,
+and `ADMIN_SESSION_SECRET` are server-only environment values; do not put
+them in application source, `netlify.toml`, or `VITE_`-prefixed variables.
+The gallery uses Realtime Database without Firebase Auth, so its browser
+configuration intentionally omits the unnecessary public Firebase API key.
+If a deploy reports a detected secret, check the exact key and file in the
+deploy log. Rotate any exposed credential rather than disabling scanning.
+
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)

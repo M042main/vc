@@ -31,7 +31,9 @@ import {
 } from "./galleryPagingCore.mjs";
 
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDbqMEThRW9pXEbi-HuTpAgUzTcnCO_Luo",
+  // This app uses only Realtime Database, without Firebase Auth or Analytics.
+  // Its databaseURL identifies the database; no Google API key is needed.
+  // Access remains governed by database rules and server-side admin sessions.
   authDomain: "project-001-e7851.firebaseapp.com",
   databaseURL:
     "https://project-001-e7851-default-rtdb.asia-southeast1.firebasedatabase.app",

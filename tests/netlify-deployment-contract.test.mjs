@@ -37,6 +37,20 @@ async function readProjectFile(relativePath) {
   return readFile(path.join(projectRoot, relativePath), "utf8");
 }
 
+test("Netlify artifacts do not contain Google API keys or build-time secret canaries", { skip: !hasNetlifyOutput }, async () => {
+  const files = [...await listFiles(netlifyPublicRoot), ...await listFiles(netlifyServerRoot)]
+    .filter((file) => /\.(?:m?js|cjs|json|html|map)$/u.test(file));
+  const exposed = [];
+  for (const file of files) {
+    const content = await readFile(file, "utf8");
+    if (/AIza[0-9A-Za-z_-]{35}/u.test(content) || /netlify-audit-(?:gemini|admin|session)-canary-/u.test(content)) {
+      exposed.push(path.relative(projectRoot, file));
+    }
+  }
+  // Report only paths, never the key or the complete bundle on failure.
+  assert.deepEqual(exposed, [], "credentials must remain runtime-only, not bundled");
+});
+
 test("keeps Netlify on Nitro without replacing the existing Sites build", async () => {
   const [packageSource, netlifyConfig, viteConfig, gitignore, readme] =
     await Promise.all([
