@@ -4,11 +4,6 @@ const TRUSTED_SITES_HOSTNAME = "motion-ink-vrm-studio.m042.chatgpt.site";
 const ADMIN_COOKIE_NAME = "__Host-vc-admin";
 const ADMIN_SESSION_SECONDS = 8 * 60 * 60;
 const TOKEN_PATTERN = /^(\d{10})\.([A-Za-z0-9_-]{22})\.([a-f0-9]{64})$/u;
-const DEFAULT_ADMIN_ACCESS_CODE = "m042";
-// Convenience fallback for the fixed classroom code. Deployments that override
-// the access code must also provide their own independent session secret.
-const DEFAULT_ADMIN_SESSION_SECRET =
-  "virtual-creator-classroom-admin-session-m042-v1";
 
 const encoder = new TextEncoder();
 
@@ -20,13 +15,12 @@ function environmentValue(name: "ADMIN_ACCESS_CODE" | "ADMIN_SESSION_SECRET") {
 function sessionSecret() {
   const value = environmentValue("ADMIN_SESSION_SECRET");
   if (value) return value.length >= 32 ? value : null;
-  return environmentValue("ADMIN_ACCESS_CODE")
-    ? null
-    : DEFAULT_ADMIN_SESSION_SECRET;
+  const accessCode = environmentValue("ADMIN_ACCESS_CODE");
+  return accessCode ? `virtual-creator-admin-session:${accessCode}` : null;
 }
 
 function configuredAccessCode() {
-  return environmentValue("ADMIN_ACCESS_CODE") ?? DEFAULT_ADMIN_ACCESS_CODE;
+  return environmentValue("ADMIN_ACCESS_CODE");
 }
 
 function bytesToHex(bytes: Uint8Array) {

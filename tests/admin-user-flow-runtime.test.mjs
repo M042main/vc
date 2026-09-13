@@ -67,10 +67,10 @@ function request(path, method, body, cookie, bearerToken) {
   });
 }
 
-async function withoutAdminEnvironment(run) {
+async function withAdminEnvironment(run) {
   const previousCode = process.env.ADMIN_ACCESS_CODE;
   const previousSecret = process.env.ADMIN_SESSION_SECRET;
-  delete process.env.ADMIN_ACCESS_CODE;
+  process.env.ADMIN_ACCESS_CODE = "m042";
   delete process.env.ADMIN_SESSION_SECRET;
   try {
     return await run();
@@ -82,8 +82,8 @@ async function withoutAdminEnvironment(run) {
   }
 }
 
-test("m042 login authorizes class create/delete and gallery-wide delete without environment variables", async () => {
-  await withoutAdminEnvironment(async () => {
+test("environment-configured login authorizes class create/delete and gallery-wide delete", async () => {
+  await withAdminEnvironment(async () => {
     const { session, classes, galleryDelete } =
       await loadAdministratorRoutes("no-env-user-flow");
 

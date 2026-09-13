@@ -255,6 +255,7 @@ export async function PATCH(request: Request) {
       retryable: false,
     });
   }
+  const existingRecord = existingClass as Record<string, unknown>;
   const existingEtag = existingResponse.headers.get("ETag");
   if (!existingEtag) {
     return errorResponse("Firebase 학급 버전 정보를 읽지 못했습니다.", 502, {
@@ -266,14 +267,17 @@ export async function PATCH(request: Request) {
   let firebaseResponse: Response;
   try {
     firebaseResponse = await fetch(firebaseClassUrl, {
-      method: "PATCH",
+      // Firebase conditional writes support If-Match with PUT, not PATCH.
+      // Replacing the verified record keeps the toggle atomic while preserving
+      // every existing class field.
+      method: "PUT",
       redirect: "follow",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json; charset=utf-8",
         "If-Match": existingEtag,
       },
-      body: JSON.stringify({ aiEnabled }),
+      body: JSON.stringify({ ...existingRecord, aiEnabled }),
     });
   } catch {
     return errorResponse(

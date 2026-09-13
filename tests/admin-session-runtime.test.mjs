@@ -67,9 +67,9 @@ test("trusts the Sites identity header only on the exact Sites hostname", async 
   );
 });
 
-test("accepts the built-in m042 administrator login without environment variables", async () => {
-  const { route } = await loadModules("built-in-login");
-  await withAdminEnvironment({ code: undefined, secret: undefined }, async () => {
+test("accepts the administrator password configured in the environment", async () => {
+  const { route } = await loadModules("environment-login");
+  await withAdminEnvironment({ code: "m042", secret: undefined }, async () => {
     const wrong = await route.POST(
       new Request(`${SITES_URL}/api/admin/session`, {
         method: "POST",
@@ -95,8 +95,22 @@ test("accepts the built-in m042 administrator login without environment variable
   });
 });
 
-test("fails closed when a custom administrator code lacks a strong session secret", async () => {
-  const { route } = await loadModules("unsafe-custom-configuration");
+test("requires the administrator password environment variable", async () => {
+  const { route } = await loadModules("missing-configuration");
+  await withAdminEnvironment({ code: undefined, secret: undefined }, async () => {
+    const response = await route.POST(
+      new Request(`${SITES_URL}/api/admin/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "m042" }),
+      }),
+    );
+    assert.equal(response.status, 503);
+  });
+});
+
+test("derives a session key when no separate signing secret is configured", async () => {
+  const { route } = await loadModules("derived-session-secret");
   await withAdminEnvironment({ code: "custom-code", secret: undefined }, async () => {
     const response = await route.POST(
       new Request(`${SITES_URL}/api/admin/session`, {
@@ -105,8 +119,12 @@ test("fails closed when a custom administrator code lacks a strong session secre
         body: JSON.stringify({ code: "custom-code" }),
       }),
     );
-    assert.equal(response.status, 503);
+    assert.equal(response.status, 200);
   });
+});
+
+test("fails closed when an explicitly configured session secret is too short", async () => {
+  const { route } = await loadModules("unsafe-session-secret");
   await withAdminEnvironment({ code: "m042", secret: "too-short" }, async () => {
     const response = await route.POST(
       new Request(`${SITES_URL}/api/admin/session`, {
@@ -122,7 +140,7 @@ test("fails closed when a custom administrator code lacks a strong session secre
 test("issues and verifies a signed HttpOnly administrator cookie", async () => {
   const { route } = await loadModules("signed-cookie");
   await withAdminEnvironment(
-    { code: undefined, secret: undefined },
+    { code: "m042", secret: undefined },
     async () => {
       const wrong = await route.POST(
         new Request("https://virtual-creator.netlify.app/api/admin/session", {
@@ -187,7 +205,7 @@ test("logout clears the signed administrator cookie", async () => {
 test("rate-limits repeated incorrect administrator login guesses", async () => {
   const { route } = await loadModules("rate-limit");
   await withAdminEnvironment(
-    { code: undefined, secret: undefined },
+    { code: "m042", secret: undefined },
     async () => {
       const request = () =>
         new Request("https://virtual-creator.netlify.app/api/admin/session", {
@@ -211,7 +229,7 @@ test("rate-limits repeated incorrect administrator login guesses", async () => {
 test("does not rate-limit repeated successful m042 logins", async () => {
   const { route } = await loadModules("successful-logins");
   await withAdminEnvironment(
-    { code: undefined, secret: undefined },
+    { code: "m042", secret: undefined },
     async () => {
       const request = () =>
         new Request("https://virtual-creator.netlify.app/api/admin/session", {
@@ -232,7 +250,7 @@ test("does not rate-limit repeated successful m042 logins", async () => {
 test("a successful m042 login clears prior failed attempts", async () => {
   const { route } = await loadModules("successful-login-reset");
   await withAdminEnvironment(
-    { code: undefined, secret: undefined },
+    { code: "m042", secret: undefined },
     async () => {
       const request = (code) =>
         new Request("https://virtual-creator.netlify.app/api/admin/session", {

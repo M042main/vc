@@ -105,11 +105,10 @@ uses Vinext's Nitro adapter only for Netlify builds.
    `npm run build:netlify`; Nitro generates Netlify's publish and function
    output automatically.
 2. In **Project configuration → Environment variables**, add `GEMINI_API_KEY`
-   as a secret available to Functions. Administrator login works immediately
-   with the classroom code `m042`, so no administrator environment variables
-   are required. To replace that code for a hardened deployment, add both
-   `ADMIN_ACCESS_CODE` and an independent random `ADMIN_SESSION_SECRET` of at
-   least 32 characters as secrets. Do not put override values in
+   and `ADMIN_ACCESS_CODE` as secrets available to Functions. Set
+   `ADMIN_ACCESS_CODE` to the administrator password; no administrator password
+   is embedded in the source. You may also add an independent random
+   `ADMIN_SESSION_SECRET` of at least 32 characters. Do not put secret values in
    `netlify.toml` or commit them to the repository.
 3. Deploy. Nitro generates the Netlify server function and routing metadata,
    while static `_next` assets, MediaPipe worker files, and WASM are served from
@@ -117,9 +116,9 @@ uses Vinext's Nitro adapter only for Netlify builds.
 
 Netlify does not provide the Sites-only `oai-authenticated-user-email` header.
 This app therefore checks the administrator code on the server and issues a
-short-lived, HMAC-signed HttpOnly administrator session. The built-in `m042`
-mode is for this classroom's simple access requirement; use both administrator
-environment overrides when stronger production separation is needed.
+short-lived, HMAC-signed HttpOnly administrator session. The password exists
+only in the deployment environment; use an independent `ADMIN_SESSION_SECRET`
+when stronger production separation is needed.
 Administrator class and gallery write actions reject requests without that
 server-issued session. Never expose override values to browser code or replace
 the session check with a browser-supplied header.

@@ -92,7 +92,7 @@ test("administrator UI offers an accessible per-class AI switch", async () => {
   assert.match(css, /\.aiToggle\[data-enabled="true"\]/u);
 });
 
-test("protected setting update verifies the class before patching only aiEnabled", async () => {
+test("protected setting update uses a conditional PUT that preserves the class", async () => {
   const route = await loadRoute("class-ai-patch");
   const calls = [];
 
@@ -109,20 +109,25 @@ test("protected setting update verifies the class before patching only aiEnabled
       assert.equal(init.headers["X-Firebase-ETag"], "true");
       assert.equal(Object.hasOwn(init, "body"), false);
       return Response.json(
-        { name: "1학년 1반", createdAt: 1_800_000_000_000 },
+        { name: "1학년 1반", createdAt: 1_800_000_000_000, note: "preserve" },
         { headers: { ETag: '"class-version-1"' } },
       );
     }
     assert.equal(calls.length, 2, "only one verification and one write are allowed");
-    assert.equal(init.method, "PATCH");
-    assert.deepEqual(JSON.parse(init.body), { aiEnabled: false });
+    assert.equal(init.method, "PUT");
+    assert.deepEqual(JSON.parse(init.body), {
+      name: "1학년 1반",
+      createdAt: 1_800_000_000_000,
+      note: "preserve",
+      aiEnabled: false,
+    });
     assert.equal(init.headers["Content-Type"], "application/json; charset=utf-8");
     assert.equal(init.headers["If-Match"], '"class-version-1"');
     return Response.json({ aiEnabled: false });
   }, () => route.PATCH(request("PATCH", { id: PUSH_KEY, aiEnabled: false })));
 
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls.map(({ init }) => init.method), ["GET", "PATCH"]);
+  assert.deepEqual(calls.map(({ init }) => init.method), ["GET", "PUT"]);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     updated: true,
@@ -131,7 +136,7 @@ test("protected setting update verifies the class before patching only aiEnabled
   });
 });
 
-test("a concurrent class deletion cannot be recreated by the AI setting PATCH", async () => {
+test("a concurrent class deletion cannot be recreated by the AI setting PUT", async () => {
   const route = await loadRoute("class-ai-conflict");
   let calls = 0;
 
@@ -143,7 +148,7 @@ test("a concurrent class deletion cannot be recreated by the AI setting PATCH", 
         { headers: { ETag: '"class-version-before-delete"' } },
       );
     }
-    assert.equal(init.method, "PATCH");
+    assert.equal(init.method, "PUT");
     assert.equal(init.headers["If-Match"], '"class-version-before-delete"');
     return Response.json({ error: "ETag mismatch" }, { status: 412 });
   }, () => route.PATCH(request("PATCH", { id: PUSH_KEY, aiEnabled: true })));
@@ -172,7 +177,7 @@ test("a missing class returns 404 without creating an orphan setting child", asy
     return Response.json(null);
   }, () => route.PATCH(request("PATCH", { id: PUSH_KEY, aiEnabled: true })));
 
-  assert.equal(calls, 1, "a missing class must never reach the PATCH write");
+  assert.equal(calls, 1, "a missing class must never reach the PUT write");
   assert.equal(response.status, 404);
   assert.deepEqual(await response.json(), {
     error: "변경할 학급을 찾지 못했습니다.",
