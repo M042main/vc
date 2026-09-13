@@ -59,7 +59,39 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
+}
+
+.panelTitle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.panelMenuButton {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(23, 23, 19, 0.14);
+  border-radius: 11px;
+  background: #f3efe7;
+  color: #171713;
+  cursor: pointer;
+}
+
+.panelMenuButton:hover {
+  border-color: #171713;
+  background: #dfff45;
+}
+
+.panelMenuButton:focus-visible,
+.panelReopenButton:focus-visible,
+.trackingButton:focus-visible {
+  outline: 3px solid rgba(116, 92, 255, 0.56);
+  outline-offset: 3px;
 }
 
 .panelHeader h2,
@@ -108,10 +140,73 @@
   margin-top: 0;
 }
 
+.toolTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid rgba(23, 23, 19, 0.12);
+  border-radius: 14px;
+  background: #f3efe7;
+}
+
+.toolTabs button {
+  display: grid;
+  min-width: 0;
+  min-height: 52px;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  padding: 5px 3px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #77746b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.toolTabs button[data-selected="true"] {
+  background: #171713;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(23, 23, 19, 0.18);
+}
+
+.toolTabs button:focus-visible {
+  outline: 3px solid rgba(116, 92, 255, 0.46);
+  outline-offset: 2px;
+}
+
+.toolTabPanel {
+  min-width: 0;
+  padding-top: 15px;
+}
+
+.toolTabPanel[hidden] {
+  display: none;
+}
+
+.toolTabPanel > .sectionLabel:first-child {
+  margin-top: 0;
+}
+
+.emptyToolPanel {
+  padding: 16px 13px;
+  border: 1px dashed rgba(23, 23, 19, 0.2);
+  border-radius: 14px;
+  background: #f5f1e8;
+  color: #77746b;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
 .animationLab {
   display: grid;
   gap: 9px;
-  margin-top: 14px;
+  margin-top: 0;
   padding: 12px;
   border: 1px solid rgba(23, 23, 19, 0.14);
   border-radius: 16px;
@@ -422,8 +517,34 @@
   outline-offset: 3px;
 }
 
-.workspaceControls + .stageBar {
-  right: 250px;
+.workspaceControls ~ .stageBar {
+  right: 150px;
+}
+
+.studio[data-panel-collapsed="true"] .stageBar {
+  left: 76px;
+}
+
+.panelReopenButton {
+  position: absolute;
+  z-index: 7;
+  top: 16px;
+  left: 16px;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(17, 17, 18, 0.78);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.panelReopenButton:hover {
+  border-color: #dfff45;
+  color: #dfff45;
 }
 
 .stageBadge,
@@ -584,6 +705,42 @@
   backdrop-filter: blur(12px);
 }
 
+.trackingButton {
+  position: absolute;
+  z-index: 6;
+  right: 18px;
+  bottom: 18px;
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: #3478f6;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(18, 57, 135, 0.42);
+  transition:
+    transform 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.trackingButton[data-running="true"] {
+  background: #ed3f4f;
+  box-shadow: 0 12px 28px rgba(142, 20, 34, 0.44);
+}
+
+.trackingButton:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+}
+
+.trackingButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+}
+
 .iconButton {
   width: 44px;
   height: 44px;
@@ -606,19 +763,6 @@
   width: 20px;
   height: 1px;
   background: rgba(255, 255, 255, 0.14);
-}
-
-.settingsHeading {
-  margin: 24px -18px 0;
-  padding: 20px 18px 0;
-  border-top: 1px solid rgba(23, 23, 19, 0.12);
-  font-size: 14px;
-  font-weight: 900;
-  letter-spacing: -0.04em;
-}
-
-.settingsHeading + .sectionLabel {
-  margin-top: 16px;
 }
 
 .toast {
@@ -1240,6 +1384,18 @@
     right: 10px;
   }
 
+  .trackingButton {
+    right: 12px;
+    bottom: 12px;
+    width: 54px;
+    height: 54px;
+  }
+
+  .panelReopenButton {
+    top: 10px;
+    left: 10px;
+  }
+
   .workspaceControls {
     top: 10px;
     right: 10px;
@@ -1259,7 +1415,7 @@
     clip-path: inset(50%);
   }
 
-  .workspaceControls + .stageBar {
+  .workspaceControls ~ .stageBar {
     right: 108px;
   }
 

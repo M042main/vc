@@ -26,6 +26,8 @@ test("uses the full workspace and offers panel collapse plus browser fullscreen"
   assert.match(studio, /aria-controls="studio-tool-panel"/u);
   assert.match(studio, /"도구 패널 숨기기"/u);
   assert.match(studio, /"도구 패널 열기"/u);
+  assert.match(studio, /className=\{styles\.panelMenuButton\}[\s\S]{0,280}<Menu/u);
+  assert.match(studio, /className=\{styles\.panelReopenButton\}/u);
   assert.match(studio, /studio\.requestFullscreen\(\)/u);
   assert.match(studio, /document\.exitFullscreen\(\)/u);
   assert.match(studio, /"전체 화면으로 보기"/u);

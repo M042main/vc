@@ -15,9 +15,8 @@ import {
   LockOpen,
   LockKeyhole,
   Maximize2,
+  Menu,
   Minimize2,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pause,
   PictureInPicture2,
   Play,
@@ -84,6 +83,7 @@ import styles from "./VrmStudio.module.css";
 
 type TrackingState = "idle" | "loading" | "running" | "error";
 type ModelState = "empty" | "loading" | "ready" | "error";
+type StudioToolTab = "character" | "background" | "motion";
 
 type TrackerMessage =
   | { type: "READY"; delegate: "GPU" | "CPU" }
@@ -495,6 +495,8 @@ export function VrmStudio({
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
   const [cameraPreviewVisible, setCameraPreviewVisible] = useState(true);
   const [toolPanelCollapsed, setToolPanelCollapsed] = useState(false);
+  const [activeToolTab, setActiveToolTab] =
+    useState<StudioToolTab>("character");
   const [studioFullscreen, setStudioFullscreen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -1318,7 +1320,7 @@ export function VrmStudio({
         }
 
         fitObject(loaded.vrm.scene, camera, controls);
-        setModelName(file.name);
+        setModelName(options.defaultModel ? "기본" : file.name);
         setModelSize(`${(file.size / 1024 / 1024).toFixed(1)} MB · VRM 캐릭터`);
         setModelState("ready");
         if (options.defaultModel) {
@@ -2129,21 +2131,6 @@ export function VrmStudio({
         <div className={styles.workspaceControls} aria-label="스튜디오 화면 설정">
           <button
             type="button"
-            onClick={() => setToolPanelCollapsed((collapsed) => !collapsed)}
-            aria-expanded={!toolPanelCollapsed}
-            aria-controls="studio-tool-panel"
-            aria-label={toolPanelCollapsed ? "도구 패널 열기" : "도구 패널 숨기기"}
-            title={toolPanelCollapsed ? "도구 패널 열기" : "도구 패널 숨기기"}
-          >
-            {toolPanelCollapsed ? (
-              <PanelLeftOpen size={17} aria-hidden="true" />
-            ) : (
-              <PanelLeftClose size={17} aria-hidden="true" />
-            )}
-            <span>{toolPanelCollapsed ? "도구 열기" : "도구 숨기기"}</span>
-          </button>
-          <button
-            type="button"
             onClick={() => void toggleStudioFullscreen()}
             aria-pressed={studioFullscreen}
             aria-label={studioFullscreen ? "전체 화면 종료" : "전체 화면으로 보기"}
@@ -2157,6 +2144,20 @@ export function VrmStudio({
             <span>{studioFullscreen ? "전체 화면 종료" : "전체 화면"}</span>
           </button>
         </div>
+
+        {toolPanelCollapsed ? (
+          <button
+            type="button"
+            className={styles.panelReopenButton}
+            onClick={() => setToolPanelCollapsed(false)}
+            aria-expanded="false"
+            aria-controls="studio-tool-panel"
+            aria-label="도구 패널 열기"
+            title="도구 패널 열기"
+          >
+            <Menu size={20} aria-hidden="true" />
+          </button>
+        ) : null}
 
         <div className={styles.stageBar}>
           <span
@@ -2332,17 +2333,44 @@ export function VrmStudio({
               <PictureInPicture2 size={17} />
             )}
           </button>
-          <button
-            className={styles.iconButton}
-            type="button"
-            onClick={(event) => openCaptureDialog(event.currentTarget)}
-            disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
-            aria-label="캐릭터 사진을 온라인 갤러리에 저장"
-            aria-haspopup="dialog"
-          >
-            <Camera size={16} />
-          </button>
         </div>
+
+        <button
+          className={styles.trackingButton}
+          type="button"
+          onClick={trackingRunning ? stopTracking : startTracking}
+          disabled={
+            !characterReady ||
+            trackingState === "loading" ||
+            modelState === "loading" ||
+            isRecording
+          }
+          data-running={trackingRunning}
+          data-loading={trackingState === "loading"}
+          aria-pressed={trackingRunning}
+          aria-label={
+            trackingState === "loading"
+              ? "카메라 준비 중"
+              : trackingRunning
+                ? "카메라 트래킹 멈추기"
+                : "카메라 트래킹 시작"
+          }
+          title={
+            trackingState === "loading"
+              ? "카메라 준비 중"
+              : trackingRunning
+                ? "카메라 끄기"
+                : "카메라 시작"
+          }
+        >
+          {trackingState === "loading" ? (
+            <LoaderCircle size={22} className="spin" />
+          ) : trackingRunning ? (
+            <VideoOff size={22} aria-hidden="true" />
+          ) : (
+            <Video size={22} aria-hidden="true" />
+          )}
+        </button>
 
         {toast ? (
           <div className={styles.toast} role="status">
@@ -2359,7 +2387,20 @@ export function VrmStudio({
         aria-label="스튜디오 도구 및 무대 설정"
       >
         <div className={styles.panelHeader}>
-          <h2>스튜디오 도구</h2>
+          <div className={styles.panelTitle}>
+            <button
+              type="button"
+              className={styles.panelMenuButton}
+              onClick={() => setToolPanelCollapsed(true)}
+              aria-expanded="true"
+              aria-controls="studio-tool-panel"
+              aria-label="도구 패널 숨기기"
+              title="도구 패널 숨기기"
+            >
+              <Menu size={18} aria-hidden="true" />
+            </button>
+            <h2>스튜디오 도구</h2>
+          </div>
           <span className={styles.statusDot} data-ready={characterReady}>
             {trackingRunning ? "트래킹 중" : characterReady ? "준비됨" : "대기 중"}
           </span>
@@ -2385,289 +2426,330 @@ export function VrmStudio({
           aria-label="무대 사진 배경 선택"
         />
 
-        <div className={styles.actionStack}>
+        <div className={styles.toolTabs} role="tablist" aria-label="스튜디오 도구">
           <button
-            className={styles.primaryButton}
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={modelState === "loading" || isRecording}
+            id="studio-character-tab"
+            role="tab"
+            aria-selected={activeToolTab === "character"}
+            aria-controls="studio-character-panel"
+            data-selected={activeToolTab === "character"}
+            onClick={() => setActiveToolTab("character")}
           >
-            {modelState === "loading" ? (
-              <LoaderCircle size={16} className="spin" />
-            ) : (
-              <FileUp size={16} />
-            )}
-            {vrmAvailable ? "다른 VRM 선택" : "VRM 파일 선택"}
+            <CircleUserRound size={16} aria-hidden="true" />
+            캐릭터
           </button>
           <button
-            className={styles.secondaryButton}
             type="button"
-            onClick={trackingRunning ? stopTracking : startTracking}
-            disabled={
-              !characterReady ||
-              trackingState === "loading" ||
-              modelState === "loading" ||
-              isRecording
-            }
+            id="studio-background-tab"
+            role="tab"
+            aria-selected={activeToolTab === "background"}
+            aria-controls="studio-background-panel"
+            data-selected={activeToolTab === "background"}
+            onClick={() => setActiveToolTab("background")}
           >
-            {trackingState === "loading" ? (
-              <LoaderCircle size={16} />
-            ) : trackingRunning ? (
-              <VideoOff size={16} />
-            ) : (
-              <Video size={16} />
-            )}
-            {trackingState === "loading"
-              ? "엔진 준비 중"
-              : trackingRunning
-                ? "트래킹 멈추기"
-                : "카메라 시작"}
+            <ImageIcon size={16} aria-hidden="true" />
+            배경
           </button>
           <button
-            className={styles.captureButton}
             type="button"
-            onClick={(event) => openCaptureDialog(event.currentTarget)}
-            disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
-            aria-haspopup="dialog"
+            id="studio-motion-tab"
+            role="tab"
+            aria-selected={activeToolTab === "motion"}
+            aria-controls="studio-motion-panel"
+            data-selected={activeToolTab === "motion"}
+            onClick={() => setActiveToolTab("motion")}
           >
-            {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
-            {isCapturing ? "갤러리에 저장 중" : "캐릭터 사진찍기"}
+            <Sparkles size={16} aria-hidden="true" />
+            움직임
           </button>
         </div>
 
-        {paperDollActive || modelReady ? (
-          <section className={styles.animationLab} aria-label="캐릭터 애니메이션 만들기">
-            <div className={styles.animationHeading}>
-              <span>ANIMATION LAB</span>
-              <strong>
-                {paperDollActive
-                  ? "저장한 그림을 움직여 보세요"
-                  : "VRM에 프리셋 움직임을 더해 보세요"}
-              </strong>
-            </div>
-            <div className={styles.motionGrid}>
-              {DOLL_MOTION_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className={styles.motionPresetButton}
-                  data-selected={selectedMotion === preset.id}
-                  aria-pressed={selectedMotion === preset.id}
-                  onClick={() => selectMotionPreset(preset.id)}
-                  disabled={isRecording || trackingState === "loading"}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <div className={styles.motionControls}>
-              <button
-                type="button"
-                className={styles.playButton}
-                onClick={toggleAnimation}
-                disabled={isRecording || trackingState === "loading"}
-              >
-                {animationPlaying ? <Pause size={14} /> : <Play size={14} />}
-                {animationPlaying ? "일시정지" : "애니메이션 재생"}
-              </button>
-              <label className={styles.speedControl}>
-                <span>속도</span>
-                <select
-                  value={animationSpeed}
-                  onChange={(event) => changeAnimationSpeed(Number(event.target.value))}
-                  disabled={isRecording}
-                  aria-label="애니메이션 재생 속도"
-                >
-                  <option value={0.75}>0.75×</option>
-                  <option value={1}>1×</option>
-                  <option value={1.25}>1.25×</option>
-                  <option value={1.5}>1.5×</option>
-                </select>
-              </label>
-            </div>
+        <section
+          id="studio-character-panel"
+          className={styles.toolTabPanel}
+          role="tabpanel"
+          aria-labelledby="studio-character-tab"
+          hidden={activeToolTab !== "character"}
+        >
+          <div className={styles.actionStack}>
             <button
+              className={styles.primaryButton}
               type="button"
-              className={styles.recordButton}
-              onClick={recordAnimation}
-              disabled={isRecording || trackingState === "loading"}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={modelState === "loading" || isRecording}
             >
-              {isRecording ? <LoaderCircle size={15} /> : <Film size={15} />}
-              {isRecording ? "애니메이션 녹화 중" : "애니메이션 WebM 저장"}
+              {modelState === "loading" ? (
+                <LoaderCircle size={16} className="spin" />
+              ) : (
+                <FileUp size={16} />
+              )}
+              {vrmAvailable ? "다른 VRM 선택" : "VRM 파일 선택"}
             </button>
-          </section>
-        ) : null}
+            <button
+              className={styles.captureButton}
+              type="button"
+              onClick={(event) => openCaptureDialog(event.currentTarget)}
+              disabled={!characterReady || isCapturing || isRecording || modelState === "loading"}
+              aria-haspopup="dialog"
+            >
+              {isCapturing ? <LoaderCircle size={17} /> : <Camera size={17} />}
+              {isCapturing ? "갤러리에 저장 중" : "캐릭터 사진찍기"}
+            </button>
+          </div>
 
-        {error ? <div className={styles.errorBox}>{error}</div> : null}
-
-        <h3 className={styles.settingsHeading}>무대 설정</h3>
-        <span className={styles.sectionLabel}>캐릭터 선택</span>
-        {vrmAvailable || selectableCreatedCharacters.length > 0 ? (
-          <div className={styles.characterChoices} role="group" aria-label="무대 캐릭터 선택">
-            {vrmAvailable ? (
-              <button
-                type="button"
-                className={styles.characterChoice}
-                data-selected={modelReady}
-                aria-pressed={modelReady}
-                aria-label={`${modelName} VRM 선택`}
-                disabled={isRecording}
-                onClick={() => void selectVrmCharacter()}
-              >
-                <span className={styles.characterChoiceThumb} data-vrm="true">
-                  <CircleUserRound size={25} aria-hidden="true" />
-                  <small>VRM</small>
-                </span>
-                <span className={styles.characterChoiceInfo}>
-                  <strong>{modelName}</strong>
-                  <small>{modelSize || "3D 캐릭터"}</small>
-                </span>
-              </button>
-            ) : null}
-            {selectableCreatedCharacters.map((character) => {
-              const selected =
-                paperDollActive &&
-                selectedCreatedCharacter?.id === character.id;
-              return (
+          <span className={styles.sectionLabel}>캐릭터 선택</span>
+          {vrmAvailable || selectableCreatedCharacters.length > 0 ? (
+            <div className={styles.characterChoices} role="group" aria-label="무대 캐릭터 선택">
+              {vrmAvailable ? (
                 <button
-                  key={character.id}
                   type="button"
                   className={styles.characterChoice}
-                  data-selected={selected}
-                  aria-pressed={selected}
-                  aria-label={`${character.name} 그림 캐릭터 선택`}
-                  disabled={isRecording || modelState === "loading"}
-                  onClick={() => void selectCreatedCharacter(character)}
+                  data-selected={modelReady}
+                  aria-pressed={modelReady}
+                  aria-label={`${modelName} VRM 선택`}
+                  disabled={isRecording}
+                  onClick={() => void selectVrmCharacter()}
                 >
-                  <span className={styles.characterChoiceThumb}>
-                    {/* CharacterCreator exports a local transparent PNG Data URL. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={character.artwork} alt="" />
+                  <span className={styles.characterChoiceThumb} data-vrm="true">
+                    <CircleUserRound size={25} aria-hidden="true" />
+                    <small>VRM</small>
                   </span>
                   <span className={styles.characterChoiceInfo}>
-                    <strong>{character.name}</strong>
-                    <small>그림 캐릭터</small>
+                    <strong>{modelName}</strong>
+                    <small>{modelSize || "3D 캐릭터"}</small>
                   </span>
                 </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className={styles.modelCard}>
-            <div className={styles.modelThumb}>
-              <ImageIcon size={27} aria-hidden="true" />
+              ) : null}
+              {selectableCreatedCharacters.map((character) => {
+                const selected =
+                  paperDollActive &&
+                  selectedCreatedCharacter?.id === character.id;
+                return (
+                  <button
+                    key={character.id}
+                    type="button"
+                    className={styles.characterChoice}
+                    data-selected={selected}
+                    aria-pressed={selected}
+                    aria-label={`${character.name} 그림 캐릭터 선택`}
+                    disabled={isRecording || modelState === "loading"}
+                    onClick={() => void selectCreatedCharacter(character)}
+                  >
+                    <span className={styles.characterChoiceThumb}>
+                      {/* CharacterCreator exports a local transparent PNG Data URL. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={character.artwork} alt="" />
+                    </span>
+                    <span className={styles.characterChoiceInfo}>
+                      <strong>{character.name}</strong>
+                      <small>그림 캐릭터</small>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            <div className={styles.modelInfo}>
-              <strong>{displayModelName}</strong>
-              <span>VRM을 올리거나 그림 캐릭터를 만들어 주세요</span>
+          ) : (
+            <div className={styles.modelCard}>
+              <div className={styles.modelThumb}>
+                <ImageIcon size={27} aria-hidden="true" />
+              </div>
+              <div className={styles.modelInfo}>
+                <strong>{displayModelName}</strong>
+                <span>VRM을 올리거나 그림 캐릭터를 만들어 주세요</span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </section>
 
-        <span className={styles.sectionLabel}>무대 배경색</span>
-        <div className={styles.swatches} aria-label="무대 배경색 선택">
-          {STAGE_COLORS.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              className={styles.swatch}
-              style={{ backgroundColor: value }}
-              data-selected={!stageBackgroundImage && stageColor === value}
-              data-chroma={value === CHROMA_KEY_GREEN}
-              aria-pressed={!stageBackgroundImage && stageColor === value}
-              onClick={() => selectStageColor(value)}
-              aria-label={`배경색 ${label}`}
-              title={label}
-            />
-          ))}
-          <label
-            className={styles.customColorControl}
-            data-selected={
-              !stageBackgroundImage &&
-              !STAGE_COLORS.some(({ value }) => value === stageColor)
-            }
-            title="자유 배경색"
-          >
-            <input
-              type="color"
-              value={customStageColorDraft}
-              onChange={(event) =>
-                updateCustomStageColorDraft(event.target.value)
-              }
-              aria-label="자유 배경색 선택"
-            />
-            <span>자유색</span>
-          </label>
-        </div>
-
-        <div
-          className={styles.backgroundImagePanel}
-          data-active={Boolean(stageBackgroundImage)}
+        <section
+          id="studio-background-panel"
+          className={styles.toolTabPanel}
+          role="tabpanel"
+          aria-labelledby="studio-background-tab"
+          hidden={activeToolTab !== "background"}
         >
-          <button
-            type="button"
-            className={styles.backgroundUploadButton}
-            onClick={() => backgroundInputRef.current?.click()}
-            disabled={isRecording}
+          <span className={styles.sectionLabel}>무대 배경색</span>
+          <div className={styles.swatches} aria-label="무대 배경색 선택">
+            {STAGE_COLORS.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                className={styles.swatch}
+                style={{ backgroundColor: value }}
+                data-selected={!stageBackgroundImage && stageColor === value}
+                data-chroma={value === CHROMA_KEY_GREEN}
+                aria-pressed={!stageBackgroundImage && stageColor === value}
+                onClick={() => selectStageColor(value)}
+                aria-label={`배경색 ${label}`}
+                title={label}
+              />
+            ))}
+            <label
+              className={styles.customColorControl}
+              data-selected={
+                !stageBackgroundImage &&
+                !STAGE_COLORS.some(({ value }) => value === stageColor)
+              }
+              title="자유 배경색"
+            >
+              <input
+                type="color"
+                value={customStageColorDraft}
+                onChange={(event) =>
+                  updateCustomStageColorDraft(event.target.value)
+                }
+                aria-label="자유 배경색 선택"
+              />
+              <span>자유색</span>
+            </label>
+          </div>
+
+          <div
+            className={styles.backgroundImagePanel}
+            data-active={Boolean(stageBackgroundImage)}
           >
-            <ImagePlus size={15} aria-hidden="true" />
-            {stageBackgroundImage ? "사진 배경 바꾸기" : "사진 배경 선택"}
-          </button>
-          {stageBackgroundImage ? (
-            <>
-              <strong className={styles.backgroundFileName} title={stageBackgroundName}>
-                {stageBackgroundName}
-              </strong>
-              <div className={styles.backgroundFitControls} aria-label="사진 배경 맞춤 방식">
+            <button
+              type="button"
+              className={styles.backgroundUploadButton}
+              onClick={() => backgroundInputRef.current?.click()}
+              disabled={isRecording}
+            >
+              <ImagePlus size={15} aria-hidden="true" />
+              {stageBackgroundImage ? "사진 배경 바꾸기" : "사진 배경 선택"}
+            </button>
+            {stageBackgroundImage ? (
+              <>
+                <strong className={styles.backgroundFileName} title={stageBackgroundName}>
+                  {stageBackgroundName}
+                </strong>
+                <div className={styles.backgroundFitControls} aria-label="사진 배경 맞춤 방식">
+                  <button
+                    type="button"
+                    data-selected={stageBackgroundFit === "cover"}
+                    aria-pressed={stageBackgroundFit === "cover"}
+                    onClick={() => changeStageBackgroundFit("cover")}
+                  >
+                    화면 채우기
+                  </button>
+                  <button
+                    type="button"
+                    data-selected={stageBackgroundFit === "contain"}
+                    aria-pressed={stageBackgroundFit === "contain"}
+                    onClick={() => changeStageBackgroundFit("contain")}
+                  >
+                    전체 보기
+                  </button>
+                </div>
                 <button
                   type="button"
-                  data-selected={stageBackgroundFit === "cover"}
-                  aria-pressed={stageBackgroundFit === "cover"}
-                  onClick={() => changeStageBackgroundFit("cover")}
+                  className={styles.backgroundRemoveButton}
+                  onClick={removeStageBackgroundImage}
                 >
-                  화면 채우기
+                  <Trash2 size={13} aria-hidden="true" />
+                  사진 배경 지우기
                 </button>
+              </>
+            ) : (
+              <small>PNG · JPEG · WebP, 최대 12MB</small>
+            )}
+          </div>
+        </section>
+
+        <section
+          id="studio-motion-panel"
+          className={styles.toolTabPanel}
+          role="tabpanel"
+          aria-labelledby="studio-motion-tab"
+          hidden={activeToolTab !== "motion"}
+        >
+          {paperDollActive || modelReady ? (
+            <section className={styles.animationLab} aria-label="캐릭터 애니메이션 만들기">
+              <div className={styles.animationHeading}>
+                <strong>
+                  {paperDollActive
+                    ? "저장한 그림을 움직여 보세요"
+                    : "VRM에 프리셋 움직임을 더해 보세요"}
+                </strong>
+              </div>
+              <div className={styles.motionGrid}>
+                {DOLL_MOTION_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={styles.motionPresetButton}
+                    data-selected={selectedMotion === preset.id}
+                    aria-pressed={selectedMotion === preset.id}
+                    onClick={() => selectMotionPreset(preset.id)}
+                    disabled={isRecording || trackingState === "loading"}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.motionControls}>
                 <button
                   type="button"
-                  data-selected={stageBackgroundFit === "contain"}
-                  aria-pressed={stageBackgroundFit === "contain"}
-                  onClick={() => changeStageBackgroundFit("contain")}
+                  className={styles.playButton}
+                  onClick={toggleAnimation}
+                  disabled={isRecording || trackingState === "loading"}
                 >
-                  전체 보기
+                  {animationPlaying ? <Pause size={14} /> : <Play size={14} />}
+                  {animationPlaying ? "일시정지" : "애니메이션 재생"}
                 </button>
+                <label className={styles.speedControl}>
+                  <span>속도</span>
+                  <select
+                    value={animationSpeed}
+                    onChange={(event) => changeAnimationSpeed(Number(event.target.value))}
+                    disabled={isRecording}
+                    aria-label="애니메이션 재생 속도"
+                  >
+                    <option value={0.75}>0.75×</option>
+                    <option value={1}>1×</option>
+                    <option value={1.25}>1.25×</option>
+                    <option value={1.5}>1.5×</option>
+                  </select>
+                </label>
               </div>
               <button
                 type="button"
-                className={styles.backgroundRemoveButton}
-                onClick={removeStageBackgroundImage}
+                className={styles.recordButton}
+                onClick={recordAnimation}
+                disabled={isRecording || trackingState === "loading"}
               >
-                <Trash2 size={13} aria-hidden="true" />
-                사진 배경 지우기
+                {isRecording ? <LoaderCircle size={15} /> : <Film size={15} />}
+                {isRecording ? "애니메이션 녹화 중" : "애니메이션 WebM 저장"}
               </button>
-            </>
+            </section>
           ) : (
-            <small>PNG · JPEG · WebP, 최대 12MB</small>
+            <div className={styles.emptyToolPanel}>
+              캐릭터를 선택하면 움직임을 적용할 수 있어요.
+            </div>
           )}
-        </div>
 
-        <button
-          type="button"
-          className={styles.legLockButton}
-          data-locked={legsLocked}
-          aria-pressed={legsLocked}
-          onClick={toggleLegLock}
-          disabled={
-            !characterReady ||
-            isRecording ||
-            animationPlaying ||
-            modelState === "loading"
-          }
-        >
-          {legsLocked ? <LockKeyhole size={15} /> : <LockOpen size={15} />}
-          <span>
-            <strong>{legsLocked ? "다리 고정됨" : "다리 움직임 추적"}</strong>
-            <small>{legsLocked ? "눌러서 다리 풀기" : "눌러서 현재 자세 고정"}</small>
-          </span>
-        </button>
+          <button
+            type="button"
+            className={styles.legLockButton}
+            data-locked={legsLocked}
+            aria-pressed={legsLocked}
+            onClick={toggleLegLock}
+            disabled={
+              !characterReady ||
+              isRecording ||
+              animationPlaying ||
+              modelState === "loading"
+            }
+          >
+            {legsLocked ? <LockKeyhole size={15} /> : <LockOpen size={15} />}
+            <span>
+              <strong>{legsLocked ? "다리 고정됨" : "다리 움직임 추적"}</strong>
+              <small>{legsLocked ? "눌러서 다리 풀기" : "눌러서 현재 자세 고정"}</small>
+            </span>
+          </button>
+        </section>
+
+        {error ? <div className={styles.errorBox}>{error}</div> : null}
       </aside>
 
       {captureDialogOpen ? (

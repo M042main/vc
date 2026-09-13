@@ -9,7 +9,7 @@ const studioCssUrl = new URL(
 );
 const pageUrl = new URL("../app/page.tsx", import.meta.url);
 
-test("both full-body capture buttons open one accessible background choice dialog", async () => {
+test("the character-tab capture button opens one accessible background choice dialog", async () => {
   const source = await readFile(studioUrl, "utf8");
 
   assert.match(source, /captureDialogOpen/);
@@ -22,7 +22,7 @@ test("both full-body capture buttons open one accessible background choice dialo
   assert.equal(
     [...source.matchAll(/onClick=\{\(event\) => openCaptureDialog\(event\.currentTarget\)\}/g)]
       .length,
-    2,
+    1,
   );
   assert.doesNotMatch(source, /onClick=\{capture\}/);
 });
