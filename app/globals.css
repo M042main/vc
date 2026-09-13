@@ -225,9 +225,11 @@ select:focus-visible {
 }
 
 .workspace {
-  width: min(1540px, 100%);
-  margin: 0 auto;
-  padding: clamp(18px, 2.4vw, 34px) clamp(16px, 4vw, 64px) 30px;
+  width: 100%;
+  max-width: none;
+  min-height: calc(100dvh - 76px);
+  margin: 0;
+  padding: 0;
 }
 
 .workspace.studio-workspace {
@@ -239,14 +241,38 @@ select:focus-visible {
 .creator-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(250px, 280px);
-  align-items: start;
-  gap: 18px;
+  align-items: stretch;
+  min-height: calc(100dvh - 76px);
+  gap: 0;
+  background: #fff;
+}
+
+.creator-workspace > section {
+  min-height: calc(100dvh - 76px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .creator-library-column {
   position: sticky;
-  top: 94px;
+  top: 76px;
   min-width: 0;
+  height: calc(100dvh - 76px);
+  overflow-y: auto;
+  padding: 18px;
+  border-left: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.workspace-gallery > section,
+.workspace-ai > section,
+.workspace-gallery > .gallery-loading-shell,
+.workspace-ai > .gallery-loading-shell {
+  min-height: calc(100dvh - 76px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .gallery-loading-shell {
@@ -397,6 +423,10 @@ select:focus-visible {
 
   .creator-library-column {
     position: static;
+    height: auto;
+    overflow: visible;
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 }
 
@@ -407,6 +437,15 @@ select:focus-visible {
 
   .workspace {
     padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .creator-workspace,
+  .creator-workspace > section,
+  .workspace-gallery > section,
+  .workspace-ai > section,
+  .workspace-gallery > .gallery-loading-shell,
+  .workspace-ai > .gallery-loading-shell {
+    min-height: calc(100dvh - 76px);
   }
 
   .workspace.studio-workspace {
@@ -436,6 +475,16 @@ select:focus-visible {
   .topbar {
     min-height: 68px;
     padding: 10px 16px;
+  }
+
+  .workspace,
+  .creator-workspace,
+  .creator-workspace > section,
+  .workspace-gallery > section,
+  .workspace-ai > section,
+  .workspace-gallery > .gallery-loading-shell,
+  .workspace-ai > .gallery-loading-shell {
+    min-height: calc(100dvh - 68px);
   }
 
   .brand small {

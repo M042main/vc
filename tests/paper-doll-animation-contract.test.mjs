@@ -181,7 +181,15 @@ test("preserves live tracking and sends transparent PNG capture through the gall
   assert.match(studioSource, /await\s+onCaptureReady\(\{\s*imageDataUrl,\s*fileName\s*\}\)/);
   assert.match(paperDollSource, /["']image\/png["']/);
 
-  const browserOnlySource = [paperDollSource, studioSource, creatorSource].join(
+  const studioWithoutBundledModelFetch = studioSource.replace(
+    /fetch\(DEFAULT_VRM_URL,\s*\{\s*cache:\s*"force-cache"\s*\}\)/u,
+    "bundledDefaultVrmAsset",
+  );
+  const browserOnlySource = [
+    paperDollSource,
+    studioWithoutBundledModelFetch,
+    creatorSource,
+  ].join(
     "\n",
   );
   for (const [pattern, label] of [

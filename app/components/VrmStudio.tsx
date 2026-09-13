@@ -16,8 +16,8 @@ import {
   LockKeyhole,
   Maximize2,
   Minimize2,
-  PanelRightClose,
-  PanelRightOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
   PictureInPicture2,
   Play,
@@ -110,6 +110,8 @@ const MAX_VRM_SIZE = MAX_PERSISTED_VRM_BYTES;
 const MAX_STAGE_BACKGROUND_DIMENSION = 8192;
 const TRACKING_INPUT_MAX_WIDTH = 480;
 const TRACKING_INPUT_MAX_HEIGHT = 360;
+const DEFAULT_VRM_URL = "/default-character.vrm";
+const DEFAULT_VRM_FILE_NAME = "기본 캐릭터.vrm";
 
 function trackingInputDimensions(aspectRatio: number) {
   const aspect =
@@ -448,7 +450,10 @@ export function VrmStudio({
   const controlledCreatedCharacterIdRef =
     useRef(activeCreatedCharacterId);
   const restoreModelLoaderRef = useRef<
-    (file?: File, options?: { restored?: boolean }) => Promise<void>
+    (
+      file?: File,
+      options?: { restored?: boolean; defaultModel?: boolean },
+    ) => Promise<void>
   >(async () => undefined);
   const backgroundLoadSessionRef = useRef(0);
   const settingsInteractionRef = useRef(0);
@@ -1217,9 +1222,14 @@ export function VrmStudio({
   );
 
   const handleModelFile = useCallback(
-    async (file?: File, options: { restored?: boolean } = {}) => {
+    async (
+      file?: File,
+      options: { restored?: boolean; defaultModel?: boolean } = {},
+    ) => {
       if (!file) return;
-      if (!options.restored) modelInteractionRef.current += 1;
+      if (!options.restored && !options.defaultModel) {
+        modelInteractionRef.current += 1;
+      }
       if (isRecording) {
         showToast("애니메이션 저장이 끝난 뒤 VRM을 선택해 주세요.");
         return;
@@ -1291,13 +1301,14 @@ export function VrmStudio({
           characterSelectionSessionRef.current === selectionSession;
         const controlledCharacterId =
           controlledCreatedCharacterIdRef.current;
+        const passiveBootstrap = options.restored || options.defaultModel;
         const shouldActivateVrm =
           selectionIsCurrent &&
-          (!options.restored || controlledCharacterId == null);
+          (!passiveBootstrap || controlledCharacterId == null);
         if (shouldActivateVrm) {
           setSelectedCreatedCharacterId(null);
           setPreferVrm(true);
-          if (!options.restored) onSelectVrm?.();
+          if (!passiveBootstrap) onSelectVrm?.();
         }
         mannequinRef.current!.visible = false;
 
@@ -1310,7 +1321,9 @@ export function VrmStudio({
         setModelName(file.name);
         setModelSize(`${(file.size / 1024 / 1024).toFixed(1)} MB · VRM 캐릭터`);
         setModelState("ready");
-        if (options.restored) {
+        if (options.defaultModel) {
+          showToast("기본 캐릭터를 무대에 준비했어요.");
+        } else if (options.restored) {
           showToast(
             shouldActivateVrm
               ? "이 기기에 저장한 VRM과 무대 설정을 복원했어요."
@@ -1479,6 +1492,29 @@ export function VrmStudio({
         modelInteractionRef.current === modelInteraction
       ) {
         await restoreModelLoaderRef.current(snapshot.vrm.file, { restored: true });
+      } else if (modelInteractionRef.current === modelInteraction) {
+        try {
+          const response = await fetch(DEFAULT_VRM_URL, { cache: "force-cache" });
+          if (!response.ok) {
+            throw new Error(`기본 VRM을 불러오지 못했습니다. (${response.status})`);
+          }
+          const blob = await response.blob();
+          if (
+            !active ||
+            modelInteractionRef.current !== modelInteraction
+          ) return;
+          const file = new File([blob], DEFAULT_VRM_FILE_NAME, {
+            type: blob.type || "model/gltf-binary",
+          });
+          await restoreModelLoaderRef.current(file, { defaultModel: true });
+        } catch (defaultModelError) {
+          if (!active || modelInteractionRef.current !== modelInteraction) return;
+          setError(
+            defaultModelError instanceof Error
+              ? defaultModelError.message
+              : "기본 VRM을 불러오지 못했습니다.",
+          );
+        }
       }
     })().catch(() => {
       if (!active) return;
@@ -2100,9 +2136,9 @@ export function VrmStudio({
             title={toolPanelCollapsed ? "도구 패널 열기" : "도구 패널 숨기기"}
           >
             {toolPanelCollapsed ? (
-              <PanelRightOpen size={17} aria-hidden="true" />
+              <PanelLeftOpen size={17} aria-hidden="true" />
             ) : (
-              <PanelRightClose size={17} aria-hidden="true" />
+              <PanelLeftClose size={17} aria-hidden="true" />
             )}
             <span>{toolPanelCollapsed ? "도구 열기" : "도구 숨기기"}</span>
           </button>

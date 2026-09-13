@@ -92,7 +92,7 @@ test("keeps newer drawing selection ahead of stale VRM restoration and all live 
   assert.match(modelLoad, /controlledCreatedCharacterIdRef\.current/u);
   assert.match(
     modelLoad,
-    /shouldActivateVrm\s*=\s*[\s\S]{0,160}selectionIsCurrent[\s\S]{0,160}!options\.restored\s*\|\|\s*controlledCharacterId\s*==\s*null/u,
+    /passiveBootstrap\s*=\s*options\.restored\s*\|\|\s*options\.defaultModel[\s\S]{0,180}shouldActivateVrm\s*=\s*[\s\S]{0,160}selectionIsCurrent[\s\S]{0,160}!passiveBootstrap\s*\|\|\s*controlledCharacterId\s*==\s*null/u,
   );
   assert.match(modelLoad, /savePersistedVrmFile\(file\)/u);
 

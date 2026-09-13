@@ -944,7 +944,9 @@ export default function Home() {
       </header>
 
       <section
-        className={`workspace ${mode === "studio" ? "studio-workspace" : ""}`}
+        className={`workspace workspace-${mode} ${
+          mode === "studio" ? "studio-workspace" : ""
+        }`}
         id="top"
       >
         {profileReady && !profile && !adminMode ? (

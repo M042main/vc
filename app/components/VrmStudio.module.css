@@ -1,6 +1,6 @@
 .studio {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 288px;
+  grid-template-columns: 288px minmax(0, 1fr);
   width: 100%;
   height: calc(100dvh - 76px);
   min-height: 560px;
@@ -39,8 +39,19 @@
 }
 
 .studio > .panel {
-  border-left: 1px solid rgba(23, 23, 19, 0.12);
+  grid-column: 1;
+  grid-row: 1;
+  border-right: 1px solid rgba(23, 23, 19, 0.12);
   scrollbar-gutter: stable;
+}
+
+.studio > .stage {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.studio[data-panel-collapsed="true"] > .stage {
+  grid-column: 1;
 }
 
 .panelHeader {
@@ -1146,7 +1157,7 @@
 
 @media (max-width: 1120px) {
   .studio {
-    grid-template-columns: minmax(0, 1fr) 270px;
+    grid-template-columns: 270px minmax(0, 1fr);
   }
 
   .characterChoices {
@@ -1185,9 +1196,15 @@
   }
 
   .studio > .panel {
+    order: 1;
     overflow-y: visible;
-    border-top: 1px solid rgba(23, 23, 19, 0.12);
+    border-right: 0;
+    border-bottom: 1px solid rgba(23, 23, 19, 0.12);
     border-left: 0;
+  }
+
+  .studio > .stage {
+    order: 2;
   }
 
   .actionStack {

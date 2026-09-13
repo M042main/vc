@@ -8,7 +8,7 @@ const studioCssUrl = new URL(
   import.meta.url,
 );
 
-test("places the studio tools on the right and removes the numbered walkthrough", async () => {
+test("places the studio tools on the left and removes the numbered walkthrough", async () => {
   const [studio, css] = await Promise.all([
     readFile(studioUrl, "utf8"),
     readFile(studioCssUrl, "utf8"),
@@ -28,8 +28,10 @@ test("places the studio tools on the right and removes the numbered walkthrough"
 
   assert.match(
     css,
-    /\.studio\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+288px;/,
+    /\.studio\s*\{[\s\S]*?grid-template-columns:\s*288px\s+minmax\(0,\s*1fr\);/,
   );
+  assert.match(css, /\.studio\s*>\s*\.panel\s*\{[\s\S]*?grid-column:\s*1;/);
+  assert.match(css, /\.studio\s*>\s*\.stage\s*\{[\s\S]*?grid-column:\s*2;/);
   assert.match(
     css,
     /\.studio\s*\{[\s\S]*?height:\s*calc\(100dvh - 76px\);/,
