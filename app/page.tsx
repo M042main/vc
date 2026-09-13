@@ -943,7 +943,10 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="workspace" id="top">
+      <section
+        className={`workspace ${mode === "studio" ? "studio-workspace" : ""}`}
+        id="top"
+      >
         {profileReady && !profile && !adminMode ? (
           <ClassOnboarding
             profile={profile}

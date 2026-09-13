@@ -739,7 +739,7 @@ test("keeps stage settings visible on mobile and restores speed-control focus", 
   ]);
 
   const settingsPanel = studioSource.slice(
-    studioSource.lastIndexOf('<aside className={styles.panel}'),
+    studioSource.lastIndexOf('id="studio-tool-panel"'),
   );
   assert.match(
     settingsPanel,

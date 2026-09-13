@@ -14,6 +14,10 @@ import {
   LoaderCircle,
   LockOpen,
   LockKeyhole,
+  Maximize2,
+  Minimize2,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
   PictureInPicture2,
   Play,
@@ -406,6 +410,7 @@ export function VrmStudio({
   onSelectVrm,
   onCaptureReady,
 }: VrmStudioProps) {
+  const studioRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backgroundInputRef = useRef<HTMLInputElement>(null);
@@ -484,6 +489,8 @@ export function VrmStudio({
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
   const [cameraPreviewVisible, setCameraPreviewVisible] = useState(true);
+  const [toolPanelCollapsed, setToolPanelCollapsed] = useState(false);
+  const [studioFullscreen, setStudioFullscreen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [captureDialogOpen, setCaptureDialogOpen] = useState(false);
@@ -500,6 +507,31 @@ export function VrmStudio({
     useState<string | null>(activeCreatedCharacterId ?? null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setStudioFullscreen(document.fullscreenElement === studioRef.current);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+    };
+  }, []);
+
+  const toggleStudioFullscreen = useCallback(async () => {
+    const studio = studioRef.current;
+    if (!studio) return;
+    try {
+      if (document.fullscreenElement === studio) {
+        await document.exitFullscreen();
+      } else {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        await studio.requestFullscreen();
+      }
+    } catch {
+      setError("전체 화면을 열지 못했습니다. 브라우저 설정을 확인해 주세요.");
+    }
+  }, []);
 
   const selectableCreatedCharacters = useMemo(() => {
     const seen = new Set<string>();
@@ -2013,7 +2045,13 @@ export function VrmStudio({
   ]);
 
   return (
-    <section className={styles.studio} aria-label="캐릭터 트래킹 스튜디오">
+    <section
+      ref={studioRef}
+      className={styles.studio}
+      data-panel-collapsed={toolPanelCollapsed}
+      data-fullscreen={studioFullscreen}
+      aria-label="캐릭터 트래킹 스튜디오"
+    >
       <div
         className={styles.stage}
         data-dragging={isDragging}
@@ -2051,6 +2089,38 @@ export function VrmStudio({
             onAnimationPlayingChange={setAnimationPlaying}
           />
         ) : null}
+
+        <div className={styles.workspaceControls} aria-label="스튜디오 화면 설정">
+          <button
+            type="button"
+            onClick={() => setToolPanelCollapsed((collapsed) => !collapsed)}
+            aria-expanded={!toolPanelCollapsed}
+            aria-controls="studio-tool-panel"
+            aria-label={toolPanelCollapsed ? "도구 패널 열기" : "도구 패널 숨기기"}
+            title={toolPanelCollapsed ? "도구 패널 열기" : "도구 패널 숨기기"}
+          >
+            {toolPanelCollapsed ? (
+              <PanelRightOpen size={17} aria-hidden="true" />
+            ) : (
+              <PanelRightClose size={17} aria-hidden="true" />
+            )}
+            <span>{toolPanelCollapsed ? "도구 열기" : "도구 숨기기"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void toggleStudioFullscreen()}
+            aria-pressed={studioFullscreen}
+            aria-label={studioFullscreen ? "전체 화면 종료" : "전체 화면으로 보기"}
+            title={studioFullscreen ? "전체 화면 종료" : "전체 화면으로 보기"}
+          >
+            {studioFullscreen ? (
+              <Minimize2 size={17} aria-hidden="true" />
+            ) : (
+              <Maximize2 size={17} aria-hidden="true" />
+            )}
+            <span>{studioFullscreen ? "전체 화면 종료" : "전체 화면"}</span>
+          </button>
+        </div>
 
         <div className={styles.stageBar}>
           <span
@@ -2246,7 +2316,12 @@ export function VrmStudio({
         ) : null}
       </div>
 
-      <aside className={styles.panel} aria-label="스튜디오 도구 및 무대 설정">
+      <aside
+        id="studio-tool-panel"
+        className={styles.panel}
+        hidden={toolPanelCollapsed}
+        aria-label="스튜디오 도구 및 무대 설정"
+      >
         <div className={styles.panelHeader}>
           <h2>스튜디오 도구</h2>
           <span className={styles.statusDot} data-ready={characterReady}>

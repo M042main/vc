@@ -230,6 +230,12 @@ select:focus-visible {
   padding: clamp(18px, 2.4vw, 34px) clamp(16px, 4vw, 64px) 30px;
 }
 
+.workspace.studio-workspace {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+
 .creator-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(250px, 280px);
@@ -401,6 +407,10 @@ select:focus-visible {
 
   .workspace {
     padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .workspace.studio-workspace {
+    padding-bottom: calc(82px + env(safe-area-inset-bottom, 0px));
   }
 
   .mode-switch {

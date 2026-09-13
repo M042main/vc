@@ -52,7 +52,7 @@ test("opens server-authenticated admin mode from the top-right gear and passes i
     /const\s+profileGateBlocking\s*=\s*!adminMode\s*&&\s*!profile\s*&&\s*profileReady/,
   );
   assert.match(page, /const\s+renderAdminAccessButton\s*=\s*\(gateControl\s*=\s*false\)\s*=>\s*\([\s\S]{0,220}className="admin-access-button"[\s\S]{0,320}aria-haspopup="dialog"/);
-  assert.match(page, /!profileGateBlocking\s*\?\s*renderAdminAccessButton\(\)\s*:\s*null[\s\S]{0,300}blocking=\{profileGateBlocking\}[\s\S]{0,180}blockingModalControl=\{renderAdminAccessButton\(true\)\}/);
+  assert.match(page, /!profileGateBlocking\s*\?\s*renderAdminAccessButton\(\)\s*:\s*null[\s\S]{0,520}blocking=\{profileGateBlocking\}[\s\S]{0,180}blockingModalControl=\{renderAdminAccessButton\(true\)\}/);
   assert.match(page, /restoreAdminTriggerFocus[\s\S]{0,150}adminButtonRef\.current\?\.focus\(\)/);
   assert.match(globals, /\.admin-access-button\[data-gate-control=["']true["']\]\s*\{[\s\S]{0,160}position:\s*fixed;[\s\S]{0,120}z-index:\s*95;[\s\S]{0,160}top:\s*max\([\s\S]{0,100}right:\s*max\(/);
   assert.match(globals, /@media\s*\(max-width:\s*560px\)[\s\S]{0,900}\.admin-access-button\s*\{[\s\S]{0,220}width:\s*44px;/);

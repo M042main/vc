@@ -30,7 +30,11 @@ test("places the studio tools on the right and removes the numbered walkthrough"
     css,
     /\.studio\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+288px;/,
   );
-  assert.match(css, /\.stage\s*\{[\s\S]*?min-height:\s*720px;/);
+  assert.match(
+    css,
+    /\.studio\s*\{[\s\S]*?height:\s*calc\(100dvh - 76px\);/,
+  );
+  assert.match(css, /\.stage\s*\{[\s\S]*?min-height:\s*0;/);
   assert.match(
     css,
     /\.stageTools\s*\{[\s\S]*?right:\s*18px;[\s\S]*?flex-direction:\s*column;/,

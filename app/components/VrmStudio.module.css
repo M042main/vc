@@ -1,13 +1,24 @@
 .studio {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 288px;
-  height: clamp(720px, 82dvh, 940px);
-  min-height: 720px;
+  width: 100%;
+  height: calc(100dvh - 76px);
+  min-height: 560px;
   overflow: hidden;
-  border: 1px solid rgba(23, 23, 19, 0.2);
-  border-radius: 28px;
+  border: 0;
+  border-radius: 0;
   background: #181817;
-  box-shadow: 0 28px 80px rgba(36, 32, 24, 0.18);
+  box-shadow: none;
+}
+
+.studio[data-panel-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.studio:fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
 }
 
 .panel {
@@ -21,6 +32,10 @@
   padding: 22px 18px;
   background: #fffdf8;
   color: #171713;
+}
+
+.panel[hidden] {
+  display: none;
 }
 
 .studio > .panel {
@@ -277,7 +292,7 @@
 .stage {
   position: relative;
   min-width: 0;
-  min-height: 720px;
+  min-height: 0;
   overflow: hidden;
   background:
     radial-gradient(circle at 50% 32%, rgba(116, 92, 255, 0.32), transparent 37%),
@@ -357,6 +372,47 @@
   justify-content: space-between;
   gap: 12px;
   pointer-events: none;
+}
+
+.workspaceControls {
+  position: absolute;
+  z-index: 7;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 7px;
+}
+
+.workspaceControls button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(17, 17, 18, 0.76);
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+  backdrop-filter: blur(12px);
+}
+
+.workspaceControls button:hover {
+  border-color: rgba(223, 255, 69, 0.58);
+  background: rgba(17, 17, 18, 0.92);
+  color: #dfff45;
+}
+
+.workspaceControls button:focus-visible {
+  outline: 3px solid rgba(223, 255, 69, 0.55);
+  outline-offset: 3px;
+}
+
+.workspaceControls + .stageBar {
+  right: 250px;
 }
 
 .stageBadge,
@@ -1111,6 +1167,23 @@
     min-height: clamp(540px, 76dvh, 720px);
   }
 
+  .studio[data-panel-collapsed="true"],
+  .studio:fullscreen {
+    height: calc(100dvh - 68px);
+    min-height: 520px;
+  }
+
+  .studio:fullscreen {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .studio[data-panel-collapsed="true"] .stage,
+  .studio:fullscreen .stage {
+    min-height: 0;
+    flex: 1;
+  }
+
   .studio > .panel {
     overflow-y: visible;
     border-top: 1px solid rgba(23, 23, 19, 0.12);
@@ -1148,6 +1221,29 @@
 
   .stageTools {
     right: 10px;
+  }
+
+  .workspaceControls {
+    top: 10px;
+    right: 10px;
+  }
+
+  .workspaceControls button {
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .workspaceControls button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .workspaceControls + .stageBar {
+    right: 108px;
   }
 
   .emptyState {
