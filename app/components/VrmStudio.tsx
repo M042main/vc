@@ -88,6 +88,7 @@ type StudioToolTab = "character" | "background" | "motion";
 type TrackerMessage =
   | { type: "READY"; delegate: "GPU" | "CPU" }
   | { type: "DELEGATE"; delegate: "CPU"; message: string }
+  | { type: "NOTICE"; message: string }
   | {
       type: "RESULT";
       result: HolisticLandmarkerResult;
@@ -108,23 +109,26 @@ const HEX_STAGE_COLOR = /^#[0-9a-f]{6}$/i;
 type StageColor = string;
 const MAX_VRM_SIZE = MAX_PERSISTED_VRM_BYTES;
 const MAX_STAGE_BACKGROUND_DIMENSION = 8192;
-const TRACKING_INPUT_MAX_WIDTH = 480;
-const TRACKING_INPUT_MAX_HEIGHT = 360;
+const TRACKING_INPUT_MAX_WIDTH = 960;
+const TRACKING_INPUT_MAX_HEIGHT = 720;
+const TRACKING_FRAME_INTERVAL_MS = 1000 / 30;
 const DEFAULT_VRM_URL = "/default-character.vrm";
 const DEFAULT_VRM_FILE_NAME = "기본 캐릭터.vrm";
 
-function trackingInputDimensions(aspectRatio: number) {
+function trackingInputDimensions(aspectRatio: number, cpu = false) {
   const aspect =
     Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 16 / 9;
-  if (aspect >= TRACKING_INPUT_MAX_WIDTH / TRACKING_INPUT_MAX_HEIGHT) {
+  const maxWidth = cpu ? 640 : TRACKING_INPUT_MAX_WIDTH;
+  const maxHeight = cpu ? 480 : TRACKING_INPUT_MAX_HEIGHT;
+  if (aspect >= maxWidth / maxHeight) {
     return {
-      width: TRACKING_INPUT_MAX_WIDTH,
-      height: Math.max(1, Math.round(TRACKING_INPUT_MAX_WIDTH / aspect)),
+      width: maxWidth,
+      height: Math.max(1, Math.round(maxWidth / aspect)),
     };
   }
   return {
-    width: Math.max(1, Math.round(TRACKING_INPUT_MAX_HEIGHT * aspect)),
-    height: TRACKING_INPUT_MAX_HEIGHT,
+    width: Math.max(1, Math.round(maxHeight * aspect)),
+    height: maxHeight,
   };
 }
 
@@ -462,6 +466,9 @@ export function VrmStudio({
   const stageBackgroundFitRef = useRef<StudioBackgroundFit>("cover");
   const syncThreeBackgroundRef = useRef<() => void>(() => undefined);
   const lastFrameRef = useRef(0);
+  const lastVideoTimeRef = useRef(-1);
+  const lastTrackingResultRef = useRef(0);
+  const trackingCpuRef = useRef(false);
   const cameraAspectRatioRef = useRef(16 / 9);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captureBusyRef = useRef(false);
@@ -482,6 +489,7 @@ export function VrmStudio({
   const [trackingState, setTrackingState] = useState<TrackingState>("idle");
   const [modelName, setModelName] = useState("아직 불러온 모델이 없어요");
   const [modelSize, setModelSize] = useState("");
+  const [isDefaultModel, setIsDefaultModel] = useState(false);
   const [stageColor, setStageColor] = useState<StageColor>(STAGE_COLORS[0].value);
   const [customStageColorDraft, setCustomStageColorDraft] = useState(
     DEFAULT_CUSTOM_STAGE_COLOR,
@@ -952,7 +960,7 @@ export function VrmStudio({
         (!stageVisibleRef.current &&
           !pipActiveRef.current &&
           !recordingBusyRef.current) ||
-        timestamp - lastRenderAt < 33
+        timestamp - lastRenderAt < (trackingRunningRef.current ? 1000 / 60 - 1 : 33)
       ) {
         return;
       }
@@ -1079,6 +1087,8 @@ export function VrmStudio({
     trackingSessionRef.current += 1;
     trackingRunningRef.current = false;
     frameInFlightRef.current = false;
+    lastVideoTimeRef.current = -1;
+    lastTrackingResultRef.current = 0;
     if (trackingRafRef.current !== null) {
       cancelAnimationFrame(trackingRafRef.current);
       trackingRafRef.current = null;
@@ -1321,6 +1331,7 @@ export function VrmStudio({
 
         fitObject(loaded.vrm.scene, camera, controls);
         setModelName(options.defaultModel ? "기본" : file.name);
+        setIsDefaultModel(Boolean(options.defaultModel));
         setModelSize(`${(file.size / 1024 / 1024).toFixed(1)} MB · VRM 캐릭터`);
         setModelState("ready");
         if (options.defaultModel) {
@@ -1562,19 +1573,21 @@ export function VrmStudio({
         (!stageVisibleRef.current && !pipActiveRef.current) ||
         video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
         frameInFlightRef.current ||
-        timestamp - lastFrameRef.current < 66
+        video.currentTime === lastVideoTimeRef.current ||
+        timestamp - lastFrameRef.current < TRACKING_FRAME_INTERVAL_MS - 1
       ) {
         return;
       }
 
       frameInFlightRef.current = true;
       lastFrameRef.current = timestamp;
+      lastVideoTimeRef.current = video.currentTime;
       try {
-        const inputSize = trackingInputDimensions(cameraAspectRatioRef.current);
+        const inputSize = trackingInputDimensions(cameraAspectRatioRef.current, trackingCpuRef.current);
         const bitmap = await createImageBitmap(video, {
           resizeWidth: inputSize.width,
           resizeHeight: inputSize.height,
-          resizeQuality: "low",
+          resizeQuality: "medium",
         });
         if (!trackingRunningRef.current || workerRef.current !== worker) {
           bitmap.close();
@@ -1621,10 +1634,10 @@ export function VrmStudio({
         audio: false,
         video: {
           facingMode: "user",
-          width: { ideal: 640 },
-          height: { ideal: 360 },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
           aspectRatio: { ideal: 16 / 9 },
-          frameRate: { ideal: 24, max: 30 },
+          frameRate: { ideal: 30, max: 30 },
         },
       });
       sessionStream = stream;
@@ -1662,13 +1675,21 @@ export function VrmStudio({
         const message = event.data;
         if (message.type === "READY") {
           engineReady = true;
+          trackingCpuRef.current = message.delegate === "CPU";
+          lastVideoTimeRef.current = -1;
+          lastTrackingResultRef.current = 0;
           setTrackingState("running");
           showToast("카메라 트래킹을 시작했어요.");
           runTrackingFrames();
           return;
         }
 
+        if (message.type === "NOTICE") {
+          showToast(message.message);
+          return;
+        }
         if (message.type === "DELEGATE") {
+          trackingCpuRef.current = true;
           setError(null);
           showToast(message.message);
           return;
@@ -1685,6 +1706,11 @@ export function VrmStudio({
         }
 
         frameInFlightRef.current = false;
+        const receivedAt = performance.now();
+        const deltaSeconds = lastTrackingResultRef.current
+          ? Math.min((receivedAt - lastTrackingResultRef.current) / 1000, 0.1)
+          : 1 / 30;
+        lastTrackingResultRef.current = receivedAt;
         const result = message.result;
         trackingOverlayRef.current?.draw({
           poseLandmarks: result.poseLandmarks?.[0],
@@ -1703,10 +1729,15 @@ export function VrmStudio({
             faceLandmarks: result.faceLandmarks?.[0],
             poseLandmarks: result.poseLandmarks?.[0],
             poseWorldLandmarks: result.poseWorldLandmarks?.[0],
-            leftHandLandmarks: result.leftHandLandmarks?.[0],
-            rightHandLandmarks: result.rightHandLandmarks?.[0],
+            // Kalidokit Pose maps MediaPipe right (16) to avatar Left. Hands
+            // must use that same mirrored convention or they drive the wrong arm.
+            leftHandLandmarks: result.rightHandLandmarks?.[0],
+            rightHandLandmarks: result.leftHandLandmarks?.[0],
+            leftHandWorldLandmarks: result.rightHandWorldLandmarks?.[0],
+            rightHandWorldLandmarks: result.leftHandWorldLandmarks?.[0],
             imageSize: message.imageSize,
           }, {
+            deltaSeconds,
             enableLegs: !legsLockedRef.current,
             applyHipsPosition: !legsLockedRef.current,
             applyHipsRotation: !legsLockedRef.current,
@@ -2217,7 +2248,7 @@ export function VrmStudio({
             mirror
             sourceAspectRatio={cameraAspectRatio}
             fit="cover"
-            hidden={trackingState !== "loading" && !trackingRunning}
+            hidden={!cameraPreviewVisible || (trackingState !== "loading" && !trackingRunning)}
           />
           <span>{trackingRunning ? "ON DEVICE" : "LOADING"}</span>
         </div>
@@ -2513,11 +2544,11 @@ export function VrmStudio({
                 >
                   <span className={styles.characterChoiceThumb} data-vrm="true">
                     <CircleUserRound size={25} aria-hidden="true" />
-                    <small>VRM</small>
+                    {!isDefaultModel ? <small>VRM</small> : null}
                   </span>
                   <span className={styles.characterChoiceInfo}>
                     <strong>{modelName}</strong>
-                    <small>{modelSize || "3D 캐릭터"}</small>
+                    {!isDefaultModel ? <small>{modelSize || "3D 캐릭터"}</small> : null}
                   </span>
                 </button>
               ) : null}

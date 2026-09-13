@@ -15,12 +15,12 @@ test("keeps the unused face-blendshape WebGL subgraph disabled", async () => {
   assert.doesNotMatch(workerSource, /outputFaceBlendshapes\s*:\s*true/);
 });
 
-async function loadWorkerHarness({ gpuCloseThrows = false } = {}) {
+async function loadWorkerHarness({ gpuCloseThrows = false, faceCount = 0, faceFailure = false } = {}) {
   const workerSource = await readFile(workerUrl, "utf8");
   const harnessSource = workerSource
     .replace(
       /import\s*\{[\s\S]*?\}\s*from\s*["']@mediapipe\/tasks-vision["'];?/,
-      "const { HolisticLandmarker } = __deps;",
+      "const { HolisticLandmarker, FaceLandmarker } = __deps;",
     )
     .replace(
       /import\s+wasmBinaryPath\s+from\s+["'][^"']*vision_wasm_module_internal\.wasm\?url["'];?/,
@@ -54,6 +54,9 @@ async function loadWorkerHarness({ gpuCloseThrows = false } = {}) {
   let gpuCloseCalls = 0;
   let moduleFactoryLoads = 0;
   let bitmapCloseCalls = 0;
+  const faceDetectCalls = [];
+  let faceCreateCalls = 0;
+  let faceCloseCalls = 0;
 
   const gpuLandmarker = {
     detectForVideo(bitmap, timestamp) {
@@ -66,6 +69,7 @@ async function loadWorkerHarness({ gpuCloseThrows = false } = {}) {
     },
   };
   const cpuResult = { poseLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]] };
+  if (faceCount) cpuResult.faceLandmarks = [Array.from({ length: faceCount }, () => ({ x: 0.2, y: 0.3, z: 0 }))];
   const cpuLandmarker = {
     detectForVideo(bitmap, timestamp) {
       cpuDetectCalls.push({ bitmap, timestamp });
@@ -104,6 +108,21 @@ async function loadWorkerHarness({ gpuCloseThrows = false } = {}) {
   const context = vm.createContext({
     __deps: {
       HolisticLandmarker,
+      FaceLandmarker: {
+        async createFromOptions(_fileset, options) {
+          faceCreateCalls += 1;
+          assert.equal(options.numFaces, 1);
+          assert.equal(options.outputFaceBlendshapes, false);
+          if (faceFailure) throw new Error("Face model unavailable");
+          return {
+            detectForVideo(bitmap, timestamp) {
+              faceDetectCalls.push({ bitmap, timestamp });
+              return { faceLandmarks: [Array.from({ length: 478 }, () => ({ x: 0.4, y: 0.5, z: 0 }))] };
+            },
+            close() { faceCloseCalls += 1; },
+          };
+        },
+      },
       async importWasmLoader() {
         moduleFactoryLoads += 1;
         return { default: async () => ({}) };
@@ -133,6 +152,9 @@ async function loadWorkerHarness({ gpuCloseThrows = false } = {}) {
     cpuDetectCalls,
     cpuResult,
     createDelegates,
+    faceDetectCalls,
+    get faceCreateCalls() { return faceCreateCalls; },
+    get faceCloseCalls() { return faceCloseCalls; },
     get bitmapCloseCalls() {
       return bitmapCloseCalls;
     },
@@ -147,6 +169,40 @@ async function loadWorkerHarness({ gpuCloseThrows = false } = {}) {
     self,
   };
 }
+
+test("refines an iris-less face using the same bitmap and timestamp, and releases the extra task", async () => {
+  const harness = await loadWorkerHarness({ faceCount: 468 });
+  await harness.self.onmessage({ data: { type: "INIT" } });
+  await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 42 } });
+  const result = harness.messages.find((message) => message.type === "RESULT");
+  assert.equal(result.result.faceLandmarks[0].length, 478);
+  assert.equal(result.result.faceLandmarks[0][468].x, 0.4, "iris comes from the face detector, not synthetic points");
+  assert.equal(harness.faceDetectCalls[0].bitmap, harness.bitmap);
+  assert.equal(harness.faceDetectCalls[0].timestamp, 42);
+  assert.equal(harness.bitmapCloseCalls, 1);
+  await harness.self.onmessage({ data: { type: "STOP" } });
+  assert.equal(harness.faceCloseCalls, 1);
+});
+
+test("does no redundant face inference when Holistic already has iris points", async () => {
+  const harness = await loadWorkerHarness({ faceCount: 478 });
+  await harness.self.onmessage({ data: { type: "INIT" } });
+  await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 42 } });
+  assert.equal(harness.faceCreateCalls, 0);
+  assert.equal(harness.faceDetectCalls.length, 0);
+});
+
+test("optional iris model failure preserves body/face tracking and does not retry on every frame", async () => {
+  const harness = await loadWorkerHarness({ faceCount: 468, faceFailure: true });
+  await harness.self.onmessage({ data: { type: "INIT" } });
+  for (const timestamp of [42, 84]) {
+    await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp } });
+  }
+  assert.equal(harness.faceCreateCalls, 1);
+  assert.equal(harness.messages.filter((message) => message.type === "NOTICE").length, 1);
+  assert.equal(harness.messages.filter((message) => message.type === "RESULT").length, 2);
+  assert.equal(harness.messages.some((message) => message.type === "ERROR"), false);
+});
 
 for (const gpuCloseThrows of [false, true]) {
   test(

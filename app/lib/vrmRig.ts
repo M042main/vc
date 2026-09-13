@@ -104,6 +104,8 @@ export interface VrmTrackingFrame {
   poseWorldLandmarks?: MediaPipeLandmarkList | null;
   leftHandLandmarks?: MediaPipeLandmarkList | null;
   rightHandLandmarks?: MediaPipeLandmarkList | null;
+  leftHandWorldLandmarks?: MediaPipeLandmarkList | null;
+  rightHandWorldLandmarks?: MediaPipeLandmarkList | null;
   /** Exact bitmap dimensions used to infer `faceLandmarks`. */
   imageSize?: { width: number; height: number } | null;
 }
@@ -150,11 +152,15 @@ export interface BoneRotationOptions {
 }
 
 export interface VrmRigOptions {
-  /** Quaternion interpolation amount per tracking frame. Defaults to 0.35. */
+  /** Response at 30 Hz; adjusted by deltaSeconds. Defaults to 0.5. */
   rotationSlerp?: number;
-  /** Hips-position interpolation amount per frame. Defaults to 0.25. */
+  /** Faster response for individual finger joints. Defaults to 0.7. */
+  fingerSlerp?: number;
+  /** Time since the previous tracking result, in seconds. Defaults to 1/30. */
+  deltaSeconds?: number;
+  /** Hips-position interpolation amount at 30 Hz. Defaults to 0.4. */
   positionLerp?: number;
-  /** Expression interpolation amount per frame. Defaults to 0.4. */
+  /** Expression interpolation amount at 30 Hz. Defaults to 0.65. */
   expressionLerp?: number;
   /** Scale applied to Kalidokit's normalized hips translation. Defaults to 1. */
   hipsPositionScale?: number;
@@ -164,9 +170,9 @@ export interface VrmRigOptions {
   applyHipsRotation?: boolean;
   /** Solve and apply leg bones. Defaults to true. */
   enableLegs?: boolean;
-  /** Maximum eye yaw produced by pupil tracking, in degrees. Defaults to 18. */
+  /** Look-at input yaw, before the model's range map. Defaults to 60 degrees. */
   maxLookYawDegrees?: number;
-  /** Maximum eye pitch produced by pupil tracking, in degrees. Defaults to 12. */
+  /** Look-at input pitch, before the model's range map. Defaults to 45 degrees. */
   maxLookPitchDegrees?: number;
 }
 
@@ -522,7 +528,7 @@ function setExpression(
   return true;
 }
 
-function applyFace(vrm: VRM, face: TFace, options: Required<VrmRigOptions>, missing: Set<VRMHumanBoneNameValue>): void {
+function applyFace(vrm: VRM, face: TFace, options: Required<VrmRigOptions>, missing: Set<VRMHumanBoneNameValue>, hasIris: boolean): void {
   if (
     !slerpVrmBoneRotation(vrm, VRMHumanBoneName.Head, face.head, {
       dampener: 0.7,
@@ -566,7 +572,10 @@ function applyFace(vrm: VRM, face: TFace, options: Required<VrmRigOptions>, miss
   setExpression(vrm, VRMExpressionPresetName.Ee, face.mouth.shape.E, expressionAmount);
   setExpression(vrm, VRMExpressionPresetName.Oh, face.mouth.shape.O, expressionAmount);
 
-  if (vrm.lookAt) {
+  // Closed eyelids obscure the iris: hold the previous gaze during blinks.
+  // VRM range maps already limit the actual eyeball rotation; their input is
+  // not the final rotation in degrees (18 degrees used to barely move it).
+  if (vrm.lookAt && hasIris && face.eye.l > 0.5 && face.eye.r > 0.5) {
     vrm.lookAt.autoUpdate = false;
     const targetYaw = MathUtils.clamp(-face.pupil.x, -1, 1) * options.maxLookYawDegrees;
     const targetPitch = MathUtils.clamp(face.pupil.y, -1, 1) * options.maxLookPitchDegrees;
@@ -597,10 +606,14 @@ function isEulerLike(value: unknown): value is EulerLike {
   return [rotation.x, rotation.y, rotation.z].every(Number.isFinite);
 }
 
-function applyPose(vrm: VRM, pose: TPose, options: Required<VrmRigOptions>, missing: Set<VRMHumanBoneNameValue>): void {
+function applyPose(vrm: VRM, pose: TPose, options: Required<VrmRigOptions>, missing: Set<VRMHumanBoneNameValue>, trackedHands: { left: boolean; right: boolean }): void {
   for (const [bone, solutionKey, dampener] of POSE_BONES) {
     if (!options.enableLegs && (solutionKey.includes("Leg") || solutionKey.includes("Foot"))) continue;
     if (!options.applyHipsRotation && bone === VRMHumanBoneName.Hips) continue;
+    // A tracked wrist is merged with the pose in applyHand. Do not blend it
+    // twice toward competing targets in the same frame.
+    if (bone === VRMHumanBoneName.LeftHand && trackedHands.left) continue;
+    if (bone === VRMHumanBoneName.RightHand && trackedHands.right) continue;
     const solution = solutionKey === "Hips" ? pose.Hips.rotation : pose[solutionKey];
     if (!isEulerLike(solution)) continue;
     if (
@@ -690,24 +703,76 @@ function applyHand(
   for (const [solutionKey, bone] of fingerMap) {
     const rotation = hand[solutionKey];
     if (!rotation) continue;
-    if (!slerpVrmBoneRotation(vrm, bone, rotation, { slerp: options.rotationSlerp })) {
+    if (!slerpVrmBoneRotation(vrm, bone, rotation, { slerp: options.fingerSlerp })) {
       missing.add(bone);
     }
   }
 }
 
 function resolveRigOptions(options: VrmRigOptions): Required<VrmRigOptions> {
+  const deltaSeconds = Number.isFinite(options.deltaSeconds)
+    ? MathUtils.clamp(options.deltaSeconds!, 1 / 120, 0.1)
+    : 1 / 30;
+  const response = (value: number) => 1 - Math.pow(1 - MathUtils.clamp(value, 0, 1), deltaSeconds * 30);
   return {
-    rotationSlerp: MathUtils.clamp(options.rotationSlerp ?? 0.35, 0, 1),
-    positionLerp: MathUtils.clamp(options.positionLerp ?? 0.25, 0, 1),
-    expressionLerp: MathUtils.clamp(options.expressionLerp ?? 0.4, 0, 1),
+    deltaSeconds,
+    rotationSlerp: response(options.rotationSlerp ?? 0.5),
+    fingerSlerp: response(options.fingerSlerp ?? 0.7),
+    positionLerp: response(options.positionLerp ?? 0.4),
+    expressionLerp: response(options.expressionLerp ?? 0.65),
     hipsPositionScale: options.hipsPositionScale ?? 1,
     applyHipsPosition: options.applyHipsPosition ?? true,
     applyHipsRotation: options.applyHipsRotation ?? true,
     enableLegs: options.enableLegs ?? true,
-    maxLookYawDegrees: Math.max(0, options.maxLookYawDegrees ?? 18),
-    maxLookPitchDegrees: Math.max(0, options.maxLookPitchDegrees ?? 12),
+    maxLookYawDegrees: Math.max(0, options.maxLookYawDegrees ?? 60),
+    maxLookPitchDegrees: Math.max(0, options.maxLookPitchDegrees ?? 45),
   };
+}
+
+function solveHand(
+  landmarks: ReturnType<typeof finiteLandmarks>,
+  worldLandmarks: MediaPipeLandmarkList | null | undefined,
+  side: "Left" | "Right",
+): KalidokitHandSolution | undefined {
+  if (!landmarks) return undefined;
+  const solved = Hand.solve(landmarks as Parameters<typeof Hand.solve>[0], side) as KalidokitHandSolution | undefined;
+  const world = finiteLandmarks(worldLandmarks, 21);
+  if (!solved || !world) return solved;
+  // Keep Kalidoface's image-space wrist convention, but solve finger curls
+  // in metric 3D space so widescreen video does not distort joint angles.
+  const fingers = Hand.solve(world as Parameters<typeof Hand.solve>[0], side) as KalidokitHandSolution | undefined;
+  return fingers ? { ...fingers, [`${side}Wrist`]: solved[`${side}Wrist`] } : solved;
+}
+
+function restoreVisibleArms(pose: TPose, world: NonNullable<ReturnType<typeof finiteLandmarks>>, image: NonNullable<ReturnType<typeof finiteLandmarks>>) {
+  // Kalidokit's legacy offscreen heuristic drops wrists below world y=0.1,
+  // even while an entire arm is visible. Use actual image bounds/confidence.
+  const visible = (indices: number[]) => indices.every((index) => {
+    const point = image[index];
+    return point.x > 0.01 && point.x < 0.99 && point.y > 0.01 && point.y < 0.99 &&
+      (point.visibility ?? world[index].visibility ?? 1) >= 0.5;
+  });
+  const arms = Pose.calcArms(world as Parameters<typeof Pose.calcArms>[0]);
+  if (visible([11, 13, 15])) {
+    pose.RightUpperArm = arms.UpperArm.r;
+    pose.RightLowerArm = arms.LowerArm.r;
+    pose.RightHand = arms.Hand.r;
+  }
+  if (visible([12, 14, 16])) {
+    pose.LeftUpperArm = arms.UpperArm.l;
+    pose.LeftLowerArm = arms.LowerArm.l;
+    pose.LeftHand = arms.Hand.l;
+  }
+}
+
+function fallbackEyeOpenness(points: NonNullable<ReturnType<typeof finiteLandmarks>>, edge: [number, number], lids: [number, number][]) {
+  // Face.solve rescales this private clone to pixels. Blink landmarks exist
+  // even in a 468-point face, although Kalidokit disables its eye solver.
+  const distance = (a: number, b: number) => Math.hypot(points[a].x - points[b].x, points[a].y - points[b].y);
+  const width = distance(...edge);
+  if (width < 1e-6) return 1;
+  const opening = lids.reduce((sum, pair) => sum + distance(...pair), 0) / lids.length / width;
+  return MathUtils.clamp((opening / 0.285 - 0.35) / 0.15, 0, 1);
 }
 
 /** Solve a MediaPipe Tasks-style landmark frame with Kalidokit and apply it to a VRM. */
@@ -729,7 +794,7 @@ export function applyVrmTracking(
   const solvedFace = faceLandmarks
     ? Face.solve(faceLandmarks as Parameters<typeof Face.solve>[0], {
         runtime: "mediapipe",
-        smoothBlink: true,
+        smoothBlink: false,
         ...(faceImageSize ? { imageSize: faceImageSize } : {}),
       })
     : undefined;
@@ -741,21 +806,19 @@ export function applyVrmTracking(
           { runtime: "mediapipe", enableLegs: options.enableLegs },
         )
       : undefined;
-  const solvedLeftHand = leftHandLandmarks
-    ? (Hand.solve(
-        leftHandLandmarks as Parameters<typeof Hand.solve>[0],
-        "Left",
-      ) as KalidokitHandSolution | undefined)
-    : undefined;
-  const solvedRightHand = rightHandLandmarks
-    ? (Hand.solve(
-        rightHandLandmarks as Parameters<typeof Hand.solve>[0],
-        "Right",
-      ) as KalidokitHandSolution | undefined)
-    : undefined;
+  const solvedLeftHand = solveHand(leftHandLandmarks, frame.leftHandWorldLandmarks, "Left");
+  const solvedRightHand = solveHand(rightHandLandmarks, frame.rightHandWorldLandmarks, "Right");
 
-  if (solvedPose) applyPose(vrm, solvedPose, options, missing);
-  if (solvedFace) applyFace(vrm, solvedFace, options, missing);
+  if (solvedPose && poseWorldLandmarks && poseLandmarks) restoreVisibleArms(solvedPose, poseWorldLandmarks, poseLandmarks);
+  if (solvedFace && faceLandmarks && faceLandmarks.length < 478) {
+    solvedFace.eye = {
+      l: fallbackEyeOpenness(faceLandmarks, [33, 133], [[160, 144], [159, 145], [158, 153]]),
+      r: fallbackEyeOpenness(faceLandmarks, [263, 362], [[387, 373], [386, 374], [385, 380]]),
+    };
+  }
+
+  if (solvedPose) applyPose(vrm, solvedPose, options, missing, { left: Boolean(solvedLeftHand), right: Boolean(solvedRightHand) });
+  if (solvedFace) applyFace(vrm, solvedFace, options, missing, (faceLandmarks?.length ?? 0) >= 478);
   if (solvedLeftHand) applyHand(vrm, "Left", solvedLeftHand, solvedPose, options, missing);
   if (solvedRightHand) applyHand(vrm, "Right", solvedRightHand, solvedPose, options, missing);
 

@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import {
+  FaceLandmarker,
   HolisticLandmarker,
   type HolisticLandmarkerResult,
 } from "@mediapipe/tasks-vision";
@@ -9,9 +10,14 @@ import wasmLoaderPath from "@mediapipe/tasks-vision/vision_wasm_module_internal.
 
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/1/holistic_landmarker.task";
+const FACE_MODEL_URL =
+  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
 let landmarker: HolisticLandmarker | null = null;
 let delegate: "GPU" | "CPU" = "CPU";
+let faceRefiner: FaceLandmarker | null = null;
+let faceDelegate: "GPU" | "CPU" = "CPU";
+let faceRefinementUnavailable = false;
 
 type MediaPipeModuleFactory = (moduleArg?: unknown) => Promise<unknown>;
 type MediaPipeWorkerGlobal = typeof self & {
@@ -27,6 +33,7 @@ type WorkerInput =
 type WorkerOutput =
   | { type: "READY"; delegate: "GPU" | "CPU" }
   | { type: "DELEGATE"; delegate: "CPU"; message: string }
+  | { type: "NOTICE"; message: string }
   | {
       type: "RESULT";
       result: HolisticLandmarkerResult;
@@ -169,6 +176,62 @@ async function createLandmarker() {
   reply({ type: "READY", delegate });
 }
 
+function disposeFaceRefiner() {
+  const current = faceRefiner;
+  faceRefiner = null;
+  try { current?.close(); } catch { /* A failed GPU graph can throw on close. */ }
+}
+
+async function createFaceRefiner(requestedDelegate: "GPU" | "CPU") {
+  await prepareWasmModuleFactory();
+  faceRefiner = await FaceLandmarker.createFromOptions(fileset, {
+    runningMode: "VIDEO",
+    numFaces: 1,
+    minFaceDetectionConfidence: 0.5,
+    minFacePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: false,
+    ...(requestedDelegate === "GPU" ? { canvas: new OffscreenCanvas(2, 2) } : {}),
+    baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: requestedDelegate },
+  });
+  faceDelegate = requestedDelegate;
+}
+
+async function refineFaceIfNeeded(result: HolisticLandmarkerResult, bitmap: ImageBitmap, timestamp: number) {
+  const count = result.faceLandmarks?.[0]?.length ?? 0;
+  // Some Holistic graphs return only the 468-point face mesh. Iris tracking
+  // needs the ten additional, genuinely detected points. Never synthesize
+  // them, and never run a second detector when Holistic already provides 478.
+  if (count < 468 || count >= 478 || faceRefinementUnavailable) return;
+  try {
+    if (!faceRefiner) {
+      try {
+        await createFaceRefiner(delegate);
+      } catch (error) {
+        if (delegate !== "GPU") throw error;
+        await createFaceRefiner("CPU");
+      }
+    }
+    let refined;
+    try {
+      refined = faceRefiner!.detectForVideo(bitmap, timestamp);
+    } catch (error) {
+      if (faceDelegate !== "GPU") throw error;
+      disposeFaceRefiner();
+      await createFaceRefiner("CPU");
+      refined = faceRefiner!.detectForVideo(bitmap, timestamp);
+    }
+    if ((refined.faceLandmarks?.[0]?.length ?? 0) >= 478) {
+      result.faceLandmarks = refined.faceLandmarks;
+    }
+  } catch {
+    disposeFaceRefiner();
+    faceRefinementUnavailable = true;
+    reply({ type: "NOTICE", message: "눈동자 정밀 모델을 불러오지 못했어요. 얼굴·몸·손 트래킹은 계속됩니다. 카메라를 다시 시작하면 재시도해요." });
+  }
+}
+
 self.onmessage = async (event: MessageEvent<WorkerInput>) => {
   const message = event.data;
 
@@ -187,6 +250,7 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
 
   if (message.type === "STOP") {
     disposeLandmarker();
+    disposeFaceRefiner();
     self.close();
     return;
   }
@@ -229,6 +293,7 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
       }
     }
 
+    await refineFaceIfNeeded(result, message.bitmap, message.timestamp);
     reply({
       type: "RESULT",
       result,

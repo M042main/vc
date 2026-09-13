@@ -33,10 +33,10 @@ function resolveNumber(source, token, label) {
   if (/^\d+(?:\.\d+)?$/.test(token)) return Number(token);
 
   const declaration = source.match(
-    new RegExp(`\\b(?:const\\s+)?${token}\\s*=\\s*(\\d+(?:\\.\\d+)?)\\b`),
+    new RegExp(`\\b(?:const\\s+)?${token}\\s*=\\s*(\\d+(?:\\.\\d+)?)(?:\\s*/\\s*(\\d+))?\\b`),
   );
   assert.ok(declaration, `${label} must resolve to a numeric source constant`);
-  return Number(declaration[1]);
+  return Number(declaration[1]) / Number(declaration[2] ?? 1);
 }
 
 function numericSetting(source, pattern, label) {
@@ -130,17 +130,17 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
   );
 
   assert.ok(
-    frameInterval >= 66,
-    `tracking must be capped near 15 FPS or lower; got ${frameInterval} ms`,
+    frameInterval >= 32 && frameInterval <= 34,
+    `tracking should accept fresh frames near 30 FPS; got ${frameInterval} ms`,
   );
-  assert.ok(inputWidth <= 480, `tracking width must be <= 480; got ${inputWidth}`);
-  assert.ok(inputHeight <= 360, `tracking height must be <= 360; got ${inputHeight}`);
-  assert.ok(cameraWidth <= 640, `camera width must be <= 640; got ${cameraWidth}`);
-  assert.ok(cameraHeight <= 360, `camera height must be <= 360; got ${cameraHeight}`);
+  assert.ok(inputWidth <= 960 && inputWidth >= 640, `tracking width must preserve hand detail: ${inputWidth}`);
+  assert.ok(inputHeight <= 720, `tracking height must be <= 720; got ${inputHeight}`);
+  assert.ok(cameraWidth <= 1280, `camera width must be <= 1280; got ${cameraWidth}`);
+  assert.ok(cameraHeight <= 720, `camera height must be <= 720; got ${cameraHeight}`);
   assert.ok(cameraMaxFps <= 30, `camera FPS must be <= 30; got ${cameraMaxFps}`);
   assert.ok(pixelRatioCap <= 1.5, `renderer DPR cap must be <= 1.5; got ${pixelRatioCap}`);
-  assert.match(studioSource, /resizeQuality\s*:\s*["']low["']/);
-  assert.match(studioSource, /trackingInputDimensions\(cameraAspectRatioRef\.current\)/);
+  assert.match(studioSource, /video\.currentTime === lastVideoTimeRef\.current/);
+  assert.match(studioSource, /trackingInputDimensions\(cameraAspectRatioRef\.current, trackingCpuRef\.current\)/);
   assert.match(
     studioSource,
     /frameInFlightRef\.current[\s\S]{0,180}timestamp\s*-\s*lastFrameRef\.current/,
@@ -166,15 +166,9 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
   assert.match(studioSource, /workerRef\.current\s*!==\s*worker/);
 });
 
-test("skips hidden 3D work and caps its render loop near 30 FPS", async () => {
+test("skips hidden 3D work and allows smooth live rendering while saving idle work", async () => {
   const studioSource = await readFile(studioUrl, "utf8");
-  const renderInterval = numericSetting(
-    studioSource,
-    /timestamp\s*-\s*lastRenderAt\s*<\s*([A-Za-z_$][\w$]*|\d+(?:\.\d+)?)/,
-    "minimum 3D render interval",
-  );
-
-  assert.ok(renderInterval >= 33, `3D render interval must be >= 33 ms; got ${renderInterval}`);
+  assert.match(studioSource, /trackingRunningRef\.current \? 1000 \/ 60 - 1 : 33/);
   assert.match(studioSource, /document\.hidden/);
   assert.match(studioSource, /paperDollActiveRef\.current/);
   assert.match(studioSource, /stageVisibleRef\.current/);
