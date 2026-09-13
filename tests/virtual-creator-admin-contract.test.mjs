@@ -30,7 +30,8 @@ test("opens server-authenticated admin mode from the top-right gear and passes i
   ]);
 
   assert.match(page, /<Settings[^>]*aria-hidden="true"/);
-  assert.match(page, /관리자 m042 접근/);
+  assert.match(page, /aria-label=\{adminMode \? "관리자 설정 열기" : "관리자 로그인"\}/u);
+  assert.match(page, /<h2 id="admin-dialog-title">관리자<\/h2>/u);
   assert.match(page, /role="dialog"/);
   assert.match(page, /aria-modal="true"/);
   assert.match(page, /fetch\("\/api\/admin\/session"[\s\S]{0,220}method:\s*"POST"[\s\S]{0,220}credentials:\s*"same-origin"/);

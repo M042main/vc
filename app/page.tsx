@@ -864,7 +864,7 @@ export default function Home() {
       onClick={openAdminDialog}
       disabled={pageBusy}
       aria-haspopup="dialog"
-      aria-label={adminMode ? "m042 관리자 설정 열기" : "관리자 m042 접근"}
+      aria-label={adminMode ? "관리자 설정 열기" : "관리자 로그인"}
     >
       <Settings size={18} aria-hidden="true" />
     </button>
@@ -1040,7 +1040,7 @@ export default function Home() {
             <span className="admin-dialog-icon" aria-hidden="true">
               <ShieldCheck size={24} />
             </span>
-            <h2 id="admin-dialog-title">m042 관리자</h2>
+            <h2 id="admin-dialog-title">관리자</h2>
             {adminMode ? (
               <>
                 <p>관리자 모드가 켜져 있습니다. 학급을 만들거나 삭제하고 갤러리 사진을 관리할 수 있습니다.</p>
