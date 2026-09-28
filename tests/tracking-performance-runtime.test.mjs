@@ -6,7 +6,7 @@ import ts from "typescript";
 
 const source = await readFile(new URL("../app/lib/trackingPerformance.ts", import.meta.url), "utf8");
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { TrackingInputBudget, fitTrackingInput } = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
+const { TrackingInputBudget, fitTrackingInput, trackingResponse } = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
 
 test("input size preserves 4:3, widescreen and portrait geometry without upscaling", () => {
   assert.deepEqual(fitTrackingInput(1280, 720, 640, 480), { width: 640, height: 360 });
@@ -35,14 +35,20 @@ test("adaptive input ignores startup stalls, reduces sustained overload and reco
   assert.equal(budget.reduced, false);
 });
 
-async function frameLoopHarness({ videoCallback = true, deferred = false, sendThrows = false } = {}) {
+async function frameLoopHarness({ videoCallback = true, deferred = false, sendThrows = false, onSend } = {}) {
   const studio = await readFile(new URL("../app/components/VrmStudio.tsx", import.meta.url), "utf8");
   const body = studio.match(/const runTrackingFrames = useCallback\(\(\) => \{([\s\S]*?)\n {2}\}, \[\]\);/u)?.[1];
   assert.ok(body, "exercise the actual component frame loop");
   const callbacks = [];
   const sent = [];
   const video = { currentTime: 1, videoWidth: 640, videoHeight: 480, readyState: 2 };
-  if (videoCallback) video.requestVideoFrameCallback = (callback) => { callbacks.push(callback); return callbacks.length; };
+  let now = 100;
+  const enqueue = (callback) => { callbacks.push(async (time) => {
+    now = time;
+    callback(time, { mediaTime: video.currentTime });
+    await new Promise((resolve) => setImmediate(resolve));
+  }); return callbacks.length; };
+  if (videoCallback) video.requestVideoFrameCallback = enqueue;
   let creates = 0;
   let closes = 0;
   let resolveBitmap;
@@ -54,16 +60,18 @@ async function frameLoopHarness({ videoCallback = true, deferred = false, sendTh
     workerRef: ref({ postMessage(message, transfer) {
       if (sendThrows) throw new Error("worker stopped");
       sent.push({ message, transfer });
+      onSend?.(now, message);
     } }),
     trackingSessionRef: ref(1), trackingRunningRef: ref(true),
+    pumpTrackingFrameRef: ref(() => {}),
     trackingVideoCallbackRef: ref(null), trackingRafRef: ref(null),
     stageVisibleRef: ref(true), pipActiveRef: ref(false), frameInFlightRef: ref(false),
     lastVideoTimeRef: ref(-1), lastFrameRef: ref(-Infinity),
     trackingInputBudgetRef: ref(new TrackingInputBudget()),
     HTMLMediaElement: { HAVE_CURRENT_DATA: 2 }, TRACKING_FRAME_INTERVAL_MS: 1000 / 30,
     trackingInputDimensions: () => ({ width: 640, height: 480 }),
-    requestAnimationFrame(callback) { callbacks.push(callback); return callbacks.length; },
-    performance: { now: () => 100 },
+    requestAnimationFrame: enqueue,
+    performance: { now: () => now },
     createImageBitmap() {
       creates++;
       return deferred ? new Promise((resolve, reject) => { resolveBitmap = resolve; rejectBitmap = reject; }) : Promise.resolve(bitmap);
@@ -73,6 +81,7 @@ async function frameLoopHarness({ videoCallback = true, deferred = false, sendTh
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
   }).outputText, context);
   return { context, video, callbacks, sent, bitmap, get creates() { return creates; }, get closes() { return closes; },
+    set now(value) { now = value; },
     resolve: () => resolveBitmap(bitmap), reject: () => rejectBitmap(new Error("capture cancelled")) };
 }
 
@@ -107,6 +116,41 @@ test("an old bitmap completion cannot send a frame to a restarted worker", async
   assert.equal(harness.closes, 1);
   assert.equal(harness.sent.length, 0);
   assert.equal(harness.context.frameInFlightRef.current, true, "old work must not release the new session's backpressure");
+});
+
+for (const [latency, minFps] of [[34, 28], [45, 21], [70, 14]]) {
+  test(`completion-driven pump avoids camera-frame quantization at ${latency} ms`, async (t) => {
+    let completionAt = Infinity;
+    const harness = await frameLoopHarness({ onSend(now) { completionAt = now + latency; } });
+    let cameraFrame = 0;
+    while (Math.min(cameraFrame * 1000 / 30, completionAt) < 10000) {
+      const cameraAt = cameraFrame * 1000 / 30;
+      if (cameraAt <= completionAt) {
+        harness.video.currentTime = cameraFrame++ / 30;
+        await harness.callbacks.shift()(cameraAt);
+      } else {
+        harness.now = completionAt;
+        completionAt = Infinity;
+        harness.context.frameInFlightRef.current = false;
+        harness.context.pumpTrackingFrameRef.current();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+    assert.ok(harness.sent.length / 10 >= minFps, `${harness.sent.length / 10} fps must exceed the old quantized rate`);
+    assert.ok(harness.sent.length <= 300, "never invent additional camera frames");
+    t.diagnostic(`Synthetic 30 fps camera, ${latency} ms processing: ${(harness.sent.length / 10).toFixed(1)} results/s`);
+    assert.equal(new Set(harness.sent.map(({ message }) => message.timestamp)).size, harness.sent.length);
+  });
+}
+
+test("display response is equivalent at 30/60/120 Hz and keeps fast blinks", () => {
+  for (const fps of [30, 60, 120]) {
+    let position = 0;
+    for (let frame = 0; frame < fps / 10; frame++) position += (1 - position) * trackingResponse(0.7, 1 / fps);
+    assert.ok(Math.abs(position - 0.973) < 1e-9);
+  }
+  assert.ok(trackingResponse(0.95, 1 / 60) > 0.77);
+  assert.equal(trackingResponse(0.7, 0), 0);
 });
 
 test("a failed frame transfer closes its bitmap and releases backpressure", async () => {

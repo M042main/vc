@@ -794,15 +794,11 @@ function fallbackEyeOpenness(points: NonNullable<ReturnType<typeof finiteLandmar
   return MathUtils.clamp((opening / 0.285 - 0.35) / (0.65 - 0.35), 0, 1);
 }
 
-/** Solve a MediaPipe Tasks-style landmark frame with Kalidokit and apply it to a VRM. */
-export function applyVrmTracking(
-  vrm: VRM,
+/** Solve once per camera result, independently of the display refresh rate. */
+export function solveVrmTracking(
   frame: VrmTrackingFrame,
-  rigOptions: VrmRigOptions = {},
-): VrmRigResult {
-  const options = resolveRigOptions(rigOptions);
-  const missing = new Set<VRMHumanBoneNameValue>();
-
+  options: Pick<VrmRigOptions, "enableLegs"> = {},
+) {
   const faceLandmarks = finiteLandmarks(frame.faceLandmarks, 468);
   const poseLandmarks = finiteLandmarks(frame.poseLandmarks, 33);
   const poseWorldLandmarks = finiteLandmarks(frame.poseWorldLandmarks, 33);
@@ -831,7 +827,7 @@ export function applyVrmTracking(
       ? Pose.solve(
           poseWorldLandmarks as Parameters<typeof Pose.solve>[0],
           poseLandmarks as Parameters<typeof Pose.solve>[1],
-          { runtime: "mediapipe", enableLegs: options.enableLegs },
+          { runtime: "mediapipe", enableLegs: options.enableLegs ?? true },
         )
       : undefined;
   const solvedLeftHand = solveHand(leftHandLandmarks, frame.leftHandWorldLandmarks, "Left");
@@ -845,8 +841,20 @@ export function applyVrmTracking(
     };
   }
 
+  return { solvedFace, solvedPose, solvedLeftHand, solvedRightHand, hasIris: (faceLandmarks?.length ?? 0) >= 478 };
+}
+
+/** Advance toward the latest solved target every display frame, without rerunning Kalidokit. */
+export function applySolvedVrmTracking(
+  vrm: VRM,
+  solved: ReturnType<typeof solveVrmTracking>,
+  rigOptions: VrmRigOptions = {},
+): VrmRigResult {
+  const options = resolveRigOptions(rigOptions);
+  const missing = new Set<VRMHumanBoneNameValue>();
+  const { solvedFace, solvedPose, solvedLeftHand, solvedRightHand, hasIris } = solved;
   if (solvedPose) applyPose(vrm, solvedPose, options, missing, { left: Boolean(solvedLeftHand), right: Boolean(solvedRightHand) });
-  if (solvedFace) applyFace(vrm, solvedFace, options, missing, (faceLandmarks?.length ?? 0) >= 478);
+  if (solvedFace) applyFace(vrm, solvedFace, options, missing, hasIris);
   if (solvedLeftHand) applyHand(vrm, "Left", solvedLeftHand, solvedPose, options, missing);
   if (solvedRightHand) applyHand(vrm, "Right", solvedRightHand, solvedPose, options, missing);
 
@@ -857,4 +865,9 @@ export function applyVrmTracking(
     rightHandApplied: Boolean(solvedRightHand),
     missingBones: [...missing],
   };
+}
+
+/** Compatibility entry point for callers that solve and apply in one step. */
+export function applyVrmTracking(vrm: VRM, frame: VrmTrackingFrame, options: VrmRigOptions = {}): VrmRigResult {
+  return applySolvedVrmTracking(vrm, solveVrmTracking(frame, options), options);
 }

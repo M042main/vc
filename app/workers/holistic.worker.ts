@@ -20,6 +20,8 @@ let faceDelegate: "GPU" | "CPU" = "CPU";
 let faceRefinementUnavailable = false;
 let lastFaceRefinementAt = -Infinity;
 let faceRefinementMs = 0;
+let faceInitialization: Promise<void> | null = null;
+let stopped = false;
 
 type MediaPipeModuleFactory = (moduleArg?: unknown) => Promise<unknown>;
 type MediaPipeWorkerGlobal = typeof self & {
@@ -53,6 +55,19 @@ function errorMessage(error: unknown) {
 }
 
 const fileset = { wasmLoaderPath: "", wasmBinaryPath };
+let taskInitialization: Promise<unknown> = Promise.resolve();
+
+function withWasmFactory<T>(create: () => Promise<T>): Promise<T> {
+  // Task construction consumes shared ModuleFactory globals. Optional face
+  // warmup and a simultaneous Holistic CPU recovery must not overwrite them.
+  const pending = taskInitialization.then(async () => {
+    if (stopped) throw new Error("Tracking worker stopped");
+    await prepareWasmModuleFactory();
+    return create();
+  });
+  taskInitialization = pending.catch(() => undefined);
+  return pending;
+}
 
 const commonOptions = {
   runningMode: "VIDEO" as const,
@@ -106,11 +121,10 @@ function disposeLandmarker() {
 }
 
 async function createCpuLandmarker() {
-  await prepareWasmModuleFactory();
-  const cpuLandmarker = await HolisticLandmarker.createFromOptions(fileset, {
+  const cpuLandmarker = await withWasmFactory(() => HolisticLandmarker.createFromOptions(fileset, {
     ...commonOptions,
     baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
-  });
+  }));
 
   landmarker = cpuLandmarker;
   delegate = "CPU";
@@ -143,12 +157,11 @@ async function createLandmarker() {
   let gpuError: unknown;
   if (typeof OffscreenCanvas !== "undefined") {
     try {
-      await prepareWasmModuleFactory();
-      landmarker = await HolisticLandmarker.createFromOptions(fileset, {
+      landmarker = await withWasmFactory(() => HolisticLandmarker.createFromOptions(fileset, {
         ...commonOptions,
         canvas: new OffscreenCanvas(2, 2),
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-      });
+      }));
       delegate = "GPU";
     } catch (error) {
       gpuError = error;
@@ -185,8 +198,7 @@ function disposeFaceRefiner() {
 }
 
 async function createFaceRefiner(requestedDelegate: "GPU" | "CPU") {
-  await prepareWasmModuleFactory();
-  faceRefiner = await FaceLandmarker.createFromOptions(fileset, {
+  const created = await withWasmFactory(() => FaceLandmarker.createFromOptions(fileset, {
     runningMode: "VIDEO",
     numFaces: 1,
     minFaceDetectionConfidence: 0.5,
@@ -196,40 +208,49 @@ async function createFaceRefiner(requestedDelegate: "GPU" | "CPU") {
     outputFacialTransformationMatrixes: false,
     ...(requestedDelegate === "GPU" ? { canvas: new OffscreenCanvas(2, 2) } : {}),
     baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: requestedDelegate },
-  });
+  }));
+  if (stopped) { created.close(); return; }
+  faceRefiner = created;
   faceDelegate = requestedDelegate;
 }
 
-async function refineFaceIfNeeded(result: HolisticLandmarkerResult, bitmap: ImageBitmap, timestamp: number) {
+function warmFaceRefiner(requestedDelegate: "GPU" | "CPU") {
+  if (faceInitialization || stopped || faceRefinementUnavailable) return;
+  // Model download/compilation must not hold the first body/hand result hostage.
+  // Until ready, Holistic's current 468-point eyes/mouth keep driving the avatar.
+  faceInitialization = (async () => {
+    try {
+      try { await createFaceRefiner(requestedDelegate); }
+      catch (error) {
+        if (requestedDelegate !== "GPU" || stopped) throw error;
+        await createFaceRefiner("CPU");
+      }
+    } catch {
+      if (stopped) return;
+      disposeFaceRefiner();
+      faceRefinementUnavailable = true;
+      reply({ type: "NOTICE", message: "눈동자 정밀 모델을 불러오지 못했어요. 얼굴·몸·손 트래킹은 계속됩니다. 카메라를 다시 시작하면 재시도해요." });
+    } finally {
+      faceInitialization = null;
+    }
+  })();
+}
+
+function refineFaceIfNeeded(result: HolisticLandmarkerResult, bitmap: ImageBitmap, timestamp: number) {
   const count = result.faceLandmarks?.[0]?.length ?? 0;
   // Some Holistic graphs return only the 468-point face mesh. Iris tracking
   // needs the ten additional, genuinely detected points. Never synthesize
   // them, and never run a second detector when Holistic already provides 478.
   if (count < 468 || count >= 478 || faceRefinementUnavailable) return;
+  if (!faceRefiner) { warmFaceRefiner(delegate); return; }
   // A second face graph must not halve body/hand responsiveness. On CPU or
   // slower GPUs refine irises at 15 Hz; keep THIS frame's 468 eyelid/mouth
   // landmarks on intervening frames (never reuse stale blinks or fake irises).
   const interval = faceRefiner && (faceDelegate === "CPU" || faceRefinementMs > 12) ? 1000 / 15 : 0;
   if (timestamp - lastFaceRefinementAt < interval - 1) return;
   try {
-    if (!faceRefiner) {
-      try {
-        await createFaceRefiner(delegate);
-      } catch (error) {
-        if (delegate !== "GPU") throw error;
-        await createFaceRefiner("CPU");
-      }
-    }
-    let refined;
     const startedAt = performance.now();
-    try {
-      refined = faceRefiner!.detectForVideo(bitmap, timestamp);
-    } catch (error) {
-      if (faceDelegate !== "GPU") throw error;
-      disposeFaceRefiner();
-      await createFaceRefiner("CPU");
-      refined = faceRefiner!.detectForVideo(bitmap, timestamp);
-    }
+    const refined = faceRefiner.detectForVideo(bitmap, timestamp);
     lastFaceRefinementAt = timestamp;
     faceRefinementMs = performance.now() - startedAt;
     if ((refined.faceLandmarks?.[0]?.length ?? 0) >= 478) {
@@ -237,6 +258,7 @@ async function refineFaceIfNeeded(result: HolisticLandmarkerResult, bitmap: Imag
     }
   } catch {
     disposeFaceRefiner();
+    if (faceDelegate === "GPU") { warmFaceRefiner("CPU"); return; }
     faceRefinementUnavailable = true;
     reply({ type: "NOTICE", message: "눈동자 정밀 모델을 불러오지 못했어요. 얼굴·몸·손 트래킹은 계속됩니다. 카메라를 다시 시작하면 재시도해요." });
   }
@@ -259,6 +281,7 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
   }
 
   if (message.type === "STOP") {
+    stopped = true;
     disposeLandmarker();
     disposeFaceRefiner();
     self.close();
@@ -303,7 +326,7 @@ self.onmessage = async (event: MessageEvent<WorkerInput>) => {
       }
     }
 
-    await refineFaceIfNeeded(result, message.bitmap, message.timestamp);
+    refineFaceIfNeeded(result, message.bitmap, message.timestamp);
     reply({
       type: "RESULT",
       result,

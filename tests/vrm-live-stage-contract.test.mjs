@@ -352,7 +352,7 @@ test("lets live VRM tracking lock the legs and suppresses lower-body bone update
 
   const applyTracking = blockFromPattern(
     studioSource,
-    /applyVrmTracking\s*\(\s*vrm\s*,/,
+    /applySolvedVrmTracking\s*\(\s*vrmRef\.current\s*,/,
     1_600,
     "VRM tracking application",
   );

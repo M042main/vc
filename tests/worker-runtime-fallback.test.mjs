@@ -15,7 +15,7 @@ test("keeps the unused face-blendshape WebGL subgraph disabled", async () => {
   assert.doesNotMatch(workerSource, /outputFaceBlendshapes\s*:\s*true/);
 });
 
-async function loadWorkerHarness({ gpuCloseThrows = false, faceCount = 0, faceFailure = false } = {}) {
+async function loadWorkerHarness({ gpuCloseThrows = false, faceCount = 0, faceFailure = false, deferredFace = false, gpuFailureAt = 0 } = {}) {
   const workerSource = await readFile(workerUrl, "utf8");
   const harnessSource = workerSource
     .replace(
@@ -57,10 +57,13 @@ async function loadWorkerHarness({ gpuCloseThrows = false, faceCount = 0, faceFa
   const faceDetectCalls = [];
   let faceCreateCalls = 0;
   let faceCloseCalls = 0;
+  let releaseFace;
+  const faceGate = deferredFace ? new Promise((resolve) => { releaseFace = resolve; }) : null;
 
   const gpuLandmarker = {
     detectForVideo(bitmap, timestamp) {
       gpuDetectCalls.push({ bitmap, timestamp });
+      if (gpuDetectCalls.length <= gpuFailureAt) return structuredClone(cpuResult);
       throw new Error(runtimeGpuError);
     },
     close() {
@@ -114,6 +117,7 @@ async function loadWorkerHarness({ gpuCloseThrows = false, faceCount = 0, faceFa
           assert.equal(options.numFaces, 1);
           assert.equal(options.outputFaceBlendshapes, false);
           if (faceFailure) throw new Error("Face model unavailable");
+          if (faceGate) await faceGate;
           return {
             detectForVideo(bitmap, timestamp) {
               faceDetectCalls.push({ bitmap, timestamp });
@@ -167,6 +171,8 @@ async function loadWorkerHarness({ gpuCloseThrows = false, faceCount = 0, faceFa
       return moduleFactoryLoads;
     },
     self,
+    releaseFace: () => releaseFace?.(),
+    settle: () => new Promise((resolve) => setImmediate(resolve)),
   };
 }
 
@@ -174,12 +180,15 @@ test("refines an iris-less face using the same bitmap and timestamp, and release
   const harness = await loadWorkerHarness({ faceCount: 468 });
   await harness.self.onmessage({ data: { type: "INIT" } });
   await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 42 } });
-  const result = harness.messages.find((message) => message.type === "RESULT");
+  assert.equal(harness.messages.find((message) => message.type === "RESULT").result.faceLandmarks[0].length, 468);
+  await harness.settle();
+  await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 80 } });
+  const result = harness.messages.filter((message) => message.type === "RESULT").at(-1);
   assert.equal(result.result.faceLandmarks[0].length, 478);
   assert.equal(result.result.faceLandmarks[0][468].x, 0.4, "iris comes from the face detector, not synthetic points");
   assert.equal(harness.faceDetectCalls[0].bitmap, harness.bitmap);
-  assert.equal(harness.faceDetectCalls[0].timestamp, 42);
-  assert.equal(harness.bitmapCloseCalls, 1);
+  assert.equal(harness.faceDetectCalls[0].timestamp, 80);
+  assert.equal(harness.bitmapCloseCalls, 2);
   await harness.self.onmessage({ data: { type: "STOP" } });
   assert.equal(harness.faceCloseCalls, 1);
 });
@@ -195,6 +204,10 @@ test("does no redundant face inference when Holistic already has iris points", a
 test("CPU iris refinement is bounded while current eyelid and hand frames continue", async () => {
   const harness = await loadWorkerHarness({ faceCount: 468 });
   await harness.self.onmessage({ data: { type: "INIT" } });
+  await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 1 } });
+  await harness.settle();
+  harness.messages.length = 0;
+  harness.cpuDetectCalls.length = 0;
   for (const timestamp of [42, 75, 109, 142]) {
     harness.cpuResult.faceLandmarks[0][159].y = timestamp / 1000;
     await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp } });
@@ -205,7 +218,7 @@ test("CPU iris refinement is bounded while current eyelid and hand frames contin
   assert.deepEqual(frames.map((frame) => frame.result.faceLandmarks[0].length), [478, 468, 478, 468]);
   assert.equal(frames[1].result.faceLandmarks[0][159].y, 0.075, "skipped refinement must still carry this frame's blink");
   assert.equal(frames[3].result.faceLandmarks[0][159].y, 0.142);
-  assert.equal(harness.bitmapCloseCalls, 4);
+  assert.equal(harness.bitmapCloseCalls, 5);
 });
 
 test("optional iris model failure preserves body/face tracking and does not retry on every frame", async () => {
@@ -213,9 +226,42 @@ test("optional iris model failure preserves body/face tracking and does not retr
   await harness.self.onmessage({ data: { type: "INIT" } });
   for (const timestamp of [42, 84]) {
     await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp } });
+    await harness.settle();
   }
   assert.equal(harness.faceCreateCalls, 1);
   assert.equal(harness.messages.filter((message) => message.type === "NOTICE").length, 1);
+  assert.equal(harness.messages.filter((message) => message.type === "RESULT").length, 2);
+  assert.equal(harness.messages.some((message) => message.type === "ERROR"), false);
+});
+
+test("body and blinks continue during optional face-model loading; stop disposes late initialization", async () => {
+  const harness = await loadWorkerHarness({ faceCount: 468, deferredFace: true });
+  await harness.self.onmessage({ data: { type: "INIT" } });
+  for (const timestamp of [1, 34, 67]) {
+    await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp } });
+    await harness.settle();
+  }
+  assert.equal(harness.messages.filter((message) => message.type === "RESULT").length, 3);
+  assert.equal(harness.faceCreateCalls, 1, "one initialization, not one per frame");
+  assert.equal(harness.bitmapCloseCalls, 3);
+  await harness.self.onmessage({ data: { type: "STOP" } });
+  harness.releaseFace();
+  await harness.settle();
+  assert.equal(harness.faceCloseCalls, 1, "do not leak a task resolved after stop");
+});
+
+test("face warmup and a later CPU recovery serialize their shared WASM factory", async () => {
+  const harness = await loadWorkerHarness({ faceCount: 468, deferredFace: true, gpuFailureAt: 1 });
+  await harness.self.onmessage({ data: { type: "INIT" } });
+  await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 1 } });
+  await harness.settle();
+  assert.equal(harness.faceCreateCalls, 1);
+  const recovering = harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 34 } });
+  await harness.settle();
+  assert.deepEqual(harness.createDelegates, ["GPU"], "CPU must not steal the face task's factory mid-initialization");
+  harness.releaseFace();
+  await recovering;
+  assert.deepEqual(harness.createDelegates, ["GPU", "CPU"]);
   assert.equal(harness.messages.filter((message) => message.type === "RESULT").length, 2);
   assert.equal(harness.messages.some((message) => message.type === "ERROR"), false);
 });

@@ -13,8 +13,8 @@ export class TrackingInputBudget {
   observe(inferenceMs: number) {
     // Ignore initialization/fallback stalls and invalid timing samples.
     if (!Number.isFinite(inferenceMs) || inferenceMs <= 0 || inferenceMs > 500) return;
-    this.slowFrames = inferenceMs > 45 ? this.slowFrames + 1 : 0;
-    this.fastFrames = inferenceMs < 24 ? this.fastFrames + 1 : 0;
+    this.slowFrames = inferenceMs > 32.5 ? this.slowFrames + 1 : 0;
+    this.fastFrames = inferenceMs < 20 ? this.fastFrames + 1 : 0;
     if (!this.reduced && this.slowFrames >= 8) {
       this.reduced = true;
       this.fastFrames = 0;
@@ -24,6 +24,12 @@ export class TrackingInputBudget {
       this.slowFrames = 0;
     }
   }
+}
+
+/** Response specified at 30 Hz, independent of the actual display frame rate. */
+export function trackingResponse(amount: number, deltaSeconds: number) {
+  const delta = Number.isFinite(deltaSeconds) ? Math.min(0.1, Math.max(0, deltaSeconds)) : 1 / 60;
+  return 1 - Math.pow(1 - Math.min(1, Math.max(0, amount)), delta * 30);
 }
 
 /** Preserve aspect ratio, and never upscale a low-resolution camera feed. */

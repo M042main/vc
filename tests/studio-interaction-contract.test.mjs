@@ -139,15 +139,17 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
   assert.equal(cameraHeight, 480);
   assert.ok(cameraMaxFps <= 30, `camera FPS must be <= 30; got ${cameraMaxFps}`);
   assert.ok(pixelRatioCap <= 1.5, `renderer DPR cap must be <= 1.5; got ${pixelRatioCap}`);
-  assert.match(studioSource, /video\.currentTime === lastVideoTimeRef\.current/);
+  assert.match(studioSource, /videoTime === lastVideoTimeRef\.current/);
   assert.match(studioSource, /trackingInputDimensions\(video, trackingInputBudgetRef\.current\.reduced\)/);
   assert.match(studioSource, /requestVideoFrameCallback\(tick\)/);
   assert.match(studioSource, /cancelVideoFrameCallback\(trackingVideoCallbackRef\.current\)/);
   assert.match(
     studioSource,
-    /frameInFlightRef\.current[\s\S]{0,180}timestamp\s*-\s*lastFrameRef\.current/,
+    /frameInFlightRef\.current[\s\S]{0,220}timestamp\s*-\s*lastFrameRef\.current/,
     "the scheduler must drop frames while one inference is in flight",
   );
+  assert.match(studioSource, /pumpTrackingFrameRef\.current\(\)/);
+  assert.match(studioSource, /metadata\?\.mediaTime/);
   assert.match(
     studioSource,
     /postMessage\([\s\S]{0,180}\[bitmap\]/,

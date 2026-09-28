@@ -81,6 +81,16 @@ function faceLandmarks() {
   }));
 }
 
+test("solves once and advances the same VRM target across display frames without rerunning Kalidokit", async () => {
+  const calls = [];
+  const { solveVrmTracking, applySolvedVrmTracking } = await loadRigModule(calls);
+  const target = solveVrmTracking({ faceLandmarks: faceLandmarks(), imageSize: { width: 640, height: 480 } });
+  const snapshot = structuredClone(target);
+  for (let i = 0; i < 6; i++) applySolvedVrmTracking(mockVrm(), target, { deltaSeconds: 1 / 60 });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(target, snapshot, "display interpolation must not mutate the solver result");
+});
+
 test("passes exact inference dimensions to Kalidokit without mutating caller landmarks", async () => {
   const faceCalls = [];
   const { applyVrmTracking } = await loadRigModule(faceCalls);

@@ -20,6 +20,7 @@ import {
   nextStageZoom,
   stepStageZoom,
 } from "../lib/stageZoom";
+import { trackingResponse } from "../lib/trackingPerformance";
 
 export type PaperDollLandmark = {
   x: number;
@@ -71,7 +72,9 @@ export type PaperDollStageHandle = {
   applyTracking: (
     poseLandmarks?: readonly PaperDollLandmark[],
     faceLandmarks?: readonly PaperDollLandmark[],
+    imageSize?: { width: number; height: number },
   ) => void;
+  stopTracking: () => void;
   playPreset: (preset: PaperDollMotionPresetId) => void;
   pauseAnimation: () => void;
   stopAnimation: () => void;
@@ -546,18 +549,19 @@ function poseFromLandmarks(landmarks?: readonly PaperDollLandmark[]): DollPose {
   };
 }
 
-function blendPose(current: DollPose, next: DollPose): DollPose {
+function blendPose(current: DollPose, next: DollPose, deltaSeconds = 1 / 30): DollPose {
+  const amount = trackingResponse(0.7, deltaSeconds);
   const boneAngles = { ...current.boneAngles };
   for (const bone of Object.keys(boneAngles) as BoneName[]) {
-    boneAngles[bone] = smoothAngle(current.boneAngles[bone], next.boneAngles[bone], 0.42);
+    boneAngles[bone] = smoothAngle(current.boneAngles[bone], next.boneAngles[bone], amount);
   }
 
   return {
-    rotation: smoothAngle(current.rotation, next.rotation, 0.3),
-    scale: current.scale * 0.72 + next.scale * 0.28,
-    x: current.x * 0.7 + next.x * 0.3,
-    y: current.y * 0.7 + next.y * 0.3,
-    headRotation: smoothAngle(current.headRotation, next.headRotation, 0.34),
+    rotation: smoothAngle(current.rotation, next.rotation, amount),
+    scale: current.scale + (next.scale - current.scale) * amount,
+    x: current.x + (next.x - current.x) * amount,
+    y: current.y + (next.y - current.y) * amount,
+    headRotation: smoothAngle(current.headRotation, next.headRotation, amount),
     boneAngles,
   };
 }
@@ -575,8 +579,15 @@ function landmarkDistance(
 
 function expressionFromFaceLandmarks(
   landmarks?: readonly PaperDollLandmark[],
+  imageSize?: { width: number; height: number },
 ): DollExpression {
   if (!landmarks || landmarks.length < 455) return { ...NEUTRAL_EXPRESSION };
+  // Eyelid/lip ratios must use square pixel units, not stretched webcam UVs.
+  if (imageSize && Number.isFinite(imageSize.width) && Number.isFinite(imageSize.height) &&
+      imageSize.width > 0 && imageSize.height > 0) {
+    const aspect = imageSize.height / imageSize.width;
+    landmarks = landmarks.map((point) => ({ ...point, y: point.y * aspect }));
+  }
 
   const leftEyeWidth = landmarkDistance(landmarks, 33, 133);
   const rightEyeWidth = landmarkDistance(landmarks, 362, 263);
@@ -760,13 +771,14 @@ function expressionFromMotion(expression: PaperDollExpression): DollExpression {
 function blendExpression(
   current: DollExpression,
   next: DollExpression,
-  amount = 0.38,
+  amount = 0.75,
+  blinkAmount = amount,
 ): DollExpression {
   return {
-    blink: current.blink + (next.blink - current.blink) * amount,
-    blinkLeft: current.blinkLeft + (next.blinkLeft - current.blinkLeft) * amount,
+    blink: current.blink + (next.blink - current.blink) * blinkAmount,
+    blinkLeft: current.blinkLeft + (next.blinkLeft - current.blinkLeft) * blinkAmount,
     blinkRight:
-      current.blinkRight + (next.blinkRight - current.blinkRight) * amount,
+      current.blinkRight + (next.blinkRight - current.blinkRight) * blinkAmount,
     mouthOpen: current.mouthOpen + (next.mouthOpen - current.mouthOpen) * amount,
     jawOpen: current.jawOpen + (next.jawOpen - current.jawOpen) * amount,
     smile: current.smile + (next.smile - current.smile) * amount,
@@ -1500,42 +1512,54 @@ function meshAxis(
   return [...points].sort((left, right) => left - right);
 }
 
+type FaceMesh = { vertices: Point[]; triangles: [number, number, number][] };
+const faceMeshCache = new WeakMap<RigSprite, FaceMesh>();
+
+function faceMeshFor(sprite: RigSprite): FaceMesh {
+  const cached = faceMeshCache.get(sprite);
+  if (cached) return cached;
+  const columns = meshAxis(sprite.x, sprite.canvas.width, FACE_MESH_X);
+  const rows = meshAxis(sprite.y, sprite.canvas.height, FACE_MESH_Y);
+  const pixels = sprite.canvas.getContext("2d")?.getImageData(0, 0, sprite.canvas.width, sprite.canvas.height).data;
+  const mesh: FaceMesh = { vertices: [], triangles: [] };
+  const indices = new Map<string, number>();
+  const vertex = (column: number, row: number) => {
+    const key = `${column}:${row}`;
+    const existing = indices.get(key);
+    if (existing !== undefined) return existing;
+    const index = mesh.vertices.length;
+    mesh.vertices.push({ x: columns[column], y: rows[row] });
+    indices.set(key, index);
+    return index;
+  };
+  for (let row = 0; row < rows.length - 1; row += 1) {
+    for (let column = 0; column < columns.length - 1; column += 1) {
+      if (pixels && !cellHasOpaquePixel(pixels, sprite.canvas.width,
+        columns[column], rows[row], columns[column + 1], rows[row + 1])) continue;
+      const a = vertex(column, row), b = vertex(column + 1, row);
+      const c = vertex(column + 1, row + 1), d = vertex(column, row + 1);
+      mesh.triangles.push([a, b, c], [a, c, d]);
+    }
+  }
+  faceMeshCache.set(sprite, mesh);
+  return mesh;
+}
+
 function drawFacialFeatures(
   context: CanvasRenderingContext2D,
   sprite: RigSprite,
   expression: DollExpression,
 ) {
-  const columns = meshAxis(sprite.x, sprite.canvas.width, FACE_MESH_X);
-  const rows = meshAxis(sprite.y, sprite.canvas.height, FACE_MESH_Y);
-  const warp = (local: Point) =>
-    warpFacialPoint(
-      { x: sprite.x + local.x, y: sprite.y + local.y },
-      expression,
-    );
-
-  for (let row = 0; row < rows.length - 1; row += 1) {
-    for (let column = 0; column < columns.length - 1; column += 1) {
-      const left = columns[column];
-      const right = columns[column + 1];
-      const top = rows[row];
-      const bottom = rows[row + 1];
-      const a = { x: left, y: top };
-      const b = { x: right, y: top };
-      const c = { x: right, y: bottom };
-      const d = { x: left, y: bottom };
-      drawTexturedTriangle(
-        context,
-        sprite.canvas,
-        [a, b, c],
-        [warp(a), warp(b), warp(c)],
-      );
-      drawTexturedTriangle(
-        context,
-        sprite.canvas,
-        [a, c, d],
-        [warp(a), warp(c), warp(d)],
-      );
-    }
+  // Topology and alpha occupancy are immutable for this artwork. Shared
+  // vertices are warped once, rather than up to six times per display frame.
+  const mesh = faceMeshFor(sprite);
+  const warped = mesh.vertices.map((local) => warpFacialPoint(
+    { x: sprite.x + local.x, y: sprite.y + local.y }, expression,
+  ));
+  for (const [a, b, c] of mesh.triangles) {
+    drawTexturedTriangle(context, sprite.canvas,
+      [mesh.vertices[a], mesh.vertices[b], mesh.vertices[c]],
+      [warped[a], warped[b], warped[c]]);
   }
 }
 
@@ -1655,6 +1679,10 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
     const spritesRef = useRef<DollSprites | null>(null);
     const poseRef = useRef<DollPose>(createRestPose());
     const expressionRef = useRef<DollExpression>({ ...NEUTRAL_EXPRESSION });
+    const trackingTargetRef = useRef<{ pose: DollPose; expression: DollExpression; receivedAt: number } | null>(null);
+    const trackingRafRef = useRef<number | null>(null);
+    const lastTrackingDrawRef = useRef(0);
+    const lastIrisAtRef = useRef(-Infinity);
     const motionPlayerRef = useRef<PaperDollMotionPlayer | null>(null);
     const lockedLegWorldAnglesRef = useRef<Partial<Record<BoneName, number>> | null>(
       null,
@@ -1773,6 +1801,41 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
       drawTo(canvas, width, height, "medium");
     }, [drawTo]);
 
+    const stopTracking = useCallback(() => {
+      trackingTargetRef.current = null;
+      lastIrisAtRef.current = -Infinity;
+      if (trackingRafRef.current !== null) cancelAnimationFrame(trackingRafRef.current);
+      trackingRafRef.current = null;
+    }, []);
+
+    const scheduleTrackingDraw = useCallback(() => {
+      if (trackingRafRef.current !== null) return;
+      lastTrackingDrawRef.current = performance.now() - 1000 / 60;
+      const tick = (now: number) => {
+        trackingRafRef.current = null;
+        const target = trackingTargetRef.current;
+        // A lost camera must not leave an animation loop running forever.
+        if (!target || now - target.receivedAt > 180) return;
+        const delta = Math.max(0, (now - lastTrackingDrawRef.current) / 1000);
+        if (delta >= 1 / 60 - 0.001) {
+          lastTrackingDrawRef.current = now;
+          poseRef.current = blendPose(poseRef.current, target.pose, delta);
+          expressionRef.current = blendExpression(expressionRef.current, target.expression,
+            trackingResponse(0.75, delta), trackingResponse(0.95, delta));
+          // Reapply world-space leg locking after interpolation too.
+          const locked = lockedLegWorldAnglesRef.current;
+          if (locked) for (const bone of LEG_BONES) {
+            if (locked[bone] !== undefined) poseRef.current.boneAngles[bone] = wrapAngle(locked[bone]! - poseRef.current.rotation);
+          }
+          redraw();
+        }
+        trackingRafRef.current = requestAnimationFrame(tick);
+      };
+      trackingRafRef.current = requestAnimationFrame(tick);
+    }, [redraw]);
+
+    useEffect(() => stopTracking, [stopTracking, redraw, artwork]);
+
     useEffect(() => {
       const image = new Image();
       image.decoding = "async";
@@ -1824,6 +1887,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
       ref,
       () => ({
         applyPose(landmarks) {
+          stopTracking();
           motionPlayerRef.current?.pause();
           const nextPose = poseFromLandmarks(landmarks);
           const lockedAngles = lockedLegWorldAnglesRef.current;
@@ -1838,7 +1902,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           poseRef.current = blendPose(poseRef.current, nextPose);
           redraw();
         },
-        applyTracking(poseLandmarks, faceLandmarks) {
+        applyTracking(poseLandmarks, faceLandmarks, imageSize) {
           motionPlayerRef.current?.pause();
           const nextPose = poseFromLandmarks(poseLandmarks);
           const lockedAngles = lockedLegWorldAnglesRef.current;
@@ -1850,14 +1914,22 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
               }
             }
           }
-          poseRef.current = blendPose(poseRef.current, nextPose);
-          expressionRef.current = blendExpression(
-            expressionRef.current,
-            expressionFromFaceLandmarks(faceLandmarks),
-          );
-          redraw();
+          const now = performance.now();
+          const expression = expressionFromFaceLandmarks(faceLandmarks, imageSize);
+          if ((faceLandmarks?.length ?? 0) >= 478) lastIrisAtRef.current = now;
+          else if ((faceLandmarks?.length ?? 0) >= 468 && now - lastIrisAtRef.current < 200) {
+            // Hold only recent gaze, never old eyelids or mouth landmarks.
+            const previous = trackingTargetRef.current?.expression ?? expressionRef.current;
+            for (const key of ["lookX", "lookY", "lookXLeft", "lookYLeft", "lookXRight", "lookYRight"] as const) {
+              expression[key] = previous[key];
+            }
+          }
+          trackingTargetRef.current = { pose: nextPose, expression, receivedAt: now };
+          scheduleTrackingDraw();
         },
+        stopTracking,
         playPreset(preset) {
+          stopTracking();
           const player = motionPlayerRef.current;
           if (!player) return;
           player.load(getPaperDollMotionPreset(preset), {
@@ -1867,10 +1939,12 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           requestAnimationFrame(() => redraw());
         },
         pauseAnimation() {
+          stopTracking();
           motionPlayerRef.current?.pause();
           redraw();
         },
         stopAnimation() {
+          stopTracking();
           motionPlayerRef.current?.stop();
           poseRef.current = createRestPose();
           expressionRef.current = { ...NEUTRAL_EXPRESSION };
@@ -1934,6 +2008,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           return canvasToBlob(canvas);
         },
         resetPose() {
+          stopTracking();
           motionPlayerRef.current?.pause();
           poseRef.current = createRestPose();
           expressionRef.current = { ...NEUTRAL_EXPRESSION };
@@ -1958,7 +2033,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
           redraw();
         },
       }),
-      [drawTo, redraw],
+      [drawTo, redraw, scheduleTrackingDraw, stopTracking],
     );
 
     const beginPan = (event: ReactPointerEvent<HTMLCanvasElement>) => {

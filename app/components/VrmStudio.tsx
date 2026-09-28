@@ -35,7 +35,7 @@ import type { HolisticLandmarkerResult } from "@mediapipe/tasks-vision";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { VRM } from "@pixiv/three-vrm";
-import { applyVrmTracking, disposeVrm, loadVrm } from "../lib/vrmRig";
+import { applySolvedVrmTracking, solveVrmTracking, disposeVrm, loadVrm } from "../lib/vrmRig";
 import {
   captureVrmFullBodyPng,
   downloadBlob,
@@ -437,6 +437,8 @@ export function VrmStudio({
   const trackingVideoCallbackRef = useRef<number | null>(null);
   const trackingRunningRef = useRef(false);
   const trackingSessionRef = useRef(0);
+  const pumpTrackingFrameRef = useRef<() => void>(() => undefined);
+  const solvedTrackingRef = useRef<ReturnType<typeof solveVrmTracking> | null>(null);
   const paperDollActiveRef = useRef(false);
   const legsLockedRef = useRef(false);
   const stageVisibleRef = useRef(true);
@@ -962,6 +964,16 @@ export function VrmStudio({
       const elapsed = clock.elapsedTime;
 
       if (vrmRef.current) {
+        if (trackingRunningRef.current && solvedTrackingRef.current &&
+            performance.now() - lastTrackingResultRef.current < 180) {
+          applySolvedVrmTracking(vrmRef.current, solvedTrackingRef.current, {
+            deltaSeconds: delta,
+            enableLegs: !legsLockedRef.current,
+            applyHipsPosition: !legsLockedRef.current,
+            applyHipsRotation: !legsLockedRef.current,
+          });
+          if (legsLockedRef.current) vrmLegLockRef.current?.enforce();
+        }
         vrmRef.current.update(delta);
       } else {
         mannequin.rotation.y = Math.sin(elapsed * 0.45) * 0.18;
@@ -1079,6 +1091,9 @@ export function VrmStudio({
   const stopTracking = useCallback(() => {
     trackingSessionRef.current += 1;
     trackingRunningRef.current = false;
+    pumpTrackingFrameRef.current = () => undefined;
+    solvedTrackingRef.current = null;
+    paperDollRef.current?.stopTracking();
     frameInFlightRef.current = false;
     lastVideoTimeRef.current = -1;
     lastTrackingResultRef.current = 0;
@@ -1560,6 +1575,7 @@ export function VrmStudio({
 
   const runTrackingFrames = useCallback(() => {
     const session = trackingSessionRef.current;
+    let presentedVideoTime = -1;
     const scheduleFrame = () => {
       const video = videoRef.current;
       if (typeof video?.requestVideoFrameCallback === "function") {
@@ -1568,27 +1584,34 @@ export function VrmStudio({
         trackingRafRef.current = requestAnimationFrame(tick);
       }
     };
-    const tick = async (timestamp: number) => {
+    const tick = (_now: number, metadata?: VideoFrameCallbackMetadata) => {
       if (!trackingRunningRef.current || trackingSessionRef.current !== session) return;
+      presentedVideoTime = metadata?.mediaTime ?? videoRef.current?.currentTime ?? -1;
       scheduleFrame();
-
+      void sendLatestFrame();
+    };
+    const sendLatestFrame = async () => {
+      if (!trackingRunningRef.current || trackingSessionRef.current !== session) return;
+      const timestamp = performance.now();
       const video = videoRef.current;
       const worker = workerRef.current;
+      const usesVideoCallback = typeof video?.requestVideoFrameCallback === "function";
+      const videoTime = usesVideoCallback ? presentedVideoTime : video?.currentTime;
       if (
         !video ||
         !worker ||
         (!stageVisibleRef.current && !pipActiveRef.current) ||
         video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
         frameInFlightRef.current ||
-        video.currentTime === lastVideoTimeRef.current ||
-        timestamp - lastFrameRef.current < TRACKING_FRAME_INTERVAL_MS - 1
+        videoTime === lastVideoTimeRef.current ||
+        (!usesVideoCallback && timestamp - lastFrameRef.current < TRACKING_FRAME_INTERVAL_MS - 1)
       ) {
         return;
       }
 
       frameInFlightRef.current = true;
       lastFrameRef.current = timestamp;
-      lastVideoTimeRef.current = video.currentTime;
+      lastVideoTimeRef.current = videoTime ?? -1;
       let bitmap: ImageBitmap | null = null;
       try {
         const inputSize = trackingInputDimensions(video, trackingInputBudgetRef.current.reduced);
@@ -1612,6 +1635,9 @@ export function VrmStudio({
       }
     };
 
+    // The result callback can consume a frame that arrived while the worker
+    // was busy. Waiting for ANOTHER video callback quantizes 34 ms to 66 ms.
+    pumpTrackingFrameRef.current = () => { void sendLatestFrame(); };
     scheduleFrame();
   }, []);
 
@@ -1688,6 +1714,7 @@ export function VrmStudio({
           lastFrameRef.current = -Infinity;
           lastVideoTimeRef.current = -1;
           lastTrackingResultRef.current = 0;
+          solvedTrackingRef.current = null;
           setTrackingState("running");
           showToast("카메라 트래킹을 시작했어요.");
           runTrackingFrames();
@@ -1716,12 +1743,12 @@ export function VrmStudio({
         }
 
         frameInFlightRef.current = false;
-        trackingInputBudgetRef.current.observe(message.inferenceMs);
         const receivedAt = performance.now();
-        const deltaSeconds = lastTrackingResultRef.current
-          ? Math.min((receivedAt - lastTrackingResultRef.current) / 1000, 0.1)
-          : 1 / 30;
+        trackingInputBudgetRef.current.observe(Math.max(message.inferenceMs, receivedAt - lastFrameRef.current));
         lastTrackingResultRef.current = receivedAt;
+        // Dispatch before main-thread drawing/solving; at most one bitmap is
+        // in flight, and only the latest camera image is ever captured.
+        pumpTrackingFrameRef.current();
         const result = message.result;
         trackingOverlayRef.current?.draw({
           poseLandmarks: result.poseLandmarks?.[0],
@@ -1734,9 +1761,10 @@ export function VrmStudio({
           paperDollRef.current?.applyTracking(
             result.poseLandmarks?.[0],
             result.faceLandmarks?.[0],
+            message.imageSize,
           );
         } else if (vrm) {
-          applyVrmTracking(vrm, {
+          solvedTrackingRef.current = solveVrmTracking({
             faceLandmarks: result.faceLandmarks?.[0],
             poseLandmarks: result.poseLandmarks?.[0],
             poseWorldLandmarks: result.poseWorldLandmarks?.[0],
@@ -1748,12 +1776,8 @@ export function VrmStudio({
             rightHandWorldLandmarks: result.leftHandWorldLandmarks?.[0],
             imageSize: message.imageSize,
           }, {
-            deltaSeconds,
             enableLegs: !legsLockedRef.current,
-            applyHipsPosition: !legsLockedRef.current,
-            applyHipsRotation: !legsLockedRef.current,
           });
-          if (legsLockedRef.current) vrmLegLockRef.current?.enforce();
         }
       };
 
