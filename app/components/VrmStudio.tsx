@@ -41,6 +41,7 @@ import {
   downloadBlob,
 } from "../lib/vrmCapture";
 import { createHolisticTrackingWorker } from "../lib/holisticWorker";
+import { fitTrackingInput, TrackingInputBudget } from "../lib/trackingPerformance";
 import {
   MAX_PERSISTED_VRM_BYTES,
   MAX_STAGE_BACKGROUND_BYTES,
@@ -109,27 +110,18 @@ const HEX_STAGE_COLOR = /^#[0-9a-f]{6}$/i;
 type StageColor = string;
 const MAX_VRM_SIZE = MAX_PERSISTED_VRM_BYTES;
 const MAX_STAGE_BACKGROUND_DIMENSION = 8192;
-const TRACKING_INPUT_MAX_WIDTH = 960;
-const TRACKING_INPUT_MAX_HEIGHT = 720;
+const TRACKING_INPUT_MAX_WIDTH = 640;
+const TRACKING_INPUT_MAX_HEIGHT = 480;
 const TRACKING_FRAME_INTERVAL_MS = 1000 / 30;
 const DEFAULT_VRM_URL = "/default-character.vrm";
 const DEFAULT_VRM_FILE_NAME = "기본 캐릭터.vrm";
 
-function trackingInputDimensions(aspectRatio: number, cpu = false) {
-  const aspect =
-    Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 16 / 9;
-  const maxWidth = cpu ? 640 : TRACKING_INPUT_MAX_WIDTH;
-  const maxHeight = cpu ? 480 : TRACKING_INPUT_MAX_HEIGHT;
-  if (aspect >= maxWidth / maxHeight) {
-    return {
-      width: maxWidth,
-      height: Math.max(1, Math.round(maxWidth / aspect)),
-    };
-  }
-  return {
-    width: Math.max(1, Math.round(maxHeight * aspect)),
-    height: maxHeight,
-  };
+function trackingInputDimensions(video: HTMLVideoElement, reduced: boolean) {
+  return fitTrackingInput(
+    video.videoWidth, video.videoHeight,
+    reduced ? 480 : TRACKING_INPUT_MAX_WIDTH,
+    reduced ? 360 : TRACKING_INPUT_MAX_HEIGHT,
+  );
 }
 
 function createMannequin() {
@@ -442,6 +434,7 @@ export function VrmStudio({
   const vrmMotionPlayerRef = useRef<VrmMotionPlayer | null>(null);
   const vrmLegLockRef = useRef<VrmLegRotationLock | null>(null);
   const trackingRafRef = useRef<number | null>(null);
+  const trackingVideoCallbackRef = useRef<number | null>(null);
   const trackingRunningRef = useRef(false);
   const trackingSessionRef = useRef(0);
   const paperDollActiveRef = useRef(false);
@@ -468,7 +461,7 @@ export function VrmStudio({
   const lastFrameRef = useRef(0);
   const lastVideoTimeRef = useRef(-1);
   const lastTrackingResultRef = useRef(0);
-  const trackingCpuRef = useRef(false);
+  const trackingInputBudgetRef = useRef(new TrackingInputBudget());
   const cameraAspectRatioRef = useRef(16 / 9);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captureBusyRef = useRef(false);
@@ -1089,6 +1082,11 @@ export function VrmStudio({
     frameInFlightRef.current = false;
     lastVideoTimeRef.current = -1;
     lastTrackingResultRef.current = 0;
+    trackingInputBudgetRef.current.reset();
+    if (trackingVideoCallbackRef.current !== null) {
+      videoRef.current?.cancelVideoFrameCallback(trackingVideoCallbackRef.current);
+      trackingVideoCallbackRef.current = null;
+    }
     if (trackingRafRef.current !== null) {
       cancelAnimationFrame(trackingRafRef.current);
       trackingRafRef.current = null;
@@ -1561,9 +1559,18 @@ export function VrmStudio({
   ]);
 
   const runTrackingFrames = useCallback(() => {
+    const session = trackingSessionRef.current;
+    const scheduleFrame = () => {
+      const video = videoRef.current;
+      if (typeof video?.requestVideoFrameCallback === "function") {
+        trackingVideoCallbackRef.current = video.requestVideoFrameCallback(tick);
+      } else {
+        trackingRafRef.current = requestAnimationFrame(tick);
+      }
+    };
     const tick = async (timestamp: number) => {
-      if (!trackingRunningRef.current) return;
-      trackingRafRef.current = requestAnimationFrame(tick);
+      if (!trackingRunningRef.current || trackingSessionRef.current !== session) return;
+      scheduleFrame();
 
       const video = videoRef.current;
       const worker = workerRef.current;
@@ -1582,12 +1589,13 @@ export function VrmStudio({
       frameInFlightRef.current = true;
       lastFrameRef.current = timestamp;
       lastVideoTimeRef.current = video.currentTime;
+      let bitmap: ImageBitmap | null = null;
       try {
-        const inputSize = trackingInputDimensions(cameraAspectRatioRef.current, trackingCpuRef.current);
-        const bitmap = await createImageBitmap(video, {
+        const inputSize = trackingInputDimensions(video, trackingInputBudgetRef.current.reduced);
+        bitmap = await createImageBitmap(video, {
           resizeWidth: inputSize.width,
           resizeHeight: inputSize.height,
-          resizeQuality: "medium",
+          resizeQuality: "low",
         });
         if (!trackingRunningRef.current || workerRef.current !== worker) {
           bitmap.close();
@@ -1599,11 +1607,12 @@ export function VrmStudio({
           [bitmap],
         );
       } catch {
-        frameInFlightRef.current = false;
+        bitmap?.close();
+        if (workerRef.current === worker) frameInFlightRef.current = false;
       }
     };
 
-    trackingRafRef.current = requestAnimationFrame(tick);
+    scheduleFrame();
   }, []);
 
   const startTracking = useCallback(async () => {
@@ -1634,9 +1643,9 @@ export function VrmStudio({
         audio: false,
         video: {
           facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          aspectRatio: { ideal: 16 / 9 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          aspectRatio: { ideal: 4 / 3 },
           frameRate: { ideal: 30, max: 30 },
         },
       });
@@ -1675,7 +1684,8 @@ export function VrmStudio({
         const message = event.data;
         if (message.type === "READY") {
           engineReady = true;
-          trackingCpuRef.current = message.delegate === "CPU";
+          trackingInputBudgetRef.current.reset();
+          lastFrameRef.current = -Infinity;
           lastVideoTimeRef.current = -1;
           lastTrackingResultRef.current = 0;
           setTrackingState("running");
@@ -1689,7 +1699,7 @@ export function VrmStudio({
           return;
         }
         if (message.type === "DELEGATE") {
-          trackingCpuRef.current = true;
+          trackingInputBudgetRef.current.reset();
           setError(null);
           showToast(message.message);
           return;
@@ -1706,6 +1716,7 @@ export function VrmStudio({
         }
 
         frameInFlightRef.current = false;
+        trackingInputBudgetRef.current.observe(message.inferenceMs);
         const receivedAt = performance.now();
         const deltaSeconds = lastTrackingResultRef.current
           ? Math.min((receivedAt - lastTrackingResultRef.current) / 1000, 0.1)

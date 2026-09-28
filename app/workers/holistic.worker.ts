@@ -18,6 +18,8 @@ let delegate: "GPU" | "CPU" = "CPU";
 let faceRefiner: FaceLandmarker | null = null;
 let faceDelegate: "GPU" | "CPU" = "CPU";
 let faceRefinementUnavailable = false;
+let lastFaceRefinementAt = -Infinity;
+let faceRefinementMs = 0;
 
 type MediaPipeModuleFactory = (moduleArg?: unknown) => Promise<unknown>;
 type MediaPipeWorkerGlobal = typeof self & {
@@ -204,6 +206,11 @@ async function refineFaceIfNeeded(result: HolisticLandmarkerResult, bitmap: Imag
   // needs the ten additional, genuinely detected points. Never synthesize
   // them, and never run a second detector when Holistic already provides 478.
   if (count < 468 || count >= 478 || faceRefinementUnavailable) return;
+  // A second face graph must not halve body/hand responsiveness. On CPU or
+  // slower GPUs refine irises at 15 Hz; keep THIS frame's 468 eyelid/mouth
+  // landmarks on intervening frames (never reuse stale blinks or fake irises).
+  const interval = faceRefiner && (faceDelegate === "CPU" || faceRefinementMs > 12) ? 1000 / 15 : 0;
+  if (timestamp - lastFaceRefinementAt < interval - 1) return;
   try {
     if (!faceRefiner) {
       try {
@@ -214,6 +221,7 @@ async function refineFaceIfNeeded(result: HolisticLandmarkerResult, bitmap: Imag
       }
     }
     let refined;
+    const startedAt = performance.now();
     try {
       refined = faceRefiner!.detectForVideo(bitmap, timestamp);
     } catch (error) {
@@ -222,6 +230,8 @@ async function refineFaceIfNeeded(result: HolisticLandmarkerResult, bitmap: Imag
       await createFaceRefiner("CPU");
       refined = faceRefiner!.detectForVideo(bitmap, timestamp);
     }
+    lastFaceRefinementAt = timestamp;
+    faceRefinementMs = performance.now() - startedAt;
     if ((refined.faceLandmarks?.[0]?.length ?? 0) >= 478) {
       result.faceLandmarks = refined.faceLandmarks;
     }

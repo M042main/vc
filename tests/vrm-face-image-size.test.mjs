@@ -148,7 +148,7 @@ test("eyelid tracking still works with a 468-point face and does not fabricate g
   const vrm = expressiveVrm();
   vrm.lookAt.yaw = 12;
   const points = Array.from({ length: 468 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
-  points[33].x = 0.4;
+  points[130].x = 0.4;
   points[133].x = 0.6;
   points[263].x = 0.4;
   points[362].x = 0.6;
@@ -177,8 +177,8 @@ test("response is stable across 15/30 Hz inference and fingers use metric 3D cur
   const finger30 = at30.nodes.get("leftIndexProximal").quaternion;
   const finger15 = at15.nodes.get("leftIndexProximal").quaternion;
   assert.ok(finger30.angleTo(finger15) < 1e-7);
-  assert.ok(Math.abs(2 * Math.asin(finger30.z) - 0.91) < 1e-7, "finger target uses world landmarks");
-  assert.ok(Math.abs(2 * Math.asin(at30.nodes.get("leftHand").quaternion.x) - 0.15) < 1e-7, "wrist retains image-space convention");
+  assert.ok(Math.abs(2 * Math.asin(finger30.z) - 0.9775) < 1e-7, "finger target uses world landmarks with faster response");
+  assert.ok(Math.abs(2 * Math.asin(at30.nodes.get("leftHand").quaternion.x) - 0.182) < 1e-5, "wrist retains image-space convention");
   assert.deepEqual(calls.slice(0, 2), [{ x: 0.2, side: "Left" }, { x: 1, side: "Left" }]);
 });
 
@@ -204,6 +204,64 @@ test("restores visible lowered arms and blends tracked wrists only once", async 
   const hidden = expressiveVrm();
   applyVrmTracking(hidden, { poseLandmarks: points, poseWorldLandmarks: points }, { applyHipsPosition: false });
   assert.equal(hidden.nodes.get("leftUpperArm").quaternion.x, 0, "an occluded arm must keep the solver's fallback");
+});
+
+test("short blinks respond immediately without slowing the mouth or keeping an animation blink", async () => {
+  const face = solvedFace();
+  face.eye = { l: 0, r: 1 };
+  face.mouth.shape.A = 1;
+  const { applyVrmTracking } = await loadRigModule([], { Face: { solve: () => structuredClone(face) } });
+  const vrm = expressiveVrm();
+  vrm.values.set("blink", 1);
+  applyVrmTracking(vrm, { faceLandmarks: faceLandmarks() });
+  assert.equal(vrm.values.get("blink"), 0);
+  assert.equal(vrm.values.get("blinkLeft"), 0.95);
+  assert.equal(vrm.values.get("blinkRight"), 0);
+  assert.equal(vrm.values.get("aa"), 0.75);
+  face.eye.l = 1;
+  applyVrmTracking(vrm, { faceLandmarks: faceLandmarks() });
+  assert.ok(vrm.values.get("blinkLeft") < 0.05, "opening again must not trail for multiple frames");
+});
+
+test("a model with only a shared blink still closes fully for a wink", async () => {
+  const face = solvedFace();
+  face.eye = { l: 0, r: 1 };
+  const { applyVrmTracking } = await loadRigModule([], { Face: { solve: () => face } });
+  const vrm = expressiveVrm();
+  vrm.expressionManager.getExpression = (name) => name === "blink" ? {} : undefined;
+  applyVrmTracking(vrm, { faceLandmarks: faceLandmarks() });
+  assert.equal(vrm.values.get("blink"), 0.95);
+});
+
+test("keeps image and metric hand coordinates distinct and corrects widescreen proportions", async () => {
+  const calls = [];
+  const { applyVrmTracking, trackingFrameFromTasks } = await loadRigModule([], { Hand: { solve(points, side) {
+    calls.push({ points: structuredClone(points), side });
+    return { [`${side}Wrist`]: { x: 0, y: 0, z: 0 } };
+  } } });
+  const image = Array.from({ length: 21 }, () => ({ x: 0.2, y: 0.8, z: 0.1 }));
+  const world = image.map(() => ({ x: 0.02, y: 0.08, z: 0.01 }));
+  const frame = trackingFrameFromTasks({ hands: { landmarks: [image], worldLandmarks: [world], handedness: [[{ categoryName: "Left" }]] } });
+  assert.equal(frame.leftHandLandmarks, image);
+  assert.equal(frame.leftHandWorldLandmarks, world);
+  applyVrmTracking(expressiveVrm(), { ...frame, imageSize: { width: 640, height: 360 } });
+  assert.equal(calls[0].points[0].y, 0.45);
+  assert.equal(calls[1].points[0].y, 0.08, "metric points must not receive image aspect correction");
+  assert.equal(image[0].y, 0.8, "the original worker result must remain untouched");
+});
+
+test("invalid or degenerate solver rotations cannot corrupt finger bones", async () => {
+  const { applyVrmTracking } = await loadRigModule([], { Hand: { solve: () => ({
+    LeftWrist: { x: 0, y: 0, z: 0 },
+    LeftIndexProximal: { x: 0, y: Number.NaN, z: 1 },
+    LeftMiddleProximal: { x: 0, y: 0, z: 1 },
+  }) } });
+  const vrm = expressiveVrm();
+  const finger = vrm.humanoid.getNormalizedBoneNode("leftIndexProximal");
+  const before = finger.quaternion.clone();
+  applyVrmTracking(vrm, { leftHandLandmarks: faceLandmarks().slice(0, 21) });
+  assert.ok(finger.quaternion.equals(before));
+  assert.ok(vrm.nodes.get("leftMiddleProximal").quaternion.z > 0.4, "a valid neighboring finger still moves");
 });
 
 test("omits invalid image dimensions instead of feeding them to Kalidokit", async () => {

@@ -40,6 +40,40 @@ async function loadRigModule() {
 const rigModule = loadRigModule();
 const EPSILON = 1e-7;
 
+test("real Kalidokit eyelids stay consistent when iris refinement alternates 468/478 points", async () => {
+  const { applyVrmTracking } = await rigModule;
+  const values = new Map();
+  const vrm = {
+    meta: { metaVersion: "0" }, humanoid: { getNormalizedBoneNode: () => null },
+    expressionManager: {
+      getExpression: () => ({}), getValue: (name) => values.get(name) ?? 0,
+      setValue: (name, value) => values.set(name, value),
+    },
+  };
+  for (const gap of [0, 0.014, 0.026]) {
+    const blinks = [];
+    for (const count of [468, 478]) {
+      const points = Array.from({ length: count }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+      for (const [edgeA, edgeB, upper, lower, x] of [
+        [130, 133, [160, 159, 158], [144, 145, 153], 0.35],
+        [263, 362, [387, 386, 385], [373, 374, 380], 0.55],
+      ]) {
+        points[edgeA] = { x, y: 0.5, z: 0 };
+        points[edgeB] = { x: x + 0.1, y: 0.5, z: 0 };
+        upper.forEach((index, i) => { points[index] = { x: x + 0.025 * (i + 1), y: 0.5 - gap / 2, z: 0 }; });
+        lower.forEach((index, i) => { points[index] = { x: x + 0.025 * (i + 1), y: 0.5 + gap / 2, z: 0 }; });
+      }
+      applyVrmTracking(vrm, { faceLandmarks: points, imageSize: { width: 640, height: 480 } }, { blinkLerp: 1 });
+      blinks.push(values.get("blinkLeft"));
+      assert.ok(Math.abs(values.get("blinkLeft") - values.get("blinkRight")) < 1e-10);
+    }
+    assert.ok(Math.abs(blinks[0] - blinks[1]) < 1e-10, "skipping iris work must not change eyelid sensitivity");
+    if (gap === 0) assert.equal(blinks[0], 1);
+    if (gap === 0.026) assert.equal(blinks[0], 0);
+    if (gap === 0.014) assert.ok(blinks[0] > 0 && blinks[0] < 1);
+  }
+});
+
 function mockVrm(metaVersion, node) {
   return {
     meta: { metaVersion },

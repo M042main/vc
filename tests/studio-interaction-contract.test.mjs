@@ -133,14 +133,16 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
     frameInterval >= 32 && frameInterval <= 34,
     `tracking should accept fresh frames near 30 FPS; got ${frameInterval} ms`,
   );
-  assert.ok(inputWidth <= 960 && inputWidth >= 640, `tracking width must preserve hand detail: ${inputWidth}`);
-  assert.ok(inputHeight <= 720, `tracking height must be <= 720; got ${inputHeight}`);
-  assert.ok(cameraWidth <= 1280, `camera width must be <= 1280; got ${cameraWidth}`);
-  assert.ok(cameraHeight <= 720, `camera height must be <= 720; got ${cameraHeight}`);
+  assert.equal(inputWidth, 640);
+  assert.equal(inputHeight, 480);
+  assert.equal(cameraWidth, 640);
+  assert.equal(cameraHeight, 480);
   assert.ok(cameraMaxFps <= 30, `camera FPS must be <= 30; got ${cameraMaxFps}`);
   assert.ok(pixelRatioCap <= 1.5, `renderer DPR cap must be <= 1.5; got ${pixelRatioCap}`);
   assert.match(studioSource, /video\.currentTime === lastVideoTimeRef\.current/);
-  assert.match(studioSource, /trackingInputDimensions\(cameraAspectRatioRef\.current, trackingCpuRef\.current\)/);
+  assert.match(studioSource, /trackingInputDimensions\(video, trackingInputBudgetRef\.current\.reduced\)/);
+  assert.match(studioSource, /requestVideoFrameCallback\(tick\)/);
+  assert.match(studioSource, /cancelVideoFrameCallback\(trackingVideoCallbackRef\.current\)/);
   assert.match(
     studioSource,
     /frameInFlightRef\.current[\s\S]{0,180}timestamp\s*-\s*lastFrameRef\.current/,

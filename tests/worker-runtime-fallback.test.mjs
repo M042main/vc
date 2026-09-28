@@ -73,7 +73,7 @@ async function loadWorkerHarness({ gpuCloseThrows = false, faceCount = 0, faceFa
   const cpuLandmarker = {
     detectForVideo(bitmap, timestamp) {
       cpuDetectCalls.push({ bitmap, timestamp });
-      return cpuResult;
+      return structuredClone(cpuResult);
     },
     close() {},
   };
@@ -190,6 +190,22 @@ test("does no redundant face inference when Holistic already has iris points", a
   await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp: 42 } });
   assert.equal(harness.faceCreateCalls, 0);
   assert.equal(harness.faceDetectCalls.length, 0);
+});
+
+test("CPU iris refinement is bounded while current eyelid and hand frames continue", async () => {
+  const harness = await loadWorkerHarness({ faceCount: 468 });
+  await harness.self.onmessage({ data: { type: "INIT" } });
+  for (const timestamp of [42, 75, 109, 142]) {
+    harness.cpuResult.faceLandmarks[0][159].y = timestamp / 1000;
+    await harness.self.onmessage({ data: { type: "FRAME", bitmap: harness.bitmap, timestamp } });
+  }
+  const frames = harness.messages.filter((message) => message.type === "RESULT");
+  assert.equal(harness.cpuDetectCalls.length, 4, "full-body detection runs on every incoming frame");
+  assert.equal(harness.faceDetectCalls.length, 2, "the second graph runs at most 15 Hz");
+  assert.deepEqual(frames.map((frame) => frame.result.faceLandmarks[0].length), [478, 468, 478, 468]);
+  assert.equal(frames[1].result.faceLandmarks[0][159].y, 0.075, "skipped refinement must still carry this frame's blink");
+  assert.equal(frames[3].result.faceLandmarks[0][159].y, 0.142);
+  assert.equal(harness.bitmapCloseCalls, 4);
 });
 
 test("optional iris model failure preserves body/face tracking and does not retry on every frame", async () => {

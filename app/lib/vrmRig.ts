@@ -152,16 +152,18 @@ export interface BoneRotationOptions {
 }
 
 export interface VrmRigOptions {
-  /** Response at 30 Hz; adjusted by deltaSeconds. Defaults to 0.5. */
+  /** Response at 30 Hz; adjusted by deltaSeconds. Defaults to 0.7. */
   rotationSlerp?: number;
-  /** Faster response for individual finger joints. Defaults to 0.7. */
+  /** Faster response for individual finger joints. Defaults to 0.85. */
   fingerSlerp?: number;
   /** Time since the previous tracking result, in seconds. Defaults to 1/30. */
   deltaSeconds?: number;
   /** Hips-position interpolation amount at 30 Hz. Defaults to 0.4. */
   positionLerp?: number;
-  /** Expression interpolation amount at 30 Hz. Defaults to 0.65. */
+  /** Expression interpolation amount at 30 Hz. Defaults to 0.75. */
   expressionLerp?: number;
+  /** Fast eyelid response keeps short blinks visible. Defaults to 0.95. */
+  blinkLerp?: number;
   /** Scale applied to Kalidokit's normalized hips translation. Defaults to 1. */
   hipsPositionScale?: number;
   /** Apply hips translation as well as rotation. Defaults to true. */
@@ -408,10 +410,15 @@ export function trackingFrameFromTasks(results: MediaPipeTaskResultsLike): VrmTr
     const label = results.hands?.handedness?.[index]?.[0]?.categoryName?.toLowerCase();
     const displayName = results.hands?.handedness?.[index]?.[0]?.displayName?.toLowerCase();
     const handedness = label || displayName;
-    const preferred = results.hands?.worldLandmarks?.[index] ?? landmarks;
-
-    if (handedness === "left" && !frame.leftHandLandmarks) frame.leftHandLandmarks = preferred;
-    if (handedness === "right" && !frame.rightHandLandmarks) frame.rightHandLandmarks = preferred;
+    const world = results.hands?.worldLandmarks?.[index];
+    if (handedness === "left" && !frame.leftHandLandmarks) {
+      frame.leftHandLandmarks = landmarks;
+      frame.leftHandWorldLandmarks = world;
+    }
+    if (handedness === "right" && !frame.rightHandLandmarks) {
+      frame.rightHandLandmarks = landmarks;
+      frame.rightHandWorldLandmarks = world;
+    }
   });
 
   return frame;
@@ -465,7 +472,7 @@ export function slerpVrmBoneRotation(
   rotation: EulerLike | null | undefined,
   options: BoneRotationOptions = {},
 ): boolean {
-  if (!rotation) return false;
+  if (!rotation || ![rotation.x, rotation.y, rotation.z].every(Number.isFinite)) return false;
   const node = vrm.humanoid.getNormalizedBoneNode(boneName);
   if (!node) return false;
 
@@ -521,6 +528,7 @@ function setExpression(
   const manager = vrm.expressionManager;
   if (!manager?.getExpression(preset)) return false;
   const current = manager.getValue(preset) ?? 0;
+  if (!Number.isFinite(weight)) return false;
   manager.setValue(
     preset,
     MathUtils.lerp(current, MathUtils.clamp(weight, 0, 1), MathUtils.clamp(amount, 0, 1)),
@@ -546,24 +554,34 @@ function applyFace(vrm: VRM, face: TFace, options: Required<VrmRigOptions>, miss
   const expressionAmount = options.expressionLerp;
   const leftBlink = 1 - face.eye.l;
   const rightBlink = 1 - face.eye.r;
-  const hasLeftBlink = setExpression(
-    vrm,
-    VRMExpressionPresetName.BlinkLeft,
-    leftBlink,
-    expressionAmount,
-  );
-  const hasRightBlink = setExpression(
-    vrm,
-    VRMExpressionPresetName.BlinkRight,
-    rightBlink,
-    expressionAmount,
-  );
-  if (!hasLeftBlink && !hasRightBlink) {
+  // Fast blink response is independent of mouth/head smoothing. Clear the
+  // shared blink channel left behind by an animation to avoid stuck eyelids.
+  const manager = vrm.expressionManager;
+  const independentBlinks = manager?.getExpression(VRMExpressionPresetName.BlinkLeft) &&
+    manager.getExpression(VRMExpressionPresetName.BlinkRight);
+  const sharedBlink = manager?.getExpression(VRMExpressionPresetName.Blink);
+  if (independentBlinks || !sharedBlink) {
+    setExpression(vrm, VRMExpressionPresetName.Blink, 0, 1);
+    setExpression(
+      vrm,
+      VRMExpressionPresetName.BlinkLeft,
+      leftBlink,
+      options.blinkLerp,
+    );
+    setExpression(
+      vrm,
+      VRMExpressionPresetName.BlinkRight,
+      rightBlink,
+      options.blinkLerp,
+    );
+  } else {
+    setExpression(vrm, VRMExpressionPresetName.BlinkLeft, 0, 1);
+    setExpression(vrm, VRMExpressionPresetName.BlinkRight, 0, 1);
     setExpression(
       vrm,
       VRMExpressionPresetName.Blink,
-      (leftBlink + rightBlink) / 2,
-      expressionAmount,
+      Math.max(leftBlink, rightBlink),
+      options.blinkLerp,
     );
   }
   setExpression(vrm, VRMExpressionPresetName.Aa, face.mouth.shape.A, expressionAmount);
@@ -716,10 +734,11 @@ function resolveRigOptions(options: VrmRigOptions): Required<VrmRigOptions> {
   const response = (value: number) => 1 - Math.pow(1 - MathUtils.clamp(value, 0, 1), deltaSeconds * 30);
   return {
     deltaSeconds,
-    rotationSlerp: response(options.rotationSlerp ?? 0.5),
-    fingerSlerp: response(options.fingerSlerp ?? 0.7),
+    rotationSlerp: response(options.rotationSlerp ?? 0.7),
+    fingerSlerp: response(options.fingerSlerp ?? 0.85),
     positionLerp: response(options.positionLerp ?? 0.4),
-    expressionLerp: response(options.expressionLerp ?? 0.65),
+    expressionLerp: response(options.expressionLerp ?? 0.75),
+    blinkLerp: response(options.blinkLerp ?? options.expressionLerp ?? 0.95),
     hipsPositionScale: options.hipsPositionScale ?? 1,
     applyHipsPosition: options.applyHipsPosition ?? true,
     applyHipsRotation: options.applyHipsRotation ?? true,
@@ -772,7 +791,7 @@ function fallbackEyeOpenness(points: NonNullable<ReturnType<typeof finiteLandmar
   const width = distance(...edge);
   if (width < 1e-6) return 1;
   const opening = lids.reduce((sum, pair) => sum + distance(...pair), 0) / lids.length / width;
-  return MathUtils.clamp((opening / 0.285 - 0.35) / 0.15, 0, 1);
+  return MathUtils.clamp((opening / 0.285 - 0.35) / (0.65 - 0.35), 0, 1);
 }
 
 /** Solve a MediaPipe Tasks-style landmark frame with Kalidokit and apply it to a VRM. */
@@ -790,11 +809,20 @@ export function applyVrmTracking(
   const leftHandLandmarks = finiteLandmarks(frame.leftHandLandmarks, 21);
   const rightHandLandmarks = finiteLandmarks(frame.rightHandLandmarks, 21);
   const faceImageSize = finiteImageSize(frame.imageSize);
+  // Normalized image x/y have different units on a non-square webcam feed.
+  // Bring hand y into width units before solving wrists and fallback curls.
+  if (faceImageSize) {
+    const aspectCorrection = faceImageSize.height / faceImageSize.width;
+    for (const hand of [leftHandLandmarks, rightHandLandmarks]) {
+      if (hand) for (const point of hand) point.y *= aspectCorrection;
+    }
+  }
 
   const solvedFace = faceLandmarks
     ? Face.solve(faceLandmarks as Parameters<typeof Face.solve>[0], {
         runtime: "mediapipe",
         smoothBlink: false,
+        blinkSettings: [0.35, 0.65],
         ...(faceImageSize ? { imageSize: faceImageSize } : {}),
       })
     : undefined;
@@ -812,7 +840,7 @@ export function applyVrmTracking(
   if (solvedPose && poseWorldLandmarks && poseLandmarks) restoreVisibleArms(solvedPose, poseWorldLandmarks, poseLandmarks);
   if (solvedFace && faceLandmarks && faceLandmarks.length < 478) {
     solvedFace.eye = {
-      l: fallbackEyeOpenness(faceLandmarks, [33, 133], [[160, 144], [159, 145], [158, 153]]),
+      l: fallbackEyeOpenness(faceLandmarks, [130, 133], [[160, 144], [159, 145], [158, 153]]),
       r: fallbackEyeOpenness(faceLandmarks, [263, 362], [[387, 373], [386, 374], [385, 380]]),
     };
   }
