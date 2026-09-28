@@ -38,7 +38,7 @@ test("background capture composites the current photo or stage color after trans
   assert.match(source, /captureBackground\.color[\s\S]{0,120}captureBackground\.image[\s\S]{0,120}captureBackground\.fit/);
   assert.match(source, /context\.drawImage\(foreground,\s*0,\s*0,\s*width,\s*height\)/);
   assert.match(source, /paperDoll\.capturePng\(1600,\s*2000\)/);
-  assert.match(source, /captureVrmFullBodyPng\s*\(/);
+  assert.match(source, /captureVrmPortraitPng\s*\(/);
   assert.match(source, /includeBackground\s*\?[\s\S]{0,180}includeStageBackgroundInCapture/);
 });
 

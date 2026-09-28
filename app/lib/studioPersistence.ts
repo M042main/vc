@@ -25,6 +25,7 @@ export interface StudioSettings {
   selectedMotion: PersistedMotionId;
   animationSpeed: number;
   legsLocked: boolean;
+  trackingMode?: "upper" | "full";
 }
 
 export interface PersistedStageBackground {
@@ -195,6 +196,8 @@ function parseSettings(value: unknown): StudioSettings | null {
     selectedMotion: candidate.selectedMotion as PersistedMotionId,
     animationSpeed: candidate.animationSpeed,
     legsLocked: candidate.legsLocked,
+    ...(candidate.trackingMode === "upper" || candidate.trackingMode === "full"
+      ? { trackingMode: candidate.trackingMode } : {}),
   };
 }
 

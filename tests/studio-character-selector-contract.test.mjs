@@ -100,7 +100,7 @@ test("keeps newer drawing selection ahead of stale VRM restoration and all live 
   assert.match(studio, /paperDollActive\s*&&\s*activeArtwork/u);
   assert.match(studio, /<PaperDollStage[\s\S]{0,180}artwork=\{activeArtwork\}/u);
   assert.match(studio, /paperDollActiveRef\.current/u);
-  assert.match(studio, /captureVrmFullBodyPng/u);
+  assert.match(studio, /captureVrmPortraitPng/u);
   assert.match(studio, /const\s+canvas\s*=\s*paperDollActive[\s\S]{0,180}rendererRef\.current\?\.domElement/u);
 });
 

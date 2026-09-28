@@ -68,7 +68,7 @@ test("ships the two interactive creation surfaces and removes the starter", asyn
   assert.doesNotMatch(page, /MOTION INK|<footer|Kalidoface 3D와|카메라 사용에는 HTTPS/i);
   assert.match(layout, /Virtual Creator/);
   assert.doesNotMatch(layout, /MOTION INK/);
-  assert.match(studio, /captureVrmFullBodyPng/);
+  assert.match(studio, /captureVrmPortraitPng/);
   assert.match(studio, /createHolisticTrackingWorker/);
   assert.match(creator, /onSendToStudio/);
   assert.doesNotMatch(gallery, /publishGalleryEntry/);

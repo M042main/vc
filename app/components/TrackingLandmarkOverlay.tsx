@@ -9,6 +9,7 @@ import {
   useRef,
 } from "react";
 import styles from "./TrackingLandmarkOverlay.module.css";
+import { FACE_MESH_CONNECTIONS } from "../lib/faceMeshConnections";
 
 export interface TrackingLandmark {
   x: number;
@@ -28,7 +29,7 @@ export interface TrackingLandmarkFrame {
 }
 
 export interface TrackingLandmarkOverlayHandle {
-  /** Queues the newest tracking frame; intermediate frames are coalesced at 15fps. */
+  /** Queues the newest tracking frame; intermediate frames are coalesced at 30fps. */
   draw(frame: TrackingLandmarkFrame): void;
   /** Immediately removes every landmark from the overlay. */
   clear(): void;
@@ -61,7 +62,7 @@ interface CanvasSize {
 type Connection = readonly [start: number, end: number];
 
 const MAX_DPR = 2;
-const FRAME_INTERVAL_MS = 1000 / 15;
+const FRAME_INTERVAL_MS = 1000 / 30;
 const MIN_CONFIDENCE = 0.2;
 
 const POSE_CONNECTIONS: readonly Connection[] = [
@@ -368,7 +369,7 @@ function drawLandmarkList(
     connections,
     projection,
     mirror,
-    color,
+    "#00dbed",
     lineWidth,
     0.72,
   );
@@ -392,6 +393,9 @@ function drawFaceLandmarks(
   unit: number,
 ) {
   if (!landmarks?.length) return;
+
+  drawLandmarkConnections(context, landmarks, FACE_MESH_CONNECTIONS,
+    projection, mirror, "#cccccc", Math.max(0.35, unit * 0.2), 0.5);
 
   // A subtle complete point cloud preserves all topology without turning the
   // camera preview into an opaque mesh. Semantic overlays then make each
@@ -446,8 +450,8 @@ function drawFaceLandmarks(
     IRIS_CENTER_INDICES,
     projection,
     mirror,
-    "#ffffff",
-    unit * 0.86,
+    "#ffe343",
+    unit * 1.1,
     1,
   );
 }
@@ -501,7 +505,7 @@ function drawFrame(
     POSE_CONNECTIONS,
     projection,
     frame.mirror,
-    "#dfff45",
+    "#ff2585",
     unit * 1.25,
     unit * 1.15,
   );
@@ -511,7 +515,7 @@ function drawFrame(
     HAND_CONNECTIONS,
     projection,
     frame.mirror,
-    "#ff7357",
+    "#ff2585",
     unit,
     unit,
   );
@@ -521,7 +525,7 @@ function drawFrame(
     HAND_CONNECTIONS,
     projection,
     frame.mirror,
-    "#5de1ff",
+    "#ff2585",
     unit,
     unit,
   );
@@ -538,7 +542,7 @@ export const TrackingLandmarkOverlay = forwardRef<
     mirror = true,
     hidden = false,
     sourceAspectRatio,
-    fit = "cover",
+    fit = "contain",
     className,
   },
   ref,

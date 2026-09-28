@@ -172,7 +172,7 @@ test("keeps camera tracking bounded for responsive CPU fallback", async () => {
 
 test("skips hidden 3D work and allows smooth live rendering while saving idle work", async () => {
   const studioSource = await readFile(studioUrl, "utf8");
-  assert.match(studioSource, /trackingRunningRef\.current \? 1000 \/ 60 - 1 : 33/);
+  assert.match(studioSource, /renderClock.step\(timestamp, trackingRunningRef\.current \? 60 : 30\)/);
   assert.match(studioSource, /document\.hidden/);
   assert.match(studioSource, /paperDollActiveRef\.current/);
   assert.match(studioSource, /stageVisibleRef\.current/);

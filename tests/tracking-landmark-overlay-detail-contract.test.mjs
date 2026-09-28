@@ -60,7 +60,7 @@ test("draws dense semantic face contours including both five-point irises", asyn
   assert.match(overlay, /const FACE_SEMANTIC_LAYERS:[\s\S]{0,1800}IRIS_CONNECTIONS/u);
   assert.match(
     overlay,
-    /drawLandmarkPoints\([\s\S]{0,180}IRIS_CENTER_INDICES[\s\S]{0,180}"#ffffff"/u,
+    /drawLandmarkPoints\([\s\S]{0,180}IRIS_CENTER_INDICES[\s\S]{0,180}"#ffe343"/u,
   );
 });
 
@@ -83,11 +83,12 @@ test("continues to render complete pose and both hand skeletons", async () => {
   );
 });
 
-test("preserves the 15fps coalescing and capped high-DPI canvas", async () => {
+test("uses 30fps coalescing, a real face mesh and capped high-DPI canvas", async () => {
   const [overlay] = await sources();
 
   assert.match(overlay, /const MAX_DPR = 2/u);
-  assert.match(overlay, /const FRAME_INTERVAL_MS = 1000 \/ 15/u);
+  assert.match(overlay, /const FRAME_INTERVAL_MS = 1000 \/ 30/u);
+  assert.match(overlay, /drawLandmarkConnections\(context, landmarks, FACE_MESH_CONNECTIONS/u);
   assert.match(
     overlay,
     /timeoutRef\.current !== null \|\| animationFrameRef\.current !== null/u,

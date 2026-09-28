@@ -9,18 +9,22 @@ const parsed = ts.createSourceFile("PaperDollStage.tsx", source, ts.ScriptTarget
 const body = parsed.statements.filter((node) => !ts.isImportDeclaration(node)).map((node) => node.getText(parsed)).join("\n");
 const performanceSource = await readFile(new URL("../app/lib/trackingPerformance.ts", import.meta.url), "utf8");
 const performanceJs = ts.transpileModule(performanceSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const { trackingResponse } = await import(`data:text/javascript;base64,${Buffer.from(performanceJs).toString("base64")}`);
+const { trackingResponse, TrackingRenderClock, TrackingCadence } = await import(`data:text/javascript;base64,${Buffer.from(performanceJs).toString("base64")}`);
+const zoomSource = await readFile(new URL("../app/lib/stageZoom.ts", import.meta.url), "utf8");
+const zoomJs = ts.transpileModule(zoomSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+const { stepStageZoom } = await import(`data:text/javascript;base64,${Buffer.from(zoomJs).toString("base64")}`);
 
 function harness() {
   const refs = [];
   const frames = new Map();
   const effects = [];
+  const callbacks = [];
   let frameId = 0;
   let now = 100;
-  const context = { exports: {}, trackingResponse, React: { createElement: () => null },
+  const context = { exports: {}, trackingResponse, TrackingRenderClock, TrackingCadence, stepStageZoom, React: { createElement: () => null },
     forwardRef: (component) => component,
     useRef(current) { const ref = { current }; refs.push(ref); return ref; },
-    useCallback: (callback) => callback,
+    useCallback: (callback) => { callbacks.push(callback); return callback; },
     useEffect(effect) { effects.push(effect); },
     useImperativeHandle(ref, create) { ref.current = create(); },
     performance: { now: () => now },
@@ -33,7 +37,7 @@ function harness() {
   const handle = { current: null };
   context.exports.PaperDollStage({ artwork: "test-artwork" }, handle);
   return {
-    handle: handle.current, helpers: context.exports.helpers, frames,
+    handle: handle.current, helpers: context.exports.helpers, frames, refs, context, callbacks,
     get target() { return refs.find((ref) => ref.current?.receivedAt !== undefined)?.current; },
     get expression() { return refs.find((ref) => ref.current?.blinkLeft !== undefined)?.current; },
     set now(value) { now = value; },
@@ -68,6 +72,28 @@ test("2D face ratios are consistent across webcam aspect ratios without mutating
   const b = helpers.expressionFromFaceLandmarks(wide, { width: 640, height: 480 });
   for (const key of Object.keys(a)) assert.ok(Math.abs(a[key] - b[key]) < 1e-10, key);
   assert.deepEqual(wide, before);
+});
+
+test("2D portrait drawing ignores live rotation, expression, pan, zoom and upper-body framing", () => {
+  const h = harness();
+  const calls = [];
+  const ctx = new Proxy({}, { get: (_, key) => (...args) => calls.push([key, ...args]), set: () => true });
+  h.refs[2].current = { complete: true, naturalWidth: 640 };
+  h.refs[3].current = { limbs: [], torso: {}, headBase: {}, face: {} };
+  h.context.recordExpression = (expression) => calls.push(["expression", expression]);
+  vm.runInNewContext("drawTorso = () => {}; drawHead = (c, b, f, r, expression) => recordExpression(expression);", h.context);
+  h.refs[4].current = { ...h.helpers.createRestPose(), rotation: 0.8, x: 0.5, y: -0.4, scale: 9 };
+  h.expression.blinkLeft = 1;
+  h.handle.rotate(1);
+  h.handle.zoom(1);
+  const live = JSON.stringify(h.refs[4].current);
+  const draw = h.callbacks.find((fn) => fn.toString().includes("captureSafe"));
+  draw({ width: 1600, height: 2000, getContext: () => ctx }, 1600, 2000, "high", true);
+  assert.deepEqual(calls.find(([key]) => key === "rotate"), ["rotate", 0]);
+  assert.deepEqual(calls.find(([key]) => key === "translate"), ["translate", 800, 1000]);
+  assert.equal(calls.find(([key]) => key === "expression")[1].blinkLeft, 0);
+  assert.equal(JSON.stringify(h.refs[4].current), live, "live pose is untouched");
+  assert.equal(h.expression.blinkLeft, 1, "live expression is untouched");
 });
 
 test("2D moves between inference results, closes short blinks, and cancels on camera stop", () => {

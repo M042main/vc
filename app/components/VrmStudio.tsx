@@ -37,11 +37,11 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { VRM } from "@pixiv/three-vrm";
 import { applySolvedVrmTracking, solveVrmTracking, disposeVrm, loadVrm } from "../lib/vrmRig";
 import {
-  captureVrmFullBodyPng,
   downloadBlob,
 } from "../lib/vrmCapture";
+import { prepareVrmPortrait, captureVrmPortraitPng } from "../lib/vrmPortrait";
 import { createHolisticTrackingWorker } from "../lib/holisticWorker";
-import { fitTrackingInput, TrackingInputBudget } from "../lib/trackingPerformance";
+import { fitTrackingInput, TrackingInputBudget, TrackingRenderClock, TrackingCadence } from "../lib/trackingPerformance";
 import {
   MAX_PERSISTED_VRM_BYTES,
   MAX_STAGE_BACKGROUND_BYTES,
@@ -202,10 +202,15 @@ function fitObject(
   object: THREE.Object3D,
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
+  framing: "upper" | "full" = "upper",
 ) {
   object.updateWorldMatrix(true, true);
   const bounds = new THREE.Box3().setFromObject(object, true);
   if (bounds.isEmpty()) return;
+
+  if (framing === "upper") {
+    bounds.min.y += (bounds.max.y - bounds.min.y) * 0.52;
+  }
 
   const size = bounds.getSize(new THREE.Vector3());
   const center = bounds.getCenter(new THREE.Vector3());
@@ -215,7 +220,7 @@ function fitObject(
     Math.max(
       size.y / (2 * Math.tan(verticalFov / 2)),
       size.x / (2 * Math.tan(horizontalFov / 2)),
-    ) * 1.28;
+    ) * (framing === "upper" ? 1.08 : 1.28);
 
   camera.position.set(center.x, center.y + size.y * 0.025, center.z + distance);
   camera.near = STAGE_CAMERA_NEAR_PLANE;
@@ -441,6 +446,8 @@ export function VrmStudio({
   const solvedTrackingRef = useRef<ReturnType<typeof solveVrmTracking> | null>(null);
   const paperDollActiveRef = useRef(false);
   const legsLockedRef = useRef(false);
+  const trackingModeRef = useRef<"upper" | "full">("upper");
+  const trackingCadenceRef = useRef(new TrackingCadence());
   const stageVisibleRef = useRef(true);
   const frameInFlightRef = useRef(false);
   const modelLoadSessionRef = useRef(0);
@@ -497,6 +504,8 @@ export function VrmStudio({
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [cameraAspectRatio, setCameraAspectRatio] = useState(16 / 9);
   const [cameraPreviewVisible, setCameraPreviewVisible] = useState(true);
+  const [previewVideoVisible, setPreviewVideoVisible] = useState(false);
+  const [trackingMode, setTrackingMode] = useState<"upper" | "full">("upper");
   const [toolPanelCollapsed, setToolPanelCollapsed] = useState(false);
   const [activeToolTab, setActiveToolTab] =
     useState<StudioToolTab>("character");
@@ -946,7 +955,7 @@ export function VrmStudio({
 
     const clock = new THREE.Clock();
     let raf = 0;
-    let lastRenderAt = 0;
+    const renderClock = new TrackingRenderClock();
     const render = (timestamp = 0) => {
       raf = requestAnimationFrame(render);
       if (
@@ -955,11 +964,10 @@ export function VrmStudio({
         (!stageVisibleRef.current &&
           !pipActiveRef.current &&
           !recordingBusyRef.current) ||
-        timestamp - lastRenderAt < (trackingRunningRef.current ? 1000 / 60 - 1 : 33)
+        renderClock.step(timestamp, trackingRunningRef.current ? 60 : 30) === null
       ) {
         return;
       }
-      lastRenderAt = timestamp;
       const delta = Math.min(clock.getDelta(), 0.05);
       const elapsed = clock.elapsedTime;
 
@@ -968,11 +976,13 @@ export function VrmStudio({
             performance.now() - lastTrackingResultRef.current < 180) {
           applySolvedVrmTracking(vrmRef.current, solvedTrackingRef.current, {
             deltaSeconds: delta,
-            enableLegs: !legsLockedRef.current,
-            applyHipsPosition: !legsLockedRef.current,
-            applyHipsRotation: !legsLockedRef.current,
+            rotationSlerp: trackingCadenceRef.current.response(),
+            fingerSlerp: Math.min(0.85, trackingCadenceRef.current.response() + 0.15),
+            enableLegs: trackingModeRef.current === "full" && !legsLockedRef.current,
+            applyHipsPosition: trackingModeRef.current === "full" && !legsLockedRef.current,
+            applyHipsRotation: trackingModeRef.current === "full" && !legsLockedRef.current,
           });
-          if (legsLockedRef.current) vrmLegLockRef.current?.enforce();
+          if (trackingModeRef.current === "upper" || legsLockedRef.current) vrmLegLockRef.current?.enforce();
         }
         vrmRef.current.update(delta);
       } else {
@@ -1067,8 +1077,8 @@ export function VrmStudio({
 
   useEffect(() => {
     legsLockedRef.current = legsLocked;
-    if (paperDollActive) paperDollRef.current?.setLegsLocked(legsLocked);
-  }, [legsLocked, paperDollActive]);
+    if (paperDollActive) paperDollRef.current?.setLegsLocked(trackingMode === "upper" || legsLocked);
+  }, [legsLocked, paperDollActive, trackingMode]);
 
   const cancelRecording = useCallback(() => {
     recordingSessionRef.current += 1;
@@ -1097,6 +1107,7 @@ export function VrmStudio({
     frameInFlightRef.current = false;
     lastVideoTimeRef.current = -1;
     lastTrackingResultRef.current = 0;
+    trackingCadenceRef.current.reset();
     trackingInputBudgetRef.current.reset();
     if (trackingVideoCallbackRef.current !== null) {
       videoRef.current?.cancelVideoFrameCallback(trackingVideoCallbackRef.current);
@@ -1304,6 +1315,7 @@ export function VrmStudio({
           }
         });
 
+        prepareVrmPortrait(loaded.vrm);
         scene.add(loaded.vrm.scene);
         vrmMotionPlayerRef.current?.dispose();
         vrmLegLockRef.current?.dispose();
@@ -1316,7 +1328,7 @@ export function VrmStudio({
         const legLock = new VrmLegRotationLock(loaded.vrm, {
           updateHumanoid: false,
         });
-        if (legsLockedRef.current) {
+        if (trackingModeRef.current === "upper" || legsLockedRef.current) {
           legLock.lock({ mode: "rest", updateHumanoid: false });
         }
         vrmMotionPlayerRef.current = motionPlayer;
@@ -1342,7 +1354,7 @@ export function VrmStudio({
           disposeVrm(previous);
         }
 
-        fitObject(loaded.vrm.scene, camera, controls);
+        fitObject(loaded.vrm.scene, camera, controls, trackingModeRef.current);
         setModelName(options.defaultModel ? "기본" : file.name);
         setIsDefaultModel(Boolean(options.defaultModel));
         setModelSize(`${(file.size / 1024 / 1024).toFixed(1)} MB · VRM 캐릭터`);
@@ -1485,6 +1497,8 @@ export function VrmStudio({
         setAnimationSpeed(snapshot.settings.animationSpeed);
         legsLockedRef.current = snapshot.settings.legsLocked;
         setLegsLocked(snapshot.settings.legsLocked);
+        trackingModeRef.current = snapshot.settings.trackingMode ?? "upper";
+        setTrackingMode(trackingModeRef.current);
       }
 
       const restoredBackground = snapshot.background;
@@ -1562,10 +1576,12 @@ export function VrmStudio({
       selectedMotion,
       animationSpeed,
       legsLocked,
+      trackingMode,
     });
   }, [
     animationSpeed,
     legsLocked,
+    trackingMode,
     persistenceReady,
     selectedMotion,
     stageBackgroundFit,
@@ -1746,6 +1762,7 @@ export function VrmStudio({
         const receivedAt = performance.now();
         trackingInputBudgetRef.current.observe(Math.max(message.inferenceMs, receivedAt - lastFrameRef.current));
         lastTrackingResultRef.current = receivedAt;
+        trackingCadenceRef.current.observe(receivedAt);
         // Dispatch before main-thread drawing/solving; at most one bitmap is
         // in flight, and only the latest camera image is ever captured.
         pumpTrackingFrameRef.current();
@@ -1776,7 +1793,7 @@ export function VrmStudio({
             rightHandWorldLandmarks: result.leftHandWorldLandmarks?.[0],
             imageSize: message.imageSize,
           }, {
-            enableLegs: !legsLockedRef.current,
+            enableLegs: trackingModeRef.current === "full" && !legsLockedRef.current,
           });
         }
       };
@@ -1817,7 +1834,7 @@ export function VrmStudio({
     }
     const object = vrmRef.current?.scene ?? mannequinRef.current;
     if (object && cameraRef.current && controlsRef.current) {
-      fitObject(object, cameraRef.current, controlsRef.current);
+      fitObject(object, cameraRef.current, controlsRef.current, trackingModeRef.current);
     }
   }, [paperDollActive]);
 
@@ -1922,6 +1939,26 @@ export function VrmStudio({
       showToast("다리 고정을 풀었어요. 전신 움직임을 다시 추적합니다.");
     }
   }, [showToast]);
+
+  const changeTrackingMode = useCallback((mode: "upper" | "full") => {
+    settingsInteractionRef.current += 1;
+    trackingModeRef.current = mode;
+    setTrackingMode(mode);
+    legsLockedRef.current = false;
+    setLegsLocked(false);
+    // Do not replay a solution calculated with the previous lower-body mode.
+    solvedTrackingRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    trackingModeRef.current = trackingMode;
+    if (trackingMode === "upper") vrmLegLockRef.current?.lock({ mode: "rest", updateHumanoid: false });
+    else if (!legsLockedRef.current) vrmLegLockRef.current?.unlock({ restore: false });
+    const object = vrmRef.current?.scene ?? mannequinRef.current;
+    if (!paperDollActive && object && cameraRef.current && controlsRef.current) {
+      fitObject(object, cameraRef.current, controlsRef.current, trackingMode);
+    }
+  }, [trackingMode, paperDollActive, modelState]);
 
   const recordAnimation = useCallback(async () => {
     if (
@@ -2091,7 +2128,7 @@ export function VrmStudio({
         const helpers = [gridRef.current, floorRef.current].filter(
           (value): value is THREE.Object3D => Boolean(value),
         );
-        const result = await captureVrmFullBodyPng({
+        const result = await captureVrmPortraitPng({
           renderer: renderer!,
           scene: scene!,
           vrm: vrm!,
@@ -2186,6 +2223,7 @@ export function VrmStudio({
           <PaperDollStage
             ref={paperDollRef}
             artwork={activeArtwork}
+            framing={trackingMode}
             backgroundColor={stageColor}
             backgroundImage={stageBackgroundImage}
             backgroundFit={stageBackgroundFit}
@@ -2268,6 +2306,8 @@ export function VrmStudio({
 
         <div
           className={styles.cameraPreview}
+          style={{ aspectRatio: cameraAspectRatio }}
+          data-video-visible={previewVideoVisible}
           data-visible={
             cameraPreviewVisible &&
             (trackingState === "loading" || trackingRunning)
@@ -2282,10 +2322,14 @@ export function VrmStudio({
             ref={trackingOverlayRef}
             mirror
             sourceAspectRatio={cameraAspectRatio}
-            fit="cover"
+            fit="contain"
             hidden={!cameraPreviewVisible || (trackingState !== "loading" && !trackingRunning)}
           />
-          <span>{trackingRunning ? "ON DEVICE" : "LOADING"}</span>
+          <button type="button" className={styles.previewVideoToggle}
+            onClick={() => setPreviewVideoVisible((visible) => !visible)}
+            aria-pressed={previewVideoVisible} aria-label="트래킹 배경에 웹캠 영상 표시">
+            {previewVideoVisible ? "웹캠 숨기기" : "웹캠 보기"}
+          </button>
         </div>
 
         <video
@@ -2352,7 +2396,7 @@ export function VrmStudio({
             className={styles.iconButton}
             type="button"
             onClick={resetView}
-            aria-label="전신 화면 맞춤"
+            aria-label={trackingMode === "upper" ? "상반신 화면 맞춤" : "전신 화면 맞춤"}
           >
             <Focus size={16} />
           </button>
@@ -2729,6 +2773,14 @@ export function VrmStudio({
           aria-labelledby="studio-motion-tab"
           hidden={activeToolTab !== "motion"}
         >
+          <div className={styles.trackingModes} role="group" aria-label="트래킹 범위">
+            {(["upper", "full"] as const).map((mode) => (
+              <button key={mode} type="button" aria-pressed={trackingMode === mode}
+                onClick={() => changeTrackingMode(mode)} disabled={isRecording}>
+                {mode === "upper" ? "상반신 트래킹" : "전신 트래킹"}
+              </button>
+            ))}
+          </div>
           {paperDollActive || modelReady ? (
             <section className={styles.animationLab} aria-label="캐릭터 애니메이션 만들기">
               <div className={styles.animationHeading}>
@@ -2797,20 +2849,21 @@ export function VrmStudio({
           <button
             type="button"
             className={styles.legLockButton}
-            data-locked={legsLocked}
-            aria-pressed={legsLocked}
+            data-locked={trackingMode === "upper" || legsLocked}
+            aria-pressed={trackingMode === "upper" || legsLocked}
             onClick={toggleLegLock}
             disabled={
+              trackingMode === "upper" ||
               !characterReady ||
               isRecording ||
               animationPlaying ||
               modelState === "loading"
             }
           >
-            {legsLocked ? <LockKeyhole size={15} /> : <LockOpen size={15} />}
+            {trackingMode === "upper" || legsLocked ? <LockKeyhole size={15} /> : <LockOpen size={15} />}
             <span>
-              <strong>{legsLocked ? "다리 고정됨" : "다리 움직임 추적"}</strong>
-              <small>{legsLocked ? "눌러서 다리 풀기" : "눌러서 현재 자세 고정"}</small>
+              <strong>{trackingMode === "upper" || legsLocked ? "다리 고정됨" : "다리 움직임 추적"}</strong>
+              <small>{trackingMode === "upper" ? "전신 트래킹을 선택하면 다리도 추적합니다" : legsLocked ? "눌러서 다리 풀기" : "눌러서 현재 자세 고정"}</small>
             </span>
           </button>
         </section>
@@ -2839,7 +2892,7 @@ export function VrmStudio({
             <span className={styles.captureDialogEyebrow}>온라인 갤러리</span>
             <h2 id="capture-dialog-title">배경을 함께 저장할까요?</h2>
             <p id="capture-dialog-description">
-              현재 포즈의 전신을 자동으로 맞춘 뒤 선택한 방식으로 갤러리에 저장합니다.
+              화면 확대·현재 동작과 관계없이 기본 자세의 전신 사진을 갤러리에 저장합니다.
             </p>
             <div className={styles.captureDialogChoices}>
               <button

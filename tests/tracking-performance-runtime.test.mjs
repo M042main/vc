@@ -6,7 +6,34 @@ import ts from "typescript";
 
 const source = await readFile(new URL("../app/lib/trackingPerformance.ts", import.meta.url), "utf8");
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { TrackingInputBudget, fitTrackingInput, trackingResponse } = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
+const { TrackingInputBudget, fitTrackingInput, trackingResponse, TrackingRenderClock, TrackingCadence } = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
+
+test("60fps rendering retains fractional time on 60/75/90/120/144Hz displays", () => {
+  for (const refresh of [60, 75, 90, 120, 144]) {
+    const clock = new TrackingRenderClock();
+    let draws = 0;
+    let elapsed = 0;
+    for (let i = 0; i < refresh * 10; i++) {
+      const delta = clock.step(i * 1000 / refresh);
+      if (delta !== null) { draws++; elapsed += delta; }
+    }
+    assert.ok(draws >= 599 && draws <= 601, `${refresh}Hz: ${draws} draws`);
+    assert.ok(Math.abs(elapsed - 10) < 0.04);
+  }
+});
+
+test("cadence smoothing distributes slower inference without queueing or changing blink response", () => {
+  const cadence = new TrackingCadence();
+  const normal = cadence.response();
+  for (let i = 1; i < 100; i++) cadence.observe(i * 70);
+  assert.ok(cadence.response() < normal);
+  assert.ok(cadence.response() > 0.35, "never introduce long smoothing lag");
+  const beforeStall = cadence.intervalMs;
+  cadence.observe(20000);
+  assert.equal(cadence.intervalMs, beforeStall);
+  cadence.reset();
+  assert.equal(cadence.response(), normal);
+});
 
 test("input size preserves 4:3, widescreen and portrait geometry without upscaling", () => {
   assert.deepEqual(fitTrackingInput(1280, 720, 640, 480), { width: 640, height: 360 });

@@ -20,7 +20,7 @@ import {
   nextStageZoom,
   stepStageZoom,
 } from "../lib/stageZoom";
-import { trackingResponse } from "../lib/trackingPerformance";
+import { trackingResponse, TrackingRenderClock, TrackingCadence } from "../lib/trackingPerformance";
 
 export type PaperDollLandmark = {
   x: number;
@@ -89,6 +89,7 @@ export type PaperDollStageHandle = {
 
 export type PaperDollStageProps = {
   artwork: string;
+  framing?: "upper" | "full";
   backgroundColor?: string;
   backgroundImage?: CanvasImageSource | null;
   backgroundFit?: "cover" | "contain";
@@ -549,8 +550,8 @@ function poseFromLandmarks(landmarks?: readonly PaperDollLandmark[]): DollPose {
   };
 }
 
-function blendPose(current: DollPose, next: DollPose, deltaSeconds = 1 / 30): DollPose {
-  const amount = trackingResponse(0.7, deltaSeconds);
+function blendPose(current: DollPose, next: DollPose, deltaSeconds = 1 / 30, response = 0.7): DollPose {
+  const amount = trackingResponse(response, deltaSeconds);
   const boneAngles = { ...current.boneAngles };
   for (const bone of Object.keys(boneAngles) as BoneName[]) {
     boneAngles[bone] = smoothAngle(current.boneAngles[bone], next.boneAngles[bone], amount);
@@ -1665,6 +1666,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
   function PaperDollStage(
     {
       artwork,
+      framing = "upper",
       backgroundColor,
       backgroundImage,
       backgroundFit = "cover",
@@ -1681,7 +1683,8 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
     const expressionRef = useRef<DollExpression>({ ...NEUTRAL_EXPRESSION });
     const trackingTargetRef = useRef<{ pose: DollPose; expression: DollExpression; receivedAt: number } | null>(null);
     const trackingRafRef = useRef<number | null>(null);
-    const lastTrackingDrawRef = useRef(0);
+    const trackingClockRef = useRef(new TrackingRenderClock());
+    const trackingCadenceRef = useRef(new TrackingCadence());
     const lastIrisAtRef = useRef(-Infinity);
     const motionPlayerRef = useRef<PaperDollMotionPlayer | null>(null);
     const lockedLegWorldAnglesRef = useRef<Partial<Record<BoneName, number>> | null>(
@@ -1742,8 +1745,9 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
         context.imageSmoothingEnabled = true;
         context.imageSmoothingQuality = quality;
 
-        const pose = poseRef.current;
-        const expression = expressionRef.current;
+        const pose = captureSafe ? createRestPose() : poseRef.current;
+        const expression = captureSafe ? NEUTRAL_EXPRESSION : expressionRef.current;
+        const upperBody = !captureSafe && framing === "upper";
         const baseScale = captureSafe
           ? Math.min(
               (width * 0.5) / ARTWORK_WIDTH,
@@ -1751,7 +1755,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
             )
           : Math.min(
               (width * 0.72) / ARTWORK_WIDTH,
-              (height * 0.84) / ARTWORK_HEIGHT,
+              (height * 0.84) / (ARTWORK_HEIGHT * (upperBody ? 0.56 : 1)),
             );
         const scale =
           baseScale * (captureSafe ? 1 : pose.scale * manualZoomRef.current);
@@ -1765,9 +1769,9 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
 
         context.save();
         context.translate(centerX, centerY);
-        context.rotate(pose.rotation + manualRotationRef.current);
+        context.rotate(captureSafe ? 0 : pose.rotation + manualRotationRef.current);
         context.scale(scale, scale);
-        context.translate(-ARTWORK_CENTER.x, -ARTWORK_CENTER.y);
+        context.translate(-ARTWORK_CENTER.x, -(ARTWORK_CENTER.y - (upperBody ? ARTWORK_HEIGHT * 0.22 : 0)));
 
         for (const limb of sprites.limbs) {
           drawLimb(context, limb, targets);
@@ -1783,7 +1787,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
 
         context.restore();
       },
-      [backgroundColor, backgroundFit, backgroundImage],
+      [backgroundColor, backgroundFit, backgroundImage, framing],
     );
 
     const redraw = useCallback(() => {
@@ -1806,20 +1810,21 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
       lastIrisAtRef.current = -Infinity;
       if (trackingRafRef.current !== null) cancelAnimationFrame(trackingRafRef.current);
       trackingRafRef.current = null;
+      trackingClockRef.current.reset();
+      trackingCadenceRef.current.reset();
     }, []);
 
     const scheduleTrackingDraw = useCallback(() => {
       if (trackingRafRef.current !== null) return;
-      lastTrackingDrawRef.current = performance.now() - 1000 / 60;
+      trackingClockRef.current.reset();
       const tick = (now: number) => {
         trackingRafRef.current = null;
         const target = trackingTargetRef.current;
         // A lost camera must not leave an animation loop running forever.
         if (!target || now - target.receivedAt > 180) return;
-        const delta = Math.max(0, (now - lastTrackingDrawRef.current) / 1000);
-        if (delta >= 1 / 60 - 0.001) {
-          lastTrackingDrawRef.current = now;
-          poseRef.current = blendPose(poseRef.current, target.pose, delta);
+        const delta = trackingClockRef.current.step(now);
+        if (delta !== null) {
+          poseRef.current = blendPose(poseRef.current, target.pose, delta, trackingCadenceRef.current.response());
           expressionRef.current = blendExpression(expressionRef.current, target.expression,
             trackingResponse(0.75, delta), trackingResponse(0.95, delta));
           // Reapply world-space leg locking after interpolation too.
@@ -1915,6 +1920,7 @@ export const PaperDollStage = forwardRef<PaperDollStageHandle, PaperDollStagePro
             }
           }
           const now = performance.now();
+          trackingCadenceRef.current.observe(now);
           const expression = expressionFromFaceLandmarks(faceLandmarks, imageSize);
           if ((faceLandmarks?.length ?? 0) >= 478) lastIrisAtRef.current = now;
           else if ((faceLandmarks?.length ?? 0) >= 468 && now - lastIrisAtRef.current < 200) {

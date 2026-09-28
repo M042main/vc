@@ -358,12 +358,12 @@ test("lets live VRM tracking lock the legs and suppresses lower-body bone update
   );
   assert.match(
     applyTracking,
-    /enableLegs\s*:\s*!\s*(?:legsLockedRef|lockLegsRef|lowerBodyLockedRef)\.current/,
+    /enableLegs\s*:\s*trackingModeRef\.current === "full" && !legsLockedRef\.current/,
     "the leg-lock state must disable MediaPipe/Kalidokit leg solving",
   );
   assert.match(
     applyTracking,
-    /applyHipsPosition\s*:\s*!\s*(?:legsLockedRef|lockLegsRef|lowerBodyLockedRef)\.current/,
+    /applyHipsPosition\s*:\s*trackingModeRef\.current === "full" && !legsLockedRef\.current/,
     "locking the lower body must also stop tracking-driven hips translation",
   );
 
@@ -379,7 +379,7 @@ test("lets live VRM tracking lock the legs and suppresses lower-body bone update
   );
   assert.match(
     applyTracking,
-    /if\s*\(\s*(?:legsLockedRef|lockLegsRef|lowerBodyLockedRef)\.current\s*\)[^;]{0,160}(?:vrmLegLockRef|lowerBodyLockRef)\.current\?\.enforce\s*\(/,
+    /if\s*\(trackingModeRef\.current === "upper" \|\| legsLockedRef\.current\)[^;]{0,160}vrmLegLockRef\.current\?\.enforce\s*\(/,
     "a locked VRM must re-enforce its captured leg rotations after each tracking frame",
   );
 
@@ -390,7 +390,7 @@ test("lets live VRM tracking lock the legs and suppresses lower-body bone update
   );
   assert.match(
     lockButton,
-    /aria-pressed=\{\s*(?:legsLocked|lockLegs|lowerBodyLocked)\s*\}/,
+    /aria-pressed=\{trackingMode === "upper" \|\| legsLocked\}/,
     "leg-lock state must be announced to assistive technology",
   );
   const lockButtonIndex = studioSource.indexOf(lockButton);
